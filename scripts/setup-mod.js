@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const directory = fileURLToPath(new URL('../.deps/', import.meta.url));
@@ -14,6 +13,7 @@ await mkdir(directory, { recursive: true });
 let existing;
 try { existing = await readFile(`${directory}/${name}`); } catch {}
 if (!existing || checksum(existing) !== expected) {
+  if (!process.argv.includes('--allow-downloads')) throw new Error(`${name} is missing or failed verification. No download was made. Re-run setup:mod with --allow-downloads only after approving this dependency.`);
   console.log(`Downloading ${name} from the official Baritone release…`);
   const response = await fetch(`https://github.com/cabaletta/baritone/releases/download/v1.11.3/${name}`, { signal: AbortSignal.timeout(120_000) });
   if (!response.ok) throw new Error(`Baritone download failed: HTTP ${response.status}`);
@@ -22,7 +22,8 @@ if (!existing || checksum(existing) !== expected) {
   await writeFile(`${directory}/${name}.tmp`, bytes);
   await rename(`${directory}/${name}.tmp`, `${directory}/${name}`);
 }
-const temporary = await mkdtemp(join(tmpdir(), 'mc-baritone-'));
+await mkdir(`${directory}/tmp`, { recursive: true });
+const temporary = await mkdtemp(join(directory, 'tmp', 'baritone-'));
 try {
   execFileSync('jar', ['xf', `${directory}/${name}`, 'META-INF/jars/nether-pathfinder-1.6.jar'], { cwd: temporary });
   const nested = await readFile(join(temporary, 'META-INF/jars/nether-pathfinder-1.6.jar'));

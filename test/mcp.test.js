@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -9,9 +8,10 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { Harness } from '../src/harness.js';
 import { DemoDriver } from '../src/demo-driver.js';
 import { startBridge } from '../src/bridge-server.js';
+import { testDirectory } from './helpers.js';
 
 test('MCP client discovers tools, requires takeover, executes actions, and releases on stop', { timeout: 10_000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'mc-mcp-test-'));
+  const directory = await testDirectory(t, 'mcp-');
   const discoveryPath = join(directory, 'bridge.json');
   const bridge = await startBridge(new Harness(new DemoDriver()), { discoveryPath });
   const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../src/cli.js', import.meta.url)), '--bridge', discoveryPath, 'mcp'], stderr: 'pipe' });

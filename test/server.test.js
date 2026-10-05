@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import minecraftProtocol from 'minecraft-protocol';
 import minecraftData from 'minecraft-data';
 import { MineflayerDriver } from '../src/mineflayer-driver.js';
 import { Harness } from '../src/harness.js';
+import { testDirectory } from './helpers.js';
 
 test('standalone driver authenticates to a local protocol fixture, observes identity, saves home, and releases on death', { timeout: 15_000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'mc-server-test-'));
+  const directory = await testDirectory(t, 'server-');
   const data = minecraftData('1.21.1');
   const server = minecraftProtocol.createServer({ host: '127.0.0.1', port: 0, version: '1.21.1', 'online-mode': false, keepAlive: false, registryCodec: data.loginPacket.dimensionCodec });
   let peer;

@@ -1,6 +1,6 @@
 # Local bridge protocol v1
 
-Discover the bridge through `~/.minecraft-agent/bridge.json`, or a file selected with `--bridge`. Its `url` is an HTTP origin on `127.0.0.1`, `token` is a bearer token, `protocol` is 1, and `backend` is `fabric`, `mineflayer`, or `demo`. Treat the file as a credential. JSON requests are capped at 8192 bytes; authentication is required for every endpoint.
+Discover the bridge through this project's `.runtime/bridge.json`, an installed game profile's `config/minecraft-agent/bridge.json` selected with `attach`, or a file selected with `--bridge`. Its `url` is an HTTP origin on `127.0.0.1`, `token` is a bearer token, `protocol` is 1, and `backend` is `fabric`, `mineflayer`, or `demo`. Treat the file as a credential. JSON requests are capped at 8192 bytes; authentication is required for every endpoint. The adjacent `.lock` file records a process ID and random ownership nonce; a second bridge cannot replace a live owner's discovery file.
 
 Every request uses `Authorization: Bearer TOKEN`. POST requests also use `Content-Type: application/json`. Browser-origin requests are rejected. Responses are JSON; failed calls return `{ "error": "explanation" }` with a non-2xx HTTP status.
 

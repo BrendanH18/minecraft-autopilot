@@ -8,7 +8,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
@@ -44,7 +43,7 @@ public final class AgentController {
     private final MinecraftClient client;
     private final ControlLease lease = new ControlLease();
     private final Map<String, Object> savedSettings = new HashMap<>();
-    private final Path homesFile = FabricLoader.getInstance().getConfigDir().resolve("minecraft-agent-homes.json");
+    private final Path homesFile;
     private JsonObject homes = new JsonObject();
     private JsonObject job;
     private JsonObject action;
@@ -66,6 +65,7 @@ public final class AgentController {
 
     public AgentController(MinecraftClient client) {
         this.client = client;
+        homesFile = RuntimePaths.directory(client.runDirectory.toPath(), System.getenv("MC_AGENT_HOME")).resolve("homes.json");
         try { homes = JsonParser.parseString(Files.readString(homesFile)).getAsJsonObject(); }
         catch (Exception ignored) {}
     }
@@ -149,6 +149,7 @@ public final class AgentController {
                 case "set_home": {
                     JsonObject home = position(client.player.getBlockPos());
                     homes.add(identity(), home);
+                    Files.createDirectories(homesFile.getParent());
                     Files.writeString(homesFile, new Gson().toJson(homes));
                     finish("completed", "Saved home in this world and dimension."); break;
                 }

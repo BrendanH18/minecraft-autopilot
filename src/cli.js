@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { Command, Option, InvalidArgumentError } from 'commander';
 import { readFile, access, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { FabricAdapter } from './fabric-adapter.js';
-import { bridgeFile } from './config.js';
+import { bridgeFile, dataDirectory } from './config.js';
+import { attachBridge, cleanupRuntime, assertBridgeNotRunning } from './runtime.js';
 import { Harness } from './harness.js';
 import { startBridge } from './bridge-server.js';
 import { DemoDriver } from './demo-driver.js';
@@ -54,6 +54,15 @@ async function perform(action) {
 
 program.command('observe').alias('status').description('Inspect the current player without taking control.')
   .action(async () => print(await (await connect()).observe()));
+program.command('attach').description('Remember the discovery file for a Minecraft profile; credentials stay in that profile.')
+  .argument('<file>', 'path to the profile’s config/minecraft-agent/bridge.json')
+  .action(async path => print(await attachBridge(path)));
+program.command('clean').description('Remove stopped-session files from the project; preserve sign-in tokens and worlds by default.')
+  .option('--dry-run', 'list files without removing them')
+  .option('--include-auth', 'also remove cached Microsoft sign-in tokens')
+  .option('--include-homes', 'also remove saved home waypoints')
+  .option('--caches', 'also remove this project’s downloaded tools and build caches')
+  .action(async options => print(await cleanupRuntime(options)));
 program.command('set-home').description('Save your current position as home for this world and dimension.').action(() => perform({ type: 'set_home' }));
 program.command('home').description('Walk to the saved home.').action(() => perform({ type: 'home' }));
 program.command('goto').description('Navigate to a coordinate without placing or breaking blocks.')
@@ -112,7 +121,11 @@ program.command('demo').description('Run a simulated player bridge; no Minecraft
   .option('--smoke', 'run a short end-to-end demonstration and exit')
   .action(async options => {
     let directory;
-    if (options.smoke) directory = await mkdtemp(join(tmpdir(), 'mc-agent-demo-'));
+    if (options.smoke) {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(join(dataDirectory, 'tmp'), { recursive: true });
+      directory = await mkdtemp(join(dataDirectory, 'tmp', 'demo-'));
+    }
     const path = directory ? join(directory, 'bridge.json') : program.opts().bridge;
     activeBridge = await startBridge(new Harness(new DemoDriver()), { discoveryPath: path });
     log('DEMO SIMULATION — no real Minecraft world is connected.');
@@ -137,11 +150,13 @@ program.command('server').description('Connect a standalone bot to a Java server
   .option('--version <version>', 'Minecraft server version', '1.21.1')
   .action(async options => {
     if (options.port > 65535) throw new Error('Port must be <= 65535.');
+    await assertBridgeNotRunning(program.opts().bridge);
     const { MineflayerDriver } = await import('./mineflayer-driver.js');
     log(`Connecting to ${options.host}:${options.port}. Disconnect your Minecraft client before using the same account.`);
     const driver = await MineflayerDriver.connect(options, { log, signal: abortController.signal });
     if (abortController.signal.aborted) { await driver.close(); return; }
-    activeBridge = await startBridge(new Harness(driver), { discoveryPath: program.opts().bridge });
+    try { activeBridge = await startBridge(new Harness(driver), { discoveryPath: program.opts().bridge }); }
+    catch (error) { await driver.close(); throw error; }
     log(`Connected as ${driver.bot.username}. Bridge ready. Use commands from a second terminal. Ctrl+C disconnects the bot.`);
   });
 

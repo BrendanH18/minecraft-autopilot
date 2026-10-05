@@ -6,7 +6,7 @@ The Fabric mod targets **Minecraft Java 1.21.1, Java 21, and Fabric**. The stand
 
 ## Try it without Minecraft
 
-Requires Node.js 22 or newer. Dependencies are pinned in `package-lock.json`.
+Requires Node.js 22 or newer. Dependencies are pinned in `package-lock.json`. If dependencies are already present, skip `npm ci`; installation is an explicit user step.
 
 ```sh
 npm ci
@@ -43,9 +43,9 @@ npm start -- stop
    npm run build:mod
    ```
 
-4. Copy **all three jars** from `dist/mods/` to that profile's `mods` directory. They are this mod, Fabric API, and Baritone. The build downloads official dependency jars and verifies their pinned SHA-256 checksums.
+4. Copy **all three jars** from `dist/mods/` to that profile's `mods` directory. They are this mod, Fabric API, and Baritone. Builds use verified cached dependencies and run offline by default.
 5. Launch the Fabric profile, enter your single-player world or a Java 1.21.1 server, and close game menus.
-6. Run `npm start -- observe` to verify the connection, then use the commands above.
+6. Run `npm start -- attach /path/to/your/game-directory/config/minecraft-agent/bridge.json`, then `npm start -- observe` to verify the connection. The CLI remembers the discovery-file location, so you only need to attach once per profile.
 
 On macOS, the default launcher game directory is `~/Library/Application Support/minecraft`; custom profiles and launchers can use another directory. `npm start -- doctor` checks Java, the built mod, and the bridge discovery file without connecting to the game.
 
@@ -53,9 +53,19 @@ The mod controls the player already logged into the client. It does not spawn an
 
 **Minecraft must stay running and unpaused, and your computer must stay awake.** While an agent owns control, the mod temporarily disables pause-on-focus-loss and restores the previous setting when control is released. Opening a game menu, dying, disconnecting, changing dimensions, or pressing **F8** releases agent control. F8 can be rebound under Options → Controls → Minecraft Agent. The first version uses explicit handoff; ordinary mouse or movement input is not an automatic takeover trigger.
 
-For development, `npm run dev:mod` launches Fabric's development client with the dependencies. This downloads game assets but does not install a Minecraft launcher. Development profiles use a test identity; use your normal authenticated launcher for online-mode servers.
+For development, `npm run dev:mod` launches Fabric's development client using already cached dependencies and game assets. Missing files cause an error rather than an automatic download. Development profiles use a test identity; use your normal authenticated launcher for online-mode servers.
 
-Downloads stay in this repository: npm uses `.npm-cache/`, and the build scripts put Gradle, Minecraft assets, and development connection files in `.gradle-user/` and `.runtime/`. Builds disable persistent Gradle daemons. The development client runs only when you explicitly launch `dev:mod`; it is not a startup service. To control that development client, pass `--bridge .runtime/bridge.json` to CLI commands. A normal installed Minecraft profile uses the default discovery path described below.
+Project files stay in this repository: npm uses `.npm-cache/`, Gradle and Minecraft assets use `.gradle-user/`, and development sessions, server sign-in caches, temporary test files, and waypoints use `.runtime/`. Builds disable persistent Gradle daemons. The development client runs only when explicitly launched; it is not a startup service. A normal installed Minecraft profile stores its bridge and homes under that profile's `config/minecraft-agent/` directory.
+
+For a fresh checkout, downloading missing mod/build dependencies requires explicit approval and an explicit opt-in:
+
+```sh
+npm run setup:mod -- --allow-downloads
+node scripts/gradle.js build --allow-downloads
+node scripts/package-mod.js --allow-downloads
+```
+
+Those commands are optional setup steps. The ordinary `build:mod` and `dev:mod` commands do not opt into downloads.
 
 ## Continue on a server after closing your game client
 
@@ -67,7 +77,7 @@ First disconnect your regular Minecraft client. Then leave this process running:
 npm start -- server --host your-server.example --account your-account-identifier --version 1.21.1
 ```
 
-Follow the Microsoft device sign-in instructions printed in the terminal. No password is accepted by this CLI. Authentication caches are stored locally under `~/.minecraft-agent/auth/`; do not share that directory. `--account` identifies the account/cache to use; the authenticated Minecraft profile determines the actual player identity.
+Follow the Microsoft device sign-in instructions printed in the terminal. No password is accepted by this CLI. Authentication caches are stored locally under this repository's `.runtime/auth/`; do not share that directory. `--account` identifies the account/cache to use; the authenticated Minecraft profile determines the actual player identity.
 
 Use `observe`, `set-home`, `collect`, `guard`, or `agent` from a second terminal. `stop` stops agent actions while leaving the bot connected. **Ctrl+C in the server terminal disconnects the bot**, allowing you to reconnect with your regular client. Never run both clients as the same account simultaneously.
 
@@ -139,9 +149,18 @@ Control heartbeats run every two seconds. The bridge cancels inputs and navigati
 
 ## Bridge and development
 
-The bridge binds only to `127.0.0.1` on a free port. A private discovery file at `~/.minecraft-agent/bridge.json` contains its URL and a random bearer token. Requests require the token; browser-origin requests are rejected. Use **one active bridge per discovery file**. The Fabric client writes its discovery information when it starts.
+The bridge binds only to `127.0.0.1` on a free port. The private `.runtime/bridge.json` file contains its URL and a random bearer token. Installed game profiles write `config/minecraft-agent/bridge.json` instead; `attach` records a reference to that file without copying its credentials. Requests require the token; browser-origin requests are rejected. A process ownership lock prevents one bridge from replacing another bridge's discovery file.
 
-For isolated profiles, set `MC_AGENT_HOME` for both Minecraft and the CLI, or give the CLI `--bridge /path/to/bridge.json`. State contains player/world observations and should be treated as data, not instructions.
+For isolated profiles, set `MC_AGENT_HOME` for both Minecraft and the CLI, or give the CLI `--bridge /path/to/bridge.json`. Starting a demo or server bridge selects that bridge locally; close an attached live bridge before switching. State contains player/world observations and should be treated as data, not instructions.
+
+To inspect or remove project runtime files after closing the game/bridge:
+
+```sh
+npm start -- clean --dry-run
+npm start -- clean
+```
+
+Cleaning refuses to run against a live bridge and preserves sign-in tokens, saved homes, and development worlds by default. `--include-auth` removes cached sign-in tokens, `--include-homes` removes local home waypoints, and `--caches` removes downloaded tools and build artifacts. Removing caches means rebuilding may require approved downloads again. Cleanup never deletes worlds in `mod/run` or files in an attached external game profile.
 
 The HTTP protocol is documented in [docs/protocol.md](docs/protocol.md). Sources live in `src/` and `mod/src/main/java/dev/minecraftagent/`.
 

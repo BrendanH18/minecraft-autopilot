@@ -25,11 +25,17 @@ import java.util.concurrent.TimeoutException;
 public final class BridgeServer implements AutoCloseable {
     private final Gson gson = new Gson();
     private final String token = UUID.randomUUID().toString() + UUID.randomUUID();
-    private final HttpServer server;
-    private final ExecutorService workers;
+    private HttpServer server;
+    private ExecutorService workers;
     private final Path discovery;
+    private final BridgeOwnership ownership;
 
     public BridgeServer(MinecraftClient client, AgentController controller) throws IOException {
+        Path directory = RuntimePaths.directory(client.runDirectory.toPath(), System.getenv("MC_AGENT_HOME"));
+        Files.createDirectories(directory);
+        discovery = directory.resolve("bridge.json");
+        ownership = new BridgeOwnership(discovery);
+        try {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 16);
         workers = Executors.newFixedThreadPool(2, runnable -> {
             Thread thread = new Thread(runnable, "minecraft-agent-http");
@@ -38,10 +44,6 @@ public final class BridgeServer implements AutoCloseable {
         });
         server.setExecutor(workers);
         server.createContext("/v1/", exchange -> handle(exchange, client, controller));
-        String override = System.getenv("MC_AGENT_HOME");
-        Path directory = override == null ? Path.of(System.getProperty("user.home"), ".minecraft-agent") : Path.of(override);
-        Files.createDirectories(directory);
-        discovery = directory.resolve("bridge.json");
         JsonObject config = new JsonObject();
         config.addProperty("protocol", 1);
         config.addProperty("backend", "fabric");
@@ -55,6 +57,10 @@ public final class BridgeServer implements AutoCloseable {
         Files.writeString(temporary, gson.toJson(config));
         Files.move(temporary, discovery, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         server.start();
+        } catch (IOException | RuntimeException exception) {
+            close();
+            throw exception;
+        }
     }
 
     private void handle(HttpExchange exchange, MinecraftClient client, AgentController controller) throws IOException {
@@ -106,11 +112,12 @@ public final class BridgeServer implements AutoCloseable {
     }
 
     @Override public void close() {
-        server.stop(0);
-        workers.shutdownNow();
+        if (server != null) server.stop(0);
+        if (workers != null) workers.shutdownNow();
         try {
             JsonObject saved = JsonParser.parseString(Files.readString(discovery)).getAsJsonObject();
             if (token.equals(saved.get("token").getAsString())) Files.deleteIfExists(discovery);
         } catch (Exception ignored) {}
+        ownership.close();
     }
 }

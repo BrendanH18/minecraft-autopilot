@@ -33,4 +33,12 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
     withSourcesJar()
 }
-test { useJUnitPlatform() }
+test {
+    useJUnitPlatform()
+    systemProperty 'java.io.tmpdir', file('../.runtime/tmp').absolutePath
+    doFirst { file('../.runtime/tmp').mkdirs() }
+}
+tasks.withType(JavaExec).configureEach {
+    systemProperty 'java.io.tmpdir', file('../.runtime/tmp').absolutePath
+    doFirst { file('../.runtime/tmp').mkdirs() }
+}

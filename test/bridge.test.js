@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Harness } from '../src/harness.js';
 import { DemoDriver } from '../src/demo-driver.js';
 import { startBridge } from '../src/bridge-server.js';
 import { FabricAdapter } from '../src/fabric-adapter.js';
+import { testDirectory } from './helpers.js';
 
 async function fixture(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'mc-bridge-test-'));
+  const directory = await testDirectory(t, 'bridge-');
   const discoveryPath = join(directory, 'bridge.json');
   const driver = new DemoDriver();
   const harness = new Harness(driver);
