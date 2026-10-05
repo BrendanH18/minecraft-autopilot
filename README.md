@@ -46,7 +46,7 @@ npm start -- stop
    ```
 
 4. Copy **all three jars** from `dist/mods/` to that profile's `mods` directory. They are this mod, Fabric API, and Baritone. Builds use verified cached dependencies and run offline by default.
-5. Launch the Fabric profile, enter your single-player world or a Java 1.21.1 server, and close game menus.
+5. Launch the Fabric profile, enter your single-player world or a Java 1.21.1 server, and close game menus. Switching to a terminal afterward is fine: taking control closes the pause menu Minecraft opens when its window loses focus.
 6. Run `npm start -- attach /path/to/your/game-directory/config/minecraft-agent/bridge.json`, then `npm start -- observe` to verify the connection. The CLI remembers the discovery-file location, so you only need to attach once per profile.
 
 On macOS, the default launcher game directory is `~/Library/Application Support/minecraft`; custom profiles and launchers can use another directory. `npm start -- doctor` checks Java, the built mod, and the bridge discovery file without connecting to the game.
@@ -55,7 +55,7 @@ The mod controls the player already logged into the client. It does not spawn an
 
 **Minecraft must stay running and unpaused, and your computer must stay awake.** While an agent owns control, the mod temporarily disables pause-on-focus-loss and restores the previous setting when control is released. Opening a game menu, dying, disconnecting, changing dimensions, or pressing **F8** releases agent control. F8 can be rebound under Options → Controls → Minecraft Agent. The first version uses explicit handoff; ordinary mouse or movement input is not an automatic takeover trigger.
 
-For development, `npm run dev:mod` launches Fabric's development client using already cached dependencies and game assets. Missing files cause an error rather than an automatic download. Development profiles use a test identity; use your normal authenticated launcher for online-mode servers.
+For development, `npm run dev:mod` launches Fabric's development client using already cached dependencies and game assets. `node scripts/gradle.js runClient -PquickPlay=127.0.0.1:25565` launches it and joins a local test server directly; see [the handoff](docs/HANDOFF.md#live-test-environment) for the offline test server setup. Missing files cause an error rather than an automatic download. Development profiles use a test identity; use your normal authenticated launcher for online-mode servers.
 
 Project files stay in this repository: npm uses `.npm-cache/`, Gradle and Minecraft assets use `.gradle-user/`, and development sessions, server sign-in caches, temporary test files, and waypoints use `.runtime/`. Builds disable persistent Gradle daemons. The development client runs only when explicitly launched; it is not a startup service. A normal installed Minecraft profile stores its bridge and homes under that profile's `config/minecraft-agent/` directory.
 

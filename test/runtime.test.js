@@ -44,3 +44,16 @@ test('cleanup preserves sign-in tokens, homes, and unrelated files unless explic
   await assert.rejects(access(join(directory, 'server-homes.json')));
   await access(join(directory, 'notes.txt'));
 });
+
+test('server --version selects the Minecraft version instead of printing the CLI version', async t => {
+  const directory = await testDirectory(t, 'cli-version-');
+  const { execFile } = await import('node:child_process');
+  const cli = join(projectRoot, 'src/cli.js');
+  const result = await new Promise(resolve => execFile(process.execPath,
+    [cli, '--bridge', join(directory, 'bridge.json'), 'server', '--host', '127.0.0.1', '--port', '1', '--account', 'Tester', '--auth', 'offline', '--version', '1.21.1'],
+    { timeout: 20_000 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+  assert.equal(result.stdout.trim(), '');
+  assert.match(result.stderr, /Connecting to 127\.0\.0\.1:1/);
+  assert.match(result.stderr, /ECONNREFUSED/);
+  assert.equal(result.error?.killed, false, 'a refused connection should exit promptly');
+});

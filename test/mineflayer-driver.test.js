@@ -45,3 +45,35 @@ test('handoff during food equip prevents consumption and waits for the late inve
   assert.equal(harness.observe().stopping, false);
   harness.acquire(randomUUID());
 });
+
+test('a hungry bot with low health eats instead of repeatedly retreating', async t => {
+  const bot = new EventEmitter();
+  let consumed = 0;
+  let goals = 0;
+  let stopPath;
+  Object.assign(bot, {
+    registry: minecraftData('1.21.1'),
+    entity: { position: new Vec3(0, 64, 0) }, entities: {},
+    username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
+    health: 7, food: 5,
+    inventory: { items: () => [{ name: 'bread', count: 4, slot: 36 }] },
+    // Like mineflayer-pathfinder, clearing the goal rejects the pending goto.
+    pathfinder: { setMovements() {}, setGoal(goal) { if (goal === null) stopPath?.(new Error('Goal changed')); },
+      goto: () => { goals++; return new Promise((_, reject) => { stopPath = reject; }); } },
+    findBlocks: () => [], clearControlStates() {}, deactivateItem() {}, stopDigging() {},
+    equip: async () => {},
+    consume: async () => { consumed++; bot.food = 10; },
+    quit: () => bot.emit('end', 'Closed'),
+  });
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  driver.homes[driver.identity()] = { x: 5, y: 64, z: 5 };
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID(); harness.acquire(owner);
+  harness.start(owner, { type: 'goto', x: 20, y: 64, z: 20 });
+  await harness.task;
+  assert.equal(harness.job.status, 'failed');
+  assert.match(harness.job.message, /Interrupted to eat/);
+  assert.equal(consumed, 1);
+  assert.equal(goals, 1, 'no retreat should start before eating');
+});

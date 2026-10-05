@@ -10,6 +10,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.block.Block;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.DeathScreen;
+import net.minecraft.client.gui.screen.GameMenuScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.mob.HostileEntity;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /** State, player access, and Baritone commands are confined to Minecraft's thread. */
 public final class AgentController {
@@ -40,6 +43,7 @@ public final class AgentController {
             Map.entry("jungle_log", "jungle_log"), Map.entry("acacia_log", "acacia_log"), Map.entry("dark_oak_log", "dark_oak_log"),
             Map.entry("cherry_log", "cherry_log"), Map.entry("mangrove_log", "mangrove_log"),
             Map.entry("dirt", "dirt"), Map.entry("cobblestone", "cobblestone"), Map.entry("sand", "sand"));
+    private static final String BARITONE_DROP_LOADER = "baritone.api.utils.BlockOptionalMeta$ServerLevelStub";
     private final MinecraftClient client;
     private final ControlLease lease = new ControlLease();
     private final Map<String, Object> savedSettings = new HashMap<>();
@@ -79,12 +83,16 @@ public final class AgentController {
                 String id = string(body, "leaseId");
                 switch (operation) {
                     case "acquire": {
-                        requirePlayable();
+                        // Switching to a terminal to start the agent unfocuses the game, which opens the pause menu.
+                        boolean focusPaused = focusPaused();
+                        if (!focusPaused) requirePlayable();
+                        else if (client.player.isDead()) throw new IllegalStateException("Respawn manually first.");
                         if (lease.expired()) release("Control lease expired.");
                         lease.acquire(id);
                         worldIdentity = identity();
                         previousPauseOnLostFocus = client.options.pauseOnLostFocus;
                         client.options.pauseOnLostFocus = false;
+                        if (focusPaused) client.setScreen(null);
                         conservativeSettings();
                         client.player.sendMessage(Text.literal("Minecraft Agent has control. Press F8 to take it back."), true);
                         break;
@@ -125,6 +133,7 @@ public final class AgentController {
             case "collect": {
                 block = string(requested, "block").replaceFirst("^minecraft:", "");
                 if (!COLLECT_DROPS.containsKey(block)) throw new IllegalArgumentException("Supported collection targets: " + COLLECT_DROPS.keySet());
+                if (!baritoneDropsReady()) throw new IllegalStateException("Baritone is still loading block data. Try again in a few seconds.");
                 double quantity = number(requested, "count", 1, 64);
                 if (quantity != Math.floor(quantity)) throw new IllegalArgumentException("count must be an integer.");
                 count = (int) quantity;
@@ -175,7 +184,8 @@ public final class AgentController {
     public void tick() {
         if (!lease.active()) return;
         if (lease.expired()) { release("Control lease expired; agent stopped responding."); return; }
-        if (client.player == null || client.world == null || client.player.isDead()) { release("Disconnected or player died."); return; }
+        // Servers can send the death screen before the health update.
+        if (client.player == null || client.world == null || client.player.isDead() || client.currentScreen instanceof DeathScreen) { release("Disconnected or player died."); return; }
         if (!identity().equals(worldIdentity)) { release("World or dimension changed. Start a new session explicitly."); return; }
         if (client.isPaused() || client.currentScreen != null) { release("A game menu was opened. Control returned to the player."); return; }
         long now = System.nanoTime();
@@ -306,6 +316,27 @@ public final class AgentController {
         survivalMessage = message;
     }
 
+    /**
+     * Baritone 1.11.3 loads drop tables on first use and then joins work scheduled on this client thread, which deadlocks
+     * when that first use is a mining command dispatched here. Start the load at client startup so ticks can finish it.
+     */
+    public static void prepareBaritoneDrops() {
+        try { Class.forName(BARITONE_DROP_LOADER, true, AgentController.class.getClassLoader()); }
+        catch (Throwable throwable) { AgentClient.LOGGER.warn("Could not preload Baritone block data", throwable); }
+    }
+
+    private static boolean baritoneDropsReady() {
+        try {
+            java.lang.reflect.Field field = Class.forName(BARITONE_DROP_LOADER, false, AgentController.class.getClassLoader()).getDeclaredField("registryAccess");
+            field.setAccessible(true);
+            CompletableFuture<?> loading = (CompletableFuture<?>) field.get(null);
+            return loading != null && loading.isDone() && !loading.isCompletedExceptionally();
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            AgentClient.LOGGER.warn("Cannot confirm Baritone block data is loaded", exception);
+            return false; // Refuse mining rather than risk freezing the game.
+        }
+    }
+
     private boolean nearDestination() { return destination != null && destination.isWithinDistance(client.player.getPos(), 1.75); }
     private IBaritone baritone() { return BaritoneAPI.getProvider().getPrimaryBaritone(); }
     private int inventoryCountOfSlot(int slot) { return client.player.getInventory().getStack(slot).getCount(); }
@@ -322,6 +353,11 @@ public final class AgentController {
         return world + "|" + client.player.getUuid() + "|" + client.world.getRegistryKey().getValue();
     }
 
+    /** Only the pause menu that Minecraft opened because the window lost focus; other screens mean the player is busy. */
+    private boolean focusPaused() {
+        return client.player != null && client.world != null && client.currentScreen instanceof GameMenuScreen && !client.isWindowFocused();
+    }
+
     private void requirePlayable() {
         if (client.player == null || client.world == null) throw new IllegalStateException("Enter a Minecraft world first.");
         if (client.player.isDead()) throw new IllegalStateException("Respawn manually first.");
@@ -334,6 +370,7 @@ public final class AgentController {
         state.addProperty("connected", client.player != null && client.world != null);
         state.addProperty("mode", lease.active() ? "agent" : "manual");
         state.addProperty("paused", client.isPaused() || client.currentScreen != null);
+        state.addProperty("focusPaused", focusPaused());
         state.addProperty("survival", survivalMessage);
         state.addProperty("recovering", recovering);
         state.add("job", job == null ? null : job.deepCopy());

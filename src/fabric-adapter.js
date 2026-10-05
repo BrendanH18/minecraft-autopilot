@@ -50,7 +50,14 @@ export class FabricAdapter {
     if (this.pendingAcquire) return this.pendingAcquire;
     const generation = this.generation;
     this.pendingAcquire = Promise.resolve().then(async () => {
-      assertPlayable(await this.observe());
+      let state = await this.observe();
+      // Cancelled native work on a server bot (e.g. eating) can take a few seconds to settle after the previous command.
+      for (const until = Date.now() + 10_000; state.stopping && Date.now() < until;) {
+        await delay(250);
+        if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
+        state = await this.observe();
+      }
+      assertPlayable(state);
       if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
       const leaseId = randomUUID();
       try {

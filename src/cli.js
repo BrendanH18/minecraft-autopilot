@@ -12,7 +12,7 @@ import { startBridge } from './bridge-server.js';
 import { DemoDriver } from './demo-driver.js';
 
 const program = new Command();
-program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0')
+program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
   .option('--bridge <file>', 'bridge discovery file', bridgeFile).option('--json', 'print machine-readable results');
 
 const abortController = new AbortController();

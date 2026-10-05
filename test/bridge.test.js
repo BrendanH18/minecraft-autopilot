@@ -97,3 +97,12 @@ test('closing an adapter interrupts its action and rejects overlapping submissio
   assert.equal(harness.observe().mode, 'manual');
   assert.equal(harness.observe().job.status, 'cancelled');
 });
+
+test('takeover waits for a previous command’s cancelled native work to settle', async t => {
+  const { adapter, driver } = await fixture(t);
+  driver.operations = { busy: true };
+  driver.isBusy = () => driver.operations.busy;
+  setTimeout(() => { driver.operations.busy = false; }, 600);
+  await adapter.execute({ type: 'set_home' });
+  assert.equal(driver.operations.busy, false);
+});

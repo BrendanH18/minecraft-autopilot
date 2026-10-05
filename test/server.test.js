@@ -44,9 +44,13 @@ test('standalone driver authenticates to a local protocol fixture, observes iden
   assert.equal(Object.keys(saved).length, 1);
   harness = new Harness(driver);
   const { randomUUID } = await import('node:crypto');
-  harness.acquire(randomUUID());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  harness.start(owner, { type: 'wait', seconds: 30 });
   peer.write('update_health', { health: 0, food: 20, foodSaturation: 5 });
   await once(driver.bot, 'death');
+  await harness.task;
+  assert.match(harness.job.message, /died/);
   assert.equal(harness.observe().mode, 'manual');
   assert.equal(driver.bot.isAlive, false);
 });

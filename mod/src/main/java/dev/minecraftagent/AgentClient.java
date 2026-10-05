@@ -29,6 +29,7 @@ public final class AgentClient implements ClientModInitializer {
             controller.tick();
         });
         ClientLifecycleEvents.CLIENT_STARTED.register(game -> {
+            AgentController.prepareBaritoneDrops();
             try { bridge = new BridgeServer(game, controller); LOGGER.info("Local agent bridge ready."); }
             catch (Exception exception) { LOGGER.error("Could not start the agent bridge", exception); }
         });

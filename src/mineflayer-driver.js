@@ -50,6 +50,7 @@ export class MineflayerDriver {
       host: options.host, port: options.port, username: options.account, auth: options.auth,
       version: options.version, profilesFolder,
       respawn: false,
+      logErrors: false, // Logged below to stderr; mineflayer would print raw errors to stdout.
       onMsaCode: code => log(`Microsoft sign-in: open ${code.verification_uri} and enter ${code.user_code}`),
     });
     bot.loadPlugin(pathfinder);
@@ -77,7 +78,11 @@ export class MineflayerDriver {
       let homes = {};
       try { homes = JSON.parse(await readFile(homesFile, 'utf8')); } catch {}
       return new MineflayerDriver(bot, options, homes, homesFile);
-    } catch (error) { bot.quit(); throw error; }
+    } catch (error) {
+      // Ending an already closed connection arms a 30-second close timer that keeps the CLI alive.
+      if (!bot._client.ended) bot.quit();
+      throw error;
+    }
   }
 
   identity() { return `${this.options.host}:${this.options.port}|${this.bot.player?.uuid || this.bot._client.uuid}|${this.bot.game.dimension}`; }
@@ -110,8 +115,8 @@ export class MineflayerDriver {
         behavior = () => this.goTo(home, AbortSignal.any([signal, AbortSignal.timeout(60_000)]));
       }
       if (!behavior) return;
-      this.idleTask = Promise.resolve().then(() => { signal.throwIfAborted(); return behavior(); }).catch(error => {
-        if (!signal.aborted) this.survival = `Survival response failed: ${error.message}`;
+      this.idleTask = Promise.resolve().then(() => { signal.throwIfAborted(); return behavior(); }).then(() => { this.survival = 'Ready'; }, error => {
+        this.survival = signal.aborted ? 'Survival response stopped.' : `Survival response failed: ${error.message}`;
       }).finally(() => { this.idleTask = null; this.idleController = null; });
     }, 250);
     this.idleTimer.unref();
@@ -174,11 +179,6 @@ export class MineflayerDriver {
     const check = async () => {
       if (reflexBusy || scopedSignal.aborted || local.signal.aborted) return;
       if (this.identity() !== identity) { local.abort(new Error('World or dimension changed.')); return; }
-      if (this.bot.health <= 8 && action.type !== 'eat') {
-        interruptedForSurvival = true;
-        local.abort(new Error('Low health: interrupted for survival.'));
-        return;
-      }
       if (this.bot.food <= 16 && action.type !== 'eat' && this.bot.inventory.items().some(item => SAFE_FOOD.has(item.name))) {
         reflexBusy = true;
         interruptedForFood = true;
@@ -186,6 +186,12 @@ export class MineflayerDriver {
         eatingTask = this.eat(scopedSignal).finally(() => { reflexBusy = false; });
         // Observed below; prevent an unhandled rejection while the action unwinds.
         eatingTask.catch(() => {});
+        return;
+      }
+      // Eat first when possible: health cannot regenerate while hungry, so retreating alone repeats forever.
+      if (this.bot.health <= 8 && action.type !== 'eat') {
+        interruptedForSurvival = true;
+        local.abort(new Error('Low health: interrupted for survival.'));
       }
     };
     const guard = setInterval(() => { check().catch(error => local.abort(error)); }, 250);
@@ -211,7 +217,8 @@ export class MineflayerDriver {
         } else this.survival = 'Low health; no saved shelter';
         throw new Error('Action interrupted for survival. Check health and shelter before continuing.');
       }
-      throw error;
+      // timers/promises rejects with a generic AbortError; report why control ended (e.g. death) instead.
+      throw scopedSignal.aborted ? scopedSignal.reason : error;
     } finally { clearInterval(guard); if (!eatingTask) this.stop(); this.activeAction = false; }
   }
 

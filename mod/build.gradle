@@ -9,6 +9,15 @@ base { archivesName = project.archives_base_name }
 
 repositories { mavenCentral() }
 
+// Development only: `-PquickPlay=127.0.0.1:25565` joins a local test server on launch.
+loom {
+    runs {
+        client {
+            if (project.hasProperty('quickPlay')) programArgs '--quickPlayMultiplayer', project.property('quickPlay')
+        }
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"

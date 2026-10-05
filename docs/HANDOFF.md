@@ -1,6 +1,6 @@
 # Agent handoff
 
-Updated 2026-10-05. This records the state after implementation commit `8e3be15`; check `git status` and later commits before continuing.
+Updated 2026-10-05. This records the state after the live-validation milestone that follows `7fc5817`; check `git status` and later commits before continuing.
 
 ## User's goal and constraints
 
@@ -36,7 +36,19 @@ Actions are `goto`, `home`, `set_home`, `collect`, `eat`, and `wait`. Collection
 
 Control is exclusive. Heartbeats run every two seconds and leases expire after eight seconds. Fabric releases control on F8, menus/pause, death, disconnect, or a world/dimension change. Survival behavior attempts food consumption and retreat to a saved home; it cannot guarantee survival.
 
-## Latest milestone: cancellation and handoff
+## Latest milestone: live gameplay validation
+
+The user approved running the **already cached** vanilla 1.21.1 server jar as a local offline test server and accepting its EULA for that purpose. Live testing found and fixed:
+
+- **Collection froze the game.** Baritone 1.11.3 loads drop tables in `BlockOptionalMeta$ServerLevelStub`'s static initializer and then joins work scheduled on the client thread. Our first `mineByName` ran on that thread, so it deadlocked. The mod now triggers that load at client startup and refuses `collect` (with a retry message) until it has finished.
+- **Takeover failed after switching to a terminal.** Minecraft opens the pause menu when its window loses focus. Fabric now reports `focusPaused`, and acquire closes only that menu.
+- **Bot reflexes were in the wrong order.** At low health and low hunger, the Mineflayer bot retreated without eating, so health never regenerated and every action was interrupted. It now eats first, matching Fabric.
+- **Commands failed with "still stopping" after a released reflex.** The adapter now waits up to 10 s for `stopping` to settle before takeover.
+- **`server --version 1.21.1` printed the CLI version and exited.** The CLI's own version flag is now `-V, --cli-version`.
+- **A refused bot connection kept the CLI alive for 30 s** and printed the raw error to stdout. Both are fixed.
+- Death now reports "player died" instead of "a game menu was opened" (Fabric) or "The operation was aborted" (bot). The bot's survival status also returns to `Ready` after a reflex.
+
+## Previous milestone: cancellation and handoff
 
 Commit `8e3be15` fixed delayed work after handoff:
 
@@ -51,7 +63,33 @@ There is **no uncommitted implementation in progress** at this handoff. The next
 
 ## Validation completed and its limits
 
-- At `8e3be15`, **25 Node tests passed**, JavaScript syntax checks passed, and `git diff --check` passed.
+**Live gameplay (2026-10-05)** ran against a local offline vanilla 1.21.1 server with mob spawning disabled. Every item below was observed working after the fixes above.
+
+- **Fabric development client over multiplayer:**
+  - Observation and takeover from the focus-paused state.
+  - `set-home` and `goto` (about 13 blocks in under 5 s).
+  - `collect` with additive quotas (oak 3, then +2 = 5), plus birch and sand.
+  - `eat`, and automatic eating during `goto`.
+  - Low-health retreat home during `guard`.
+  - Emergency `stop` from a second process.
+  - Lease expiry about 7 s after the controlling CLI was SIGKILLed.
+  - A clean "No path" failure for an unreachable goto.
+  - Release on death.
+- **Mineflayer bot, offline auth:**
+  - Connect and observe, `set-home`, `goto`, and `collect`.
+  - `eat`, plus eat-before-retreat at low health and hunger.
+  - Guard retreat, emergency stop, lease expiry, Ctrl+C disconnect, and release on death.
+  - The death *message* fix is covered by the protocol fixture test, not re-run live.
+- **Still not verified live:**
+  - The F8 key and handoff by opening a menu manually. Both need real keyboard input; GUI automation still cannot drive the Java window.
+  - Single-player (integrated server) worlds.
+  - Cobblestone (needs a pickaxe), threat observations with hostile mobs, and dimension changes.
+  - Microsoft-authenticated play, an installed launcher profile, and Ollama.
+- The bot logs a non-fatal `PartialReadError` from Mineflayer's protocol library while decoding a 1.21.1 recipe/armor-trim packet on join. Gameplay continued normally.
+
+Earlier validation:
+
+- After live validation, **29 Node tests pass**, and the mod builds and packages offline. At `8e3be15`, 25 Node tests passed, JavaScript syntax checks passed, and `git diff --check` passed.
 - At `5178e8e`, the Fabric mod built and packaged offline, and the Java unit tests passed. The latest milestone changed only Node code/tests and protocol documentation.
 - A real Fabric development client was previously launched successfully. Baritone and its native library loaded, and the authenticated bridge answered from the **main menu** with no world connected. The client was stopped afterward.
 - A real Mineflayer connection was tested against a local **Minecraft protocol fixture**, checking identity, home persistence, and release on death. This fixture is not a complete Minecraft server/gameplay test.
@@ -59,12 +97,30 @@ There is **no uncommitted implementation in progress** at this handoff. The next
 
 **Not yet verified:** movement, mining, eating, survival retreat, or F8 handoff inside a real Minecraft world; Microsoft-authenticated multiplayer; normal launcher/profile installation; or gameplay with a real local model. Do not describe those as proven working.
 
+## Live test environment
+
+Everything stays under `.runtime/` and `mod/run/`. No downloads are needed on this machine.
+
+```sh
+mkdir -p .runtime/test-server && cd .runtime/test-server
+cp ../../.gradle-user/caches/fabric-loom/1.21.1/minecraft-server.jar server.jar
+echo eula=true > eula.txt   # user approved accepting the Minecraft EULA for this local test server
+printf 'online-mode=false\nserver-ip=127.0.0.1\nlevel-seed=agenttest\nspawn-protection=0\n' > server.properties
+: > console.in
+tail -f console.in | java -Xmx2G -jar server.jar nogui > server.out 2>&1   # run in the background
+# Admin commands: printf 'give PlayerName bread 4\n' >> console.in
+```
+
+- Join with `node scripts/gradle.js runClient -PquickPlay=127.0.0.1:25565`. The development username is random for each launch (`PlayerNNN`), so saved homes do not carry over between launches.
+- A **fresh** `mod/run` profile shows the accessibility onboarding screen, and quick-play waits behind it. Seed `mod/run/options.txt` with `onboardAccessibility:false` before the first launch.
+- Run the bot with `npm start -- server --host 127.0.0.1 --account BotTester --auth offline --version 1.21.1`.
+- Stop the client, bot, `tail`, and server afterward. The test world is in `.runtime/test-server/world`.
+
 ## Suggested next work
 
-1. Use the already cached development client to validate gameplay in a new, isolated test world. Protect existing worlds. Verify observations, saved home, movement, collection quotas, food consumption, emergency stop, menu/F8 takeover, and lease expiry. Stop the client afterward.
-2. Fix issues exposed by live validation, add focused regression coverage, and commit the milestone.
-3. Validate an authenticated multiplayer handoff when the user provides an account/server and authorizes the connection. Do not log in or accept agreements on their behalf without appropriate authorization.
-4. Connect an existing local agent through MCP, or ask before installing Ollama/downloading a model if a real local-model test is wanted.
+1. Verify F8 and manually opened menu handoff with a person at the keyboard, plus a single-player world.
+2. Validate an authenticated multiplayer handoff when the user provides an account/server and authorizes the connection. Do not log in or accept agreements on their behalf without appropriate authorization.
+3. Connect an existing local agent through MCP, or ask before installing Ollama/downloading a model if a real local-model test is wanted.
 
 A possible development-only world bootstrap was investigated but **not implemented**. Existing cached mapped Minecraft jars can be inspected with Java tools; no new library is needed just to inspect the APIs. Computer-use tooling previously could not select the Java game window, so automated GUI gameplay remains unverified.
 
@@ -125,5 +181,7 @@ Do not share `.runtime/bridge.json`, authentication caches, or other credential 
 - `e0c5902` — Initial Minecraft player agent harness.
 - `5178e8e` — Keep runtime files local and require explicit downloads.
 - `8e3be15` — Prevent delayed actions from resuming after player handoff.
+- `7fc5817` — Document project status and constraints for agent handoff.
+- Live-validation fixes — Fix issues found in live gameplay validation (this milestone).
 
 Keep this handoff updated when the implementation or validation status changes.

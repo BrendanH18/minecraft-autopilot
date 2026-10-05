@@ -28,6 +28,7 @@ export function normalizeAction(action) {
 }
 export function assertPlayable(state) {
   if (!state.connected || !state.player) throw new Error('Enter a world or connect to a server first.');
-  if (state.paused) throw new Error('Minecraft is paused. Resume the game before giving the agent control.');
+  // Fabric reports focusPaused when the only blocker is the pause menu opened by switching windows; takeover closes it.
+  if (state.paused && !state.focusPaused) throw new Error('Minecraft is paused. Resume the game before giving the agent control.');
   if (state.player.health <= 0) throw new Error('Your character is dead. Respawn manually before continuing.');
 }
