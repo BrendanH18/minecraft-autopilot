@@ -4,6 +4,8 @@ A local harness that lets an agent play **your existing Minecraft Java character
 
 The Fabric mod targets **Minecraft Java 1.21.1, Java 21, and Fabric**. The standalone bot can use other versions supported by Mineflayer; specify `--version` explicitly. This is an initial implementation: combat, crafting, building, chest deposits, and seamless reconnect handoff are not implemented.
 
+For another development agent continuing this project, start with [the agent handoff](docs/HANDOFF.md).
+
 ## Try it without Minecraft
 
 Requires Node.js 22 or newer. Dependencies are pinned in `package-lock.json`. If dependencies are already present, skip `npm ci`; installation is an explicit user step.
