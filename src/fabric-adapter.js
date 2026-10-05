@@ -10,6 +10,12 @@ export class FabricAdapter {
     this.leaseError = null;
     this.timer = null;
     this.heartbeatInFlight = null;
+    this.pendingAcquire = null;
+    this.releaseTask = null;
+    this.sessionController = null;
+    this.generation = 0;
+    this.closed = false;
+    this.actionInFlight = false;
   }
 
   static async connect(path) { return new FabricAdapter(await readBridge(path)); }
@@ -35,36 +41,66 @@ export class FabricAdapter {
   async observe() { return this.request('/v1/state'); }
 
   async acquire() {
+    if (this.closed) throw new Error('Adapter is closed.');
+    if (this.releaseTask) throw new Error('Control is still being released.');
     if (this.leaseId) {
       if (this.leaseError) throw this.leaseError;
       return;
     }
-    assertPlayable(await this.observe());
-    const leaseId = randomUUID();
-    await this.request('/v1/control', { action: 'acquire', leaseId });
-    this.leaseId = leaseId;
-    this.leaseError = null;
-    this.timer = setInterval(() => {
-      if (this.heartbeatInFlight) return;
-      this.heartbeatInFlight = this.request('/v1/control', { action: 'heartbeat', leaseId })
-        .catch(error => { this.leaseError = error; clearInterval(this.timer); })
-        .finally(() => { this.heartbeatInFlight = null; });
-    }, 2000);
-    this.timer.unref();
+    if (this.pendingAcquire) return this.pendingAcquire;
+    const generation = this.generation;
+    this.pendingAcquire = Promise.resolve().then(async () => {
+      assertPlayable(await this.observe());
+      if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
+      const leaseId = randomUUID();
+      try {
+        // Await confirmation so a late reply can be released explicitly after shutdown.
+        await this.request('/v1/control', { action: 'acquire', leaseId });
+        if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
+      } catch (error) {
+        await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
+        throw error;
+      }
+      this.leaseId = leaseId;
+      this.leaseError = null;
+      this.sessionController = new AbortController();
+      this.timer = setInterval(() => {
+        if (this.heartbeatInFlight) return;
+        this.heartbeatInFlight = this.request('/v1/control', { action: 'heartbeat', leaseId })
+          .catch(error => {
+            this.leaseError = error;
+            this.sessionController?.abort(error);
+            clearInterval(this.timer);
+          }).finally(() => { this.heartbeatInFlight = null; });
+      }, 2000);
+      this.timer.unref();
+    }).finally(() => { this.pendingAcquire = null; });
+    return this.pendingAcquire;
   }
 
   async execute(action, { signal, onProgress = () => {} } = {}) {
     const parsed = normalizeAction(action);
     signal?.throwIfAborted();
-    await this.acquire();
-    if (this.leaseError) throw this.leaseError;
-    const started = await this.request('/v1/actions', { leaseId: this.leaseId, action: parsed }, signal);
-    let previous = '';
+    if (this.actionInFlight) throw new Error('An action is already running on this adapter.');
+    this.actionInFlight = true;
+    const generation = this.generation;
+    let leaseId;
+    let submitted = false;
     try {
+      await this.acquire();
+      signal?.throwIfAborted();
+      if (generation !== this.generation) throw new Error('Control was released.');
+      if (this.leaseError) throw this.leaseError;
+      signal = signal ? AbortSignal.any([signal, this.sessionController.signal]) : this.sessionController.signal;
+      signal.throwIfAborted();
+      leaseId = this.leaseId;
+      submitted = true;
+      const started = await this.request('/v1/actions', { leaseId, action: parsed }, signal);
+      let previous = '';
       while (true) {
-        signal?.throwIfAborted();
+        signal.throwIfAborted();
         if (this.leaseError) throw this.leaseError;
-        const state = await this.observe();
+        const state = await this.request('/v1/state', undefined, signal);
         const job = state.job;
         if (job?.id !== started.id) throw new Error('Action was interrupted by another controller.');
         if (JSON.stringify(job) !== previous) { onProgress(job); previous = JSON.stringify(job); }
@@ -76,9 +112,9 @@ export class FabricAdapter {
         await delay(250, undefined, { signal });
       }
     } catch (error) {
-      await this.cancel().catch(() => {});
-      throw error;
-    }
+      if (submitted) await this.request('/v1/cancel', { leaseId }).catch(() => {});
+      throw signal?.aborted ? signal.reason : error;
+    } finally { this.actionInFlight = false; }
   }
 
   async cancel() {
@@ -88,13 +124,22 @@ export class FabricAdapter {
   // Explicit emergency stop works even from a second CLI process.
   async emergencyStop() { return this.request('/v1/stop', {}); }
 
-  async release() {
+  release() {
+    if (this.releaseTask) return this.releaseTask;
+    this.generation++;
     clearInterval(this.timer);
-    await this.heartbeatInFlight;
-    const leaseId = this.leaseId;
-    this.leaseId = null;
-    if (leaseId) await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
+    this.timer = null;
+    this.sessionController?.abort(new Error('Control was released.'));
+    this.releaseTask = Promise.resolve().then(async () => {
+      await this.pendingAcquire?.catch(() => {});
+      await this.heartbeatInFlight;
+      const leaseId = this.leaseId;
+      this.leaseId = null;
+      this.sessionController = null;
+      if (leaseId) await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
+    }).finally(() => { this.releaseTask = null; });
+    return this.releaseTask;
   }
 
-  async close() { await this.release(); }
+  async close() { this.closed = true; await this.release(); }
 }

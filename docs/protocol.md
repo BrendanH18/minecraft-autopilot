@@ -35,4 +35,6 @@ Jobs contain `id`, `type`, `status`, and `message`. Status is `running`, `comple
 
 State includes `protocol`, `backend`, `connected`, `paused`, `mode` (`manual` or `agent`), `job`, and, when connected, `player`, `inventory`, `home`, `threats`, `blocks`, and `survival`. Fabric also exposes `recovering`. Nearby blocks and threats are partial loaded-world observations. Different backends can expose additional fields.
 
+Node bridges also expose `stopping`. Cancellation stops inputs immediately, but an inventory or pathfinder operation can still be awaiting a reply. While it settles, the bridge rejects new actions and takeover instead of overlapping operations. A world, player, or dimension change releases control even when no action is running.
+
 Player data includes name, UUID, health, hunger, dimension, and position. Inventory entries include slot, namespaced item name, and count. Item slots follow the underlying backend's inventory model and are observational; clients should identify items by name rather than assume the same slot numbers in both backends.

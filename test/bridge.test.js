@@ -58,3 +58,42 @@ test('a second process can stop the owner and the owner cannot resume', async t 
   await assert.rejects(adapter.execute({ type: 'eat' }), /released or expired|control/i);
   assert.equal((await adapter.observe()).mode, 'manual');
 });
+
+test('closing during a slow takeover releases the late lease without starting a heartbeat', async t => {
+  const { adapter, harness } = await fixture(t);
+  const request = adapter.request.bind(adapter);
+  let acquired;
+  const ready = new Promise(resolve => { acquired = resolve; });
+  let reply;
+  const response = new Promise(resolve => { reply = resolve; });
+  adapter.request = async (path, body, signal) => {
+    const result = await request(path, body, signal);
+    if (body?.action === 'acquire') { acquired(); await response; }
+    return result;
+  };
+  const rejected = assert.rejects(adapter.acquire(), /cancelled/);
+  await ready;
+  assert.equal(harness.observe().mode, 'agent');
+  const closing = adapter.close();
+  reply();
+  await Promise.all([rejected, closing]);
+  assert.equal(adapter.leaseId, null);
+  assert.equal(adapter.timer, null);
+  assert.equal(harness.observe().mode, 'manual');
+  await assert.rejects(adapter.acquire(), /closed/);
+});
+
+test('closing an adapter interrupts its action and rejects overlapping submissions', async t => {
+  const { adapter, harness } = await fixture(t);
+  let running;
+  const started = new Promise(resolve => { running = resolve; });
+  const rejected = assert.rejects(adapter.execute({ type: 'wait', seconds: 30 }, {
+    onProgress: () => running(),
+  }), /released/);
+  await started;
+  await assert.rejects(adapter.execute({ type: 'eat' }), /already running/);
+  await adapter.close();
+  await rejected;
+  assert.equal(harness.observe().mode, 'manual');
+  assert.equal(harness.observe().job.status, 'cancelled');
+});

@@ -66,3 +66,36 @@ test('a second action cannot replace a running action', async t => {
   assert.throws(() => harness.start(owner, { type: 'eat' }), /already running/);
   harness.cancel(); await harness.task;
 });
+
+test('immediate handoff prevents a queued action from dispatching', async t => {
+  const driver = new DemoDriver();
+  let dispatched = false;
+  driver.execute = async () => { dispatched = true; };
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID(); harness.acquire(owner);
+  harness.start(owner, { type: 'eat' });
+  harness.release();
+  assert.throws(() => harness.acquire(randomUUID()), /still stopping/);
+  await harness.task;
+  assert.equal(dispatched, false);
+  assert.equal(harness.observe().job.status, 'cancelled');
+  harness.acquire(randomUUID());
+});
+
+test('dimension changes release an idle session and pending native work prevents takeover', async t => {
+  const driver = new DemoDriver();
+  let identity = 'overworld';
+  let busy = false;
+  driver.identity = () => identity;
+  driver.isBusy = () => busy;
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  harness.acquire(randomUUID());
+  identity = 'the_nether';
+  assert.equal(harness.observe().mode, 'manual');
+  busy = true;
+  assert.throws(() => harness.acquire(randomUUID()), /still stopping/);
+  busy = false;
+  harness.acquire(randomUUID());
+});

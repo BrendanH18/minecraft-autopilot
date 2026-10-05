@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { dataDirectory, writePrivateJson } from './config.js';
+import { OperationGate } from './operation-gate.js';
 
 const { pathfinder, Movements, goals } = pathfinderPackage;
 const COLLECT_BLOCKS = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'dirt', 'cobblestone', 'sand']);
@@ -23,15 +24,22 @@ export class MineflayerDriver {
     this.idleController = null;
     this.idleTask = null;
     this.lastRetreat = 0;
+    this.operations = new OperationGate();
+    this.controlController = null;
+    this.controlIdentity = null;
     this.movements = new Movements(bot);
     this.movements.canDig = false;
     this.movements.allow1by1towers = false;
     this.movements.allowParkour = false;
     this.movements.allowSprinting = false;
     bot.pathfinder.setMovements(this.movements);
-    bot.on('end', reason => { this.connected = false; this.lastError = String(reason || 'Disconnected'); });
-    bot.on('kicked', reason => { this.connected = false; this.lastError = typeof reason === 'string' ? reason : JSON.stringify(reason); });
+    bot.on('end', reason => { this.connected = false; this.lastError = String(reason || 'Disconnected'); this.controlController?.abort(new Error(this.lastError)); });
+    bot.on('kicked', reason => { this.connected = false; this.lastError = typeof reason === 'string' ? reason : JSON.stringify(reason); this.controlController?.abort(new Error('Disconnected.')); });
     bot.on('error', error => { this.lastError = error.message; });
+    bot.on('death', () => this.controlController?.abort(new Error('Player died.')));
+    bot.on('game', () => {
+      if (this.controlIdentity && this.identity() !== this.controlIdentity) this.controlController?.abort(new Error('World or dimension changed.'));
+    });
   }
 
   static async connect(options, { log = console.error, timeoutMs = 120_000, storageDirectory = dataDirectory, signal } = {}) {
@@ -75,27 +83,35 @@ export class MineflayerDriver {
   identity() { return `${this.options.host}:${this.options.port}|${this.bot.player?.uuid || this.bot._client.uuid}|${this.bot.game.dimension}`; }
   dimension() { const dimension = this.bot.game.dimension; return dimension?.includes(':') ? dimension : `minecraft:${dimension}`; }
   healthState() { return { connected: this.connected, player: { health: this.bot.health } }; }
+  isBusy() { return this.activeAction || !!this.idleTask || this.operations.busy; }
 
   setControlled(controlled) {
     clearInterval(this.idleTimer);
     if (!controlled) {
+      this.controlController?.abort(new Error('Control released.'));
+      this.controlController = null;
+      this.controlIdentity = null;
       this.idleController?.abort(new Error('Control released.'));
       return;
     }
+    this.controlController = new AbortController();
+    this.controlIdentity = this.identity();
     this.idleTimer = setInterval(() => {
-      if (this.activeAction || this.idleTask || !this.connected || this.bot.health <= 0) return;
+      if (!this.controlController || this.controlController.signal.aborted || this.identity() !== this.controlIdentity) return;
+      if (this.isBusy() || !this.connected || this.bot.health <= 0) return;
       const controller = this.idleController = new AbortController();
+      const signal = AbortSignal.any([controller.signal, this.controlController.signal]);
       const home = this.homes[this.identity()];
       let behavior;
       if (this.bot.food <= 16 && this.bot.inventory.items().some(item => SAFE_FOOD.has(item.name))) {
-        this.survival = 'Eating'; behavior = () => this.eat(controller.signal);
+        this.survival = 'Eating'; behavior = () => this.eat(signal);
       } else if (this.bot.health <= 8 && home && Date.now() - this.lastRetreat > 10_000) {
         this.lastRetreat = Date.now(); this.survival = 'Low health: retreating home';
-        behavior = () => this.goTo(home, AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]));
+        behavior = () => this.goTo(home, AbortSignal.any([signal, AbortSignal.timeout(60_000)]));
       }
       if (!behavior) return;
-      this.idleTask = Promise.resolve().then(behavior).catch(error => {
-        if (!controller.signal.aborted) this.survival = `Survival response failed: ${error.message}`;
+      this.idleTask = Promise.resolve().then(() => { signal.throwIfAborted(); return behavior(); }).catch(error => {
+        if (!signal.aborted) this.survival = `Survival response failed: ${error.message}`;
       }).finally(() => { this.idleTask = null; this.idleController = null; });
     }, 250);
     this.idleTimer.unref();
@@ -125,15 +141,13 @@ export class MineflayerDriver {
     this.bot.stopDigging();
   }
 
+  cancelActivities(message) {
+    this.idleController?.abort(new Error(message));
+    this.stop();
+  }
+
   async abortable(operation, signal) {
-    signal.throwIfAborted();
-    let onAbort;
-    const interrupted = new Promise((_, reject) => {
-      onAbort = () => { this.stop(); reject(signal.reason); };
-      signal.addEventListener('abort', onAbort, { once: true });
-    });
-    try { return await Promise.race([Promise.resolve().then(operation), interrupted]); }
-    finally { signal.removeEventListener('abort', onAbort); }
+    return this.operations.run(operation, signal, () => this.stop());
   }
 
   async eat(signal) {
@@ -147,17 +161,18 @@ export class MineflayerDriver {
 
   async execute(action, { signal, onProgress }) {
     signal.throwIfAborted();
-    if (this.idleTask) throw new Error('Survival response is in progress; observe and wait before acting.');
+    if (this.isBusy()) throw new Error('Previous activity is still running or stopping; wait before acting.');
     this.activeAction = true;
+    const scopedSignal = this.controlController ? AbortSignal.any([signal, this.controlController.signal]) : signal;
     const identity = this.identity();
     const local = new AbortController();
-    const combined = AbortSignal.any([signal, local.signal]);
+    const combined = AbortSignal.any([scopedSignal, local.signal]);
     let reflexBusy = false;
     let eatingTask = null;
     let interruptedForSurvival = false;
     let interruptedForFood = false;
     const check = async () => {
-      if (reflexBusy || signal.aborted) return;
+      if (reflexBusy || scopedSignal.aborted || local.signal.aborted) return;
       if (this.identity() !== identity) { local.abort(new Error('World or dimension changed.')); return; }
       if (this.bot.health <= 8 && action.type !== 'eat') {
         interruptedForSurvival = true;
@@ -168,7 +183,7 @@ export class MineflayerDriver {
         reflexBusy = true;
         interruptedForFood = true;
         local.abort(new Error('Interrupted to eat.'));
-        eatingTask = this.eat(signal).finally(() => { reflexBusy = false; });
+        eatingTask = this.eat(scopedSignal).finally(() => { reflexBusy = false; });
         // Observed below; prevent an unhandled rejection while the action unwinds.
         eatingTask.catch(() => {});
       }
@@ -178,21 +193,21 @@ export class MineflayerDriver {
       await this.perform(action, { signal: combined, onProgress });
       return { message: 'Completed.' };
     } catch (error) {
-      if (interruptedForFood && !signal.aborted) {
+      if (interruptedForFood && !scopedSignal.aborted) {
         clearInterval(guard);
         await eatingTask;
         this.survival = 'Ate food; replan from current state';
         // Restart from the current inventory/position without duplicating a collection quota.
         throw new Error('Interrupted to eat. Food consumed; replan from fresh state.');
       }
-      if (interruptedForSurvival && !signal.aborted) {
+      if (interruptedForSurvival && !scopedSignal.aborted) {
         clearInterval(guard);
         this.stop();
         const home = this.homes[identity];
         if (home) {
           this.survival = 'Low health: retreating home'; onProgress(this.survival);
-          const retreatSignal = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
-          await this.goTo(home, retreatSignal).catch(retreatError => { if (signal.aborted) throw signal.reason; this.survival = `Retreat failed: ${retreatError.message}`; });
+          const retreatSignal = AbortSignal.any([scopedSignal, AbortSignal.timeout(60_000)]);
+          await this.goTo(home, retreatSignal).catch(retreatError => { if (scopedSignal.aborted) throw scopedSignal.reason; this.survival = `Retreat failed: ${retreatError.message}`; });
         } else this.survival = 'Low health; no saved shelter';
         throw new Error('Action interrupted for survival. Check health and shelter before continuing.');
       }
@@ -249,5 +264,18 @@ export class MineflayerDriver {
     }
   }
 
-  async close() { this.setControlled(false); this.stop(); await this.idleTask; this.bot.quit('Agent bridge stopped.'); }
+  close() {
+    this.closing ??= (async () => {
+      this.setControlled(false); this.stop();
+      if (this.connected) {
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, 2000);
+          this.bot.once('end', () => { clearTimeout(timer); resolve(); });
+          this.bot.quit('Agent bridge stopped.');
+        });
+      }
+      await this.idleTask;
+    })();
+    return this.closing;
+  }
 }
