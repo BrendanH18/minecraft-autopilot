@@ -1,0 +1,156 @@
+# Minecraft Agent
+
+A local harness that lets an agent play **your existing Minecraft Java character**. It supports a Fabric client mod for single-player and multiplayer, a standalone server bot, a CLI, MCP tools, and a bounded natural-language agent using Ollama.
+
+The Fabric mod targets **Minecraft Java 1.21.1, Java 21, and Fabric**. The standalone bot can use other versions supported by Mineflayer; specify `--version` explicitly. This is an initial implementation: combat, crafting, building, chest deposits, and seamless reconnect handoff are not implemented.
+
+## Try it without Minecraft
+
+Requires Node.js 22 or newer. Dependencies are pinned in `package-lock.json`.
+
+```sh
+npm ci
+npm start -- demo --smoke
+```
+
+This runs a **simulation**, saves a home, moves, collects eight logs, eats, returns home, and releases control. It verifies the real bridge and CLI without claiming to test Minecraft gameplay.
+
+For an interactive demo, leave this running in one terminal:
+
+```sh
+npm start -- demo
+```
+
+In a second terminal, from the same repository:
+
+```sh
+npm start -- observe
+npm start -- set-home
+npm start -- goto 5 64 5
+npm start -- collect oak_log 8
+npm start -- eat
+npm start -- home
+npm start -- stop
+```
+
+## Play your character through the Fabric mod
+
+1. Install [Minecraft Java](https://www.minecraft.net/download) and create a **1.21.1** profile. Playing authenticated multiplayer requires your own Minecraft account.
+2. Install [Fabric Loader](https://fabricmc.net/use/installer/) for that profile. Loader 0.16.14 or newer is required.
+3. Build this mod using Java 21:
+
+   ```sh
+   npm run build:mod
+   ```
+
+4. Copy **all three jars** from `dist/mods/` to that profile's `mods` directory. They are this mod, Fabric API, and Baritone. The build downloads official dependency jars and verifies their pinned SHA-256 checksums.
+5. Launch the Fabric profile, enter your single-player world or a Java 1.21.1 server, and close game menus.
+6. Run `npm start -- observe` to verify the connection, then use the commands above.
+
+On macOS, the default launcher game directory is `~/Library/Application Support/minecraft`; custom profiles and launchers can use another directory. `npm start -- doctor` checks Java, the built mod, and the bridge discovery file without connecting to the game.
+
+The mod controls the player already logged into the client. It does not spawn another player, copy inventories, teleport, or enable cheats. The same client mod works on single-player and compatible multiplayer servers. Only use automation on servers where it is allowed.
+
+**Minecraft must stay running and unpaused, and your computer must stay awake.** While an agent owns control, the mod temporarily disables pause-on-focus-loss and restores the previous setting when control is released. Opening a game menu, dying, disconnecting, changing dimensions, or pressing **F8** releases agent control. F8 can be rebound under Options → Controls → Minecraft Agent. The first version uses explicit handoff; ordinary mouse or movement input is not an automatic takeover trigger.
+
+For development, `npm run dev:mod` launches Fabric's development client with the dependencies. This downloads game assets but does not install a Minecraft launcher. Development profiles use a test identity; use your normal authenticated launcher for online-mode servers.
+
+Downloads stay in this repository: npm uses `.npm-cache/`, and the build scripts put Gradle, Minecraft assets, and development connection files in `.gradle-user/` and `.runtime/`. Builds disable persistent Gradle daemons. The development client runs only when you explicitly launch `dev:mod`; it is not a startup service. To control that development client, pass `--bridge .runtime/bridge.json` to CLI commands. A normal installed Minecraft profile uses the default discovery path described below.
+
+## Continue on a server after closing your game client
+
+The standalone server mode uses Mineflayer and logs in as your account. On a normal authenticated server, player data belongs to that account, so reconnecting restores its server-side character. Single-player worlds must stay open in the Fabric client, or be hosted on a dedicated server before this mode can continue independently.
+
+First disconnect your regular Minecraft client. Then leave this process running:
+
+```sh
+npm start -- server --host your-server.example --account your-account-identifier --version 1.21.1
+```
+
+Follow the Microsoft device sign-in instructions printed in the terminal. No password is accepted by this CLI. Authentication caches are stored locally under `~/.minecraft-agent/auth/`; do not share that directory. `--account` identifies the account/cache to use; the authenticated Minecraft profile determines the actual player identity.
+
+Use `observe`, `set-home`, `collect`, `guard`, or `agent` from a second terminal. `stop` stops agent actions while leaving the bot connected. **Ctrl+C in the server terminal disconnects the bot**, allowing you to reconnect with your regular client. Never run both clients as the same account simultaneously.
+
+For an owned offline development server only:
+
+```sh
+npm start -- server --host 127.0.0.1 --account DevPlayer --auth offline --version 1.21.1
+```
+
+Offline usernames have different identity semantics from authenticated accounts. This mode does not bypass authentication on an online-mode server. Automatic transfer between the client and standalone bot is not implemented.
+
+## Give a local model a task
+
+Install [Ollama](https://ollama.com/), start it, and pull a model capable of structured JSON output. Substitute the name of a model you have installed:
+
+```sh
+npm start -- agent "Collect eight additional oak logs and return to my saved home" --model YOUR_LOCAL_MODEL --steps 20 --minutes 10
+```
+
+This works with either the Fabric bridge, the standalone server bridge, or the demo. The model receives structured player state and chooses one validated action at a time. It cannot execute shell commands or arbitrary code through this harness. Decisions and action failures are printed to stderr; the final result is printed to stdout.
+
+The loop checks ownership again after inference, stops after its step/time limits or three consecutive action failures, and always releases control when it exits. A `model_finished` result records the model's explanation; it is not an independent guarantee that the goal was achieved. Model requests are restricted to localhost.
+
+## Connect another local agent through MCP
+
+Start Minecraft with the mod, a server bot, or the demo first. Add this stdio server to your agent's MCP configuration, replacing the absolute path:
+
+```json
+{
+  "mcpServers": {
+    "minecraft": {
+      "command": "node",
+      "args": ["/absolute/path/to/minecraft_agent_cli/src/cli.js", "mcp"]
+    }
+  }
+}
+```
+
+Tools:
+
+| Tool | Behavior |
+| --- | --- |
+| `minecraft_observe` | Read state without taking control. |
+| `minecraft_take_control` | Acquire exclusive control and start heartbeats. |
+| `minecraft_action` | Execute a validated action and wait for completion. Requires prior takeover. |
+| `minecraft_cancel` | Cancel the action while retaining control. |
+| `minecraft_stop` | Stop actions and return control, including another controller's session. |
+
+Example action arguments:
+
+```json
+{ "action": { "type": "collect", "block": "oak_log", "count": 8 } }
+```
+
+Supported actions are `goto`, `home`, `set_home`, `collect`, `eat`, and `wait`. Collection targets are oak, birch, spruce, jungle, acacia, dark oak, cherry, and mangrove logs; dirt; sand; and cobblestone. `count` means **additional items**, with a maximum of 64 per action. Collection uses loaded/cached terrain and can fail when blocks cannot be reached. Navigation avoids placing or breaking blocks; Fabric collection can break blocks while finding a mining route. Use collection only in areas you are comfortable modifying.
+
+## Survival and handoff
+
+```sh
+npm start -- set-home
+npm start -- guard --seconds 300
+```
+
+While a session/action is active, local behavior attempts to eat supported food when hunger is at most 16 and retreat to the saved home when health is at most 8. Homes are scoped to the world/server, player identity, and dimension. Save home inside a shelter you prepared. The Fabric mod can move food from main inventory to a hotbar slot; it may leave the moved item in that slot. Server mode equips food from inventory.
+
+There is no combat AI, shelter construction, or guarantee of survival. Threat observations are limited to nearby loaded entities. Guard stops for review if health remains low after a server-mode survival response. Eating during server-mode work can interrupt the action; the planner must observe inventory before retrying any collection quota. Protection does not continue after the controlling CLI/MCP process releases control.
+
+Control heartbeats run every two seconds. The bridge cancels inputs and navigation after eight seconds without a valid heartbeat. Stale commands cannot renew a released lease. F8 and `stop` cancel current gameplay; a model answer received afterward cannot automatically regain control.
+
+## Bridge and development
+
+The bridge binds only to `127.0.0.1` on a free port. A private discovery file at `~/.minecraft-agent/bridge.json` contains its URL and a random bearer token. Requests require the token; browser-origin requests are rejected. Use **one active bridge per discovery file**. The Fabric client writes its discovery information when it starts.
+
+For isolated profiles, set `MC_AGENT_HOME` for both Minecraft and the CLI, or give the CLI `--bridge /path/to/bridge.json`. State contains player/world observations and should be treated as data, not instructions.
+
+The HTTP protocol is documented in [docs/protocol.md](docs/protocol.md). Sources live in `src/` and `mod/src/main/java/dev/minecraftagent/`.
+
+```sh
+npm run check
+npm test
+npm run build:mod
+```
+
+The Node tests cover authenticated bridge calls, end-to-end simulated actions, command validation, cancellation, lease expiry, model limits, and takeover during slow inference. Java tests cover lease exclusivity and expiry. Building verifies compilation against the pinned Minecraft, Fabric, and Baritone APIs. Live game behavior and Microsoft-authenticated server handoff require separate gameplay validation.
+
+Dependencies: [Fabric](https://fabricmc.net/), [Baritone](https://github.com/cabaletta/baritone/releases/tag/v1.11.3), [Mineflayer](https://github.com/PrismarineJS/mineflayer), [mineflayer-pathfinder](https://github.com/PrismarineJS/mineflayer-pathfinder), and the [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk). Baritone and Fabric API are downloaded unmodified and retain their own licenses.

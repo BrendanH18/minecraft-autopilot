@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Harness } from '../src/harness.js';
+import { DemoDriver } from '../src/demo-driver.js';
+import { startBridge } from '../src/bridge-server.js';
+
+test('MCP client discovers tools, requires takeover, executes actions, and releases on stop', { timeout: 10_000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'mc-mcp-test-'));
+  const discoveryPath = join(directory, 'bridge.json');
+  const bridge = await startBridge(new Harness(new DemoDriver()), { discoveryPath });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../src/cli.js', import.meta.url)), '--bridge', discoveryPath, 'mcp'], stderr: 'pipe' });
+  const client = new Client({ name: 'minecraft-test', version: '1.0.0' });
+  t.after(async () => { await client.close(); await bridge.close(); await rm(directory, { recursive: true, force: true }); });
+  await client.connect(transport);
+  const tools = await client.listTools();
+  assert.equal(tools.tools.length, 5);
+  const refused = await client.callTool({ name: 'minecraft_action', arguments: { action: { type: 'eat' } } });
+  assert.equal(refused.isError, true);
+  const takeover = await client.callTool({ name: 'minecraft_take_control', arguments: {} });
+  assert.notEqual(takeover.isError, true);
+  const action = await client.callTool({ name: 'minecraft_action', arguments: { action: { type: 'collect', block: 'oak_log', count: 3 } } });
+  assert.equal(JSON.parse(action.content[0].text).status, 'completed');
+  await client.callTool({ name: 'minecraft_stop', arguments: {} });
+  const state = await client.callTool({ name: 'minecraft_observe', arguments: {} });
+  assert.equal(JSON.parse(state.content[0].text).mode, 'manual');
+  await client.callTool({ name: 'minecraft_take_control', arguments: {} });
+  await client.callTool({ name: 'minecraft_stop', arguments: {} });
+});

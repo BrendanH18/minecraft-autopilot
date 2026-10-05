@@ -1,0 +1,27 @@
+{
+  "name": "minecraft-agent-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local agent harness for your Minecraft Java player",
+  "bin": { "mc-agent": "src/cli.js" },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check.js",
+    "setup:mod": "node scripts/setup-mod.js",
+    "build:mod": "npm run setup:mod && node scripts/gradle.js build && node scripts/package-mod.js",
+    "dev:mod": "npm run setup:mod && node scripts/gradle.js runClient",
+    "demo": "node src/cli.js demo"
+  },
+  "engines": { "node": ">=22" },
+  "overrides": { "uuid": "11.1.1" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "commander": "14.0.2",
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "vec3": "0.1.10",
+    "zod": "3.25.76"
+  }
+}

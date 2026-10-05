@@ -1,0 +1,14 @@
+node_modules/
+.deps/
+.gradle/
+.gradle-user/
+.npm-cache/
+.runtime/
+mod/.gradle/
+mod/build/
+mod/run/
+dist/
+.DS_Store
+*.log
+.env
+coverage/
