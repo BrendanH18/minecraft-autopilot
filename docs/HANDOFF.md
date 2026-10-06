@@ -80,8 +80,11 @@ There is **no uncommitted implementation in progress** at this handoff. The next
   - `eat`, plus eat-before-retreat at low health and hunger.
   - Guard retreat, emergency stop, lease expiry, Ctrl+C disconnect, and release on death.
   - The death *message* fix is covered by the protocol fixture test, not re-run live.
+- **With the user at the keyboard (Fabric):**
+  - F8 returned control, and the CLI's `guard` exited.
+  - Esc returned control (`GameMenuScreen`, window focused). Closing the menu did not restore agent control.
+  - Clicking into the game window while the agent had control kept agent control. One earlier session was released as "a game menu was opened" after a click, and it did not reproduce. Releases now log the screen class and window focus, and the message includes the screen name.
 - **Still not verified live:**
-  - The F8 key and handoff by opening a menu manually. Both need real keyboard input; GUI automation still cannot drive the Java window.
   - Single-player (integrated server) worlds.
   - Cobblestone (needs a pickaxe), threat observations with hostile mobs, and dimension changes.
   - Microsoft-authenticated play, an installed launcher profile, and Ollama.
@@ -118,7 +121,7 @@ tail -f console.in | java -Xmx2G -jar server.jar nogui > server.out 2>&1   # run
 
 ## Suggested next work
 
-1. Verify F8 and manually opened menu handoff with a person at the keyboard, plus a single-player world.
+1. Validate a single-player (integrated server) world. If an unexplained "game menu was opened" release recurs, check the logged screen class.
 2. Validate an authenticated multiplayer handoff when the user provides an account/server and authorizes the connection. Do not log in or accept agreements on their behalf without appropriate authorization.
 3. Connect an existing local agent through MCP, or ask before installing Ollama/downloading a model if a real local-model test is wanted.
 

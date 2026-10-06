@@ -187,7 +187,11 @@ public final class AgentController {
         // Servers can send the death screen before the health update.
         if (client.player == null || client.world == null || client.player.isDead() || client.currentScreen instanceof DeathScreen) { release("Disconnected or player died."); return; }
         if (!identity().equals(worldIdentity)) { release("World or dimension changed. Start a new session explicitly."); return; }
-        if (client.isPaused() || client.currentScreen != null) { release("A game menu was opened. Control returned to the player."); return; }
+        if (client.isPaused() || client.currentScreen != null) {
+            String screen = client.currentScreen == null ? "pause" : client.currentScreen.getClass().getSimpleName();
+            AgentClient.LOGGER.info("Releasing control: screen {} opened (window focused: {})", screen, client.isWindowFocused());
+            release("A game menu was opened (" + screen + "). Control returned to the player."); return;
+        }
         long now = System.nanoTime();
         if (eating) {
             // Keep food selected; Baritone is stopped while eating.
