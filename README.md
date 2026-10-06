@@ -79,7 +79,7 @@ First disconnect your regular Minecraft client. Then leave this process running:
 npm start -- server --host your-server.example --account your-account-identifier --version 1.21.1
 ```
 
-Follow the Microsoft device sign-in instructions printed in the terminal. No password is accepted by this CLI. Authentication caches are stored locally under this repository's `.runtime/auth/`; do not share that directory. `--account` identifies the account/cache to use; the authenticated Minecraft profile determines the actual player identity.
+Follow the Microsoft device sign-in instructions printed in the terminal. If the character is dead, the bot refuses to connect; respawn it with your regular client first. No password is accepted by this CLI. Authentication caches are stored locally under this repository's `.runtime/auth/`; do not share that directory. `--account` identifies the account/cache to use; the authenticated Minecraft profile determines the actual player identity.
 
 Use `observe`, `set-home`, `collect`, `guard`, or `agent` from a second terminal. `stop` stops agent actions while leaving the bot connected. **Ctrl+C in the server terminal disconnects the bot**, allowing you to reconnect with your regular client. Never run both clients as the same account simultaneously.
 
@@ -134,7 +134,7 @@ Example action arguments:
 { "action": { "type": "collect", "block": "oak_log", "count": 8 } }
 ```
 
-Supported actions are `goto`, `home`, `set_home`, `collect`, `eat`, and `wait`. Collection targets are oak, birch, spruce, jungle, acacia, dark oak, cherry, and mangrove logs; dirt; sand; and cobblestone. `count` means **additional items**, with a maximum of 64 per action. Collection uses loaded/cached terrain and can fail when blocks cannot be reached. Navigation avoids placing or breaking blocks; Fabric collection can break blocks while finding a mining route. Use collection only in areas you are comfortable modifying.
+Supported actions are `goto`, `home`, `set_home`, `collect`, `eat`, and `wait`. Collection targets are oak, birch, spruce, jungle, acacia, dark oak, cherry, and mangrove logs; dirt; sand; and cobblestone. `count` means **additional items**, with a maximum of 64 per action. Collection uses loaded/cached terrain and can fail when blocks cannot be reached. Navigation avoids placing or breaking blocks; Fabric collection can break blocks while finding a mining route. Mining often digs downward, so collection finishes by walking back to where it started, breaking blocks if needed to get out of the pit it dug. The same applies to a low-health retreat during collection. The quota is a minimum: the return trip can pick up extra items. Use collection only in areas you are comfortable modifying.
 
 ## Survival and handoff
 

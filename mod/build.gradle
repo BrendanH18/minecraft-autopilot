@@ -9,11 +9,13 @@ base { archivesName = project.archives_base_name }
 
 repositories { mavenCentral() }
 
-// Development only: `-PquickPlay=127.0.0.1:25565` joins a local test server on launch.
+// Development only: `-PquickPlay=127.0.0.1:25565` joins a local test server on launch;
+// `-PquickPlayWorld=NAME` opens an existing single-player world from mod/run/saves.
 loom {
     runs {
         client {
             if (project.hasProperty('quickPlay')) programArgs '--quickPlayMultiplayer', project.property('quickPlay')
+            if (project.hasProperty('quickPlayWorld')) programArgs '--quickPlaySingleplayer', project.property('quickPlayWorld')
         }
     }
 }

@@ -48,6 +48,16 @@ The user approved running the **already cached** vanilla 1.21.1 server jar as a 
 - **A refused bot connection kept the CLI alive for 30 s** and printed the raw error to stdout. Both are fixed.
 - Death now reports "player died" instead of "a game menu was opened" (Fabric) or "The operation was aborted" (bot). The bot's survival status also returns to `Ready` after a reflex.
 
+### Follow-up session with the user at the keyboard
+
+- **Collection stranded the player in its own pit.** In single-player, Fabric collected sand by digging down five blocks. After that, `home` (which never breaks blocks) failed with "No path".
+  - Both backends now finish `collect` by returning to the starting point. Fabric uses Baritone with breaking allowed and a 60 s limit.
+  - The bot walks first, then falls back to digging movements. mineflayer-pathfinder replans after every broken block and sometimes reports "Took to long to decide path", so digging is a slow fallback.
+  - A low-health retreat during collection may also break blocks.
+  - Failing to return does not turn a completed quota into a failure; the message says the player could not return.
+- **The bot collection loop had no per-block bound.** One block stalled for about 60 s live. Each block attempt is now capped at 20 s; the stall did not reproduce afterward.
+- **A dead character made `server` wait for the full 2-minute timeout.** Mineflayer emits `death` and never `spawn`; the bot now fails immediately with respawn instructions.
+
 ## Previous milestone: cancellation and handoff
 
 Commit `8e3be15` fixed delayed work after handoff:
@@ -75,6 +85,11 @@ There is **no uncommitted implementation in progress** at this handoff. The next
   - Lease expiry about 7 s after the controlling CLI was SIGKILLed.
   - A clean "No path" failure for an unreachable goto.
   - Release on death.
+- **Fabric single-player world** (created by the user):
+  - Takeover from a genuinely paused, focus-paused world.
+  - `set-home`, and `collect sand` ending back on the surface.
+  - `goto`, and `home`.
+  - Eat and retreat were not repeated here: there was no food, and cheats were off.
 - **Mineflayer bot, offline auth:**
   - Connect and observe, `set-home`, `goto`, and `collect`.
   - `eat`, plus eat-before-retreat at low health and hunger.
@@ -85,14 +100,13 @@ There is **no uncommitted implementation in progress** at this handoff. The next
   - Esc returned control (`GameMenuScreen`, window focused). Closing the menu did not restore agent control.
   - Clicking into the game window while the agent had control kept agent control. One earlier session was released as "a game menu was opened" after a click, and it did not reproduce. Releases now log the screen class and window focus, and the message includes the screen name.
 - **Still not verified live:**
-  - Single-player (integrated server) worlds.
   - Cobblestone (needs a pickaxe), threat observations with hostile mobs, and dimension changes.
   - Microsoft-authenticated play, an installed launcher profile, and Ollama.
 - The bot logs a non-fatal `PartialReadError` from Mineflayer's protocol library while decoding a 1.21.1 recipe/armor-trim packet on join. Gameplay continued normally.
 
 Earlier validation:
 
-- After live validation, **29 Node tests pass**, and the mod builds and packages offline. At `8e3be15`, 25 Node tests passed, JavaScript syntax checks passed, and `git diff --check` passed.
+- After live validation, **31 Node tests pass**, and the mod builds and packages offline. At `8e3be15`, 25 Node tests passed, JavaScript syntax checks passed, and `git diff --check` passed.
 - At `5178e8e`, the Fabric mod built and packaged offline, and the Java unit tests passed. The latest milestone changed only Node code/tests and protocol documentation.
 - A real Fabric development client was previously launched successfully. Baritone and its native library loaded, and the authenticated bridge answered from the **main menu** with no world connected. The client was stopped afterward.
 - A real Mineflayer connection was tested against a local **Minecraft protocol fixture**, checking identity, home persistence, and release on death. This fixture is not a complete Minecraft server/gameplay test.
@@ -114,14 +128,15 @@ tail -f console.in | java -Xmx2G -jar server.jar nogui > server.out 2>&1   # run
 # Admin commands: printf 'give PlayerName bread 4\n' >> console.in
 ```
 
-- Join with `node scripts/gradle.js runClient -PquickPlay=127.0.0.1:25565`. The development username is random for each launch (`PlayerNNN`), so saved homes do not carry over between launches.
+- Join with `node scripts/gradle.js runClient -PquickPlay=127.0.0.1:25565`, or open a saved single-player world with `-PquickPlayWorld=NAME`. The development username is random for each launch (`PlayerNNN`), so saved homes do not carry over between launches.
 - A **fresh** `mod/run` profile shows the accessibility onboarding screen, and quick-play waits behind it. Seed `mod/run/options.txt` with `onboardAccessibility:false` before the first launch.
+- Background jobs started by an agent tool may have a time limit; a server that silently stops shows up as "Disconnected."
 - Run the bot with `npm start -- server --host 127.0.0.1 --account BotTester --auth offline --version 1.21.1`.
 - Stop the client, bot, `tail`, and server afterward. The test world is in `.runtime/test-server/world`.
 
 ## Suggested next work
 
-1. Validate a single-player (integrated server) world. If an unexplained "game menu was opened" release recurs, check the logged screen class.
+1. If an unexplained "game menu was opened" release recurs, check the logged screen class. Bot collection of high logs is slow (about 45 s for 3) because of pathfinder think timeouts.
 2. Validate an authenticated multiplayer handoff when the user provides an account/server and authorizes the connection. Do not log in or accept agreements on their behalf without appropriate authorization.
 3. Connect an existing local agent through MCP, or ask before installing Ollama/downloading a model if a real local-model test is wanted.
 

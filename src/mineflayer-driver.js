@@ -33,6 +33,9 @@ export class MineflayerDriver {
     this.movements.allowParkour = false;
     this.movements.allowSprinting = false;
     bot.pathfinder.setMovements(this.movements);
+    // Collection already permits breaking blocks; it may dig back out of the pits it creates.
+    this.collectMovements = new Movements(bot);
+    Object.assign(this.collectMovements, { allow1by1towers: false, allowParkour: false, allowSprinting: false });
     bot.on('end', reason => { this.connected = false; this.lastError = String(reason || 'Disconnected'); this.controlController?.abort(new Error(this.lastError)); });
     bot.on('kicked', reason => { this.connected = false; this.lastError = typeof reason === 'string' ? reason : JSON.stringify(reason); this.controlController?.abort(new Error('Disconnected.')); });
     bot.on('error', error => { this.lastError = error.message; });
@@ -64,13 +67,15 @@ export class MineflayerDriver {
         const onEnd = reason => finish(new Error(`Disconnected before spawning: ${reason}`));
         const onKicked = reason => finish(new Error(`Server rejected the connection: ${JSON.stringify(reason)}`));
         const onAbort = () => finish(signal.reason);
+        // Mineflayer never emits spawn for a character that joins dead, and this bot does not respawn on its own.
+        const onDeath = () => finish(new Error('This character is dead. Respawn it in your regular Minecraft client, disconnect, then try again.'));
         function finish(error) {
           clearTimeout(timer);
-          bot.off('spawn', onSpawn); bot.off('error', onError); bot.off('end', onEnd); bot.off('kicked', onKicked);
+          bot.off('spawn', onSpawn); bot.off('error', onError); bot.off('end', onEnd); bot.off('kicked', onKicked); bot.off('death', onDeath);
           signal?.removeEventListener('abort', onAbort);
           if (error) reject(error); else resolve();
         }
-        bot.once('spawn', onSpawn); bot.once('error', onError); bot.once('end', onEnd); bot.once('kicked', onKicked);
+        bot.once('spawn', onSpawn); bot.once('error', onError); bot.once('end', onEnd); bot.once('kicked', onKicked); bot.once('death', onDeath);
         signal?.addEventListener('abort', onAbort, { once: true });
         if (signal?.aborted) onAbort();
       });
@@ -196,8 +201,7 @@ export class MineflayerDriver {
     };
     const guard = setInterval(() => { check().catch(error => local.abort(error)); }, 250);
     try {
-      await this.perform(action, { signal: combined, onProgress });
-      return { message: 'Completed.' };
+      return { message: await this.perform(action, { signal: combined, onProgress }) || 'Completed.' };
     } catch (error) {
       if (interruptedForFood && !scopedSignal.aborted) {
         clearInterval(guard);
@@ -213,7 +217,7 @@ export class MineflayerDriver {
         if (home) {
           this.survival = 'Low health: retreating home'; onProgress(this.survival);
           const retreatSignal = AbortSignal.any([scopedSignal, AbortSignal.timeout(60_000)]);
-          await this.goTo(home, retreatSignal).catch(retreatError => { if (scopedSignal.aborted) throw scopedSignal.reason; this.survival = `Retreat failed: ${retreatError.message}`; });
+          await this.goTo(home, retreatSignal, action.type === 'collect' ? this.collectMovements : this.movements).catch(retreatError => { if (scopedSignal.aborted) throw scopedSignal.reason; this.survival = `Retreat failed: ${retreatError.message}`; });
         } else this.survival = 'Low health; no saved shelter';
         throw new Error('Action interrupted for survival. Check health and shelter before continuing.');
       }
@@ -222,8 +226,10 @@ export class MineflayerDriver {
     } finally { clearInterval(guard); if (!eatingTask) this.stop(); this.activeAction = false; }
   }
 
-  async goTo(position, signal) {
-    await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalNear(Math.floor(position.x), Math.floor(position.y), Math.floor(position.z), 1)), signal);
+  async goTo(position, signal, movements = this.movements) {
+    this.bot.pathfinder.setMovements(movements);
+    try { await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalNear(Math.floor(position.x), Math.floor(position.y), Math.floor(position.z), 1)), signal); }
+    finally { if (movements !== this.movements) this.bot.pathfinder.setMovements(this.movements); }
   }
 
   async perform(action, { signal, onProgress }) {
@@ -246,6 +252,7 @@ export class MineflayerDriver {
         if (blockId === undefined) throw new Error(`Block ${name} is unavailable in this Minecraft version.`);
         const count = () => this.bot.inventory.items().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0);
         const target = count() + action.count;
+        const start = this.bot.entity.position.clone();
         const failed = new Set();
         while (count() < target) {
           signal.throwIfAborted();
@@ -253,20 +260,31 @@ export class MineflayerDriver {
           positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
           const position = positions.find(pos => !failed.has(pos.toString()));
           if (!position) throw new Error('No reachable matching blocks remain in loaded chunks.');
+          // A single block can stall the pathfinder for a minute or more; skip it and try another.
+          const step = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
           try {
-            await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), signal);
+            await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), step);
             const block = this.bot.blockAt(position);
             if (!block || block.type !== blockId) continue;
             const tool = this.bot.pathfinder.bestHarvestTool(block);
-            if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), signal);
+            if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), step);
             if (!this.bot.canDigBlock(block)) { failed.add(position.toString()); continue; }
-            await this.abortable(() => this.bot.dig(block), signal);
-            await this.goTo(position, signal);
-            await delay(750, undefined, { signal });
+            await this.abortable(() => this.bot.dig(block), step);
+            await this.goTo(position, step);
+            await delay(750, undefined, { signal: step });
             onProgress(`Inventory: ${count()}/${target}`);
           } catch (error) { if (signal.aborted) throw signal.reason; failed.add(position.toString()); }
         }
-        return;
+        // Mining often digs downward; return so later navigation, which cannot dig, is not trapped in a pit.
+        if (start.distanceTo(this.bot.entity.position) <= 2) return 'Collected requested items.';
+        onProgress('Collected requested items; returning to where collection started.');
+        // Walking first is fast; digging is the fallback for pits because the pathfinder replans after every broken block.
+        const returnSignal = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
+        for (const movements of [this.movements, this.collectMovements]) {
+          try { await this.goTo(start, returnSignal, movements); return 'Collected requested items and returned to the starting point.'; }
+          catch (error) { if (signal.aborted) throw signal.reason; if (returnSignal.aborted) break; }
+        }
+        return 'Collected requested items, but could not return to the starting point.';
       }
     }
   }

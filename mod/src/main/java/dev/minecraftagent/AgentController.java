@@ -55,6 +55,9 @@ public final class AgentController {
     private long jobDeadline;
     private int targetCount;
     private BlockPos destination;
+    private BlockPos collectStart;
+    private boolean returning;
+    private long returnStarted;
     private String worldIdentity;
     private boolean previousPauseOnLostFocus;
     private boolean eating;
@@ -153,6 +156,7 @@ public final class AgentController {
         jobStarted = System.nanoTime();
         jobDeadline = jobStarted + (type.equals("wait") ? (long) (wait * 1e9) + 5_000_000_000L : 180_000_000_000L);
         destination = goal;
+        returning = false;
         try {
             switch (type) {
                 case "set_home": {
@@ -167,6 +171,7 @@ public final class AgentController {
                     baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1)); break;
                 case "collect":
                     targetCount = inventoryCount(COLLECT_DROPS.get(block)) + count;
+                    collectStart = client.player.getBlockPos();
                     action.addProperty("block", block);
                     BaritoneAPI.getSettings().allowBreak.value = true;
                     baritone().getMineProcess().mineByName(targetCount, "minecraft:" + block); break;
@@ -222,7 +227,8 @@ public final class AgentController {
             JsonObject home = homes.getAsJsonObject(identity());
             if (home != null) {
                 destination = new BlockPos(home.get("x").getAsInt(), home.get("y").getAsInt(), home.get("z").getAsInt());
-                BaritoneAPI.getSettings().allowBreak.value = false;
+                // Mining can leave the player in a pit; a collection session already permits breaking to get out.
+                BaritoneAPI.getSettings().allowBreak.value = collecting();
                 baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(destination, 1));
                 recovering = true;
                 survivalMessage = "Low health: retreating home";
@@ -240,7 +246,11 @@ public final class AgentController {
             return;
         }
         if (!running()) return;
-        if (now > jobDeadline) { finish("failed", "Action timed out."); return; }
+        if (now > jobDeadline) {
+            if (returning) finish("completed", "Collected requested items, but could not return to the starting point in time.");
+            else finish("failed", "Action timed out.");
+            return;
+        }
         String type = string(action, "type");
         switch (type) {
             case "goto": case "home":
@@ -249,9 +259,15 @@ public final class AgentController {
                     finish("failed", "No path to destination.");
                 break;
             case "collect": {
+                if (returning) {
+                    if (nearDestination()) finish("completed", "Collected requested items and returned to the starting point.");
+                    else if (now - returnStarted > 3_000_000_000L && !baritone().getCustomGoalProcess().isActive() && !baritone().getPathingBehavior().isPathing())
+                        finish("completed", "Collected requested items, but could not return to the starting point.");
+                    break;
+                }
                 int have = inventoryCount(COLLECT_DROPS.get(string(action, "block")));
                 job.addProperty("message", "Inventory: " + have + "/" + targetCount);
-                if (have >= targetCount) finish("completed", "Collected requested items.");
+                if (have >= targetCount) beginReturn(now);
                 else if (now - jobStarted > 3_000_000_000L && !baritone().getMineProcess().isActive()) finish("failed", "No reachable matching blocks found.");
                 break;
             }
@@ -290,13 +306,27 @@ public final class AgentController {
     private void resumeMotion() {
         resumeAfterEating = false;
         if (recovering || (running() && Set.of("goto", "home").contains(string(action, "type")))) {
-            BaritoneAPI.getSettings().allowBreak.value = false;
+            BaritoneAPI.getSettings().allowBreak.value = recovering && collecting();
             baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(destination, 1));
-        } else if (running() && string(action, "type").equals("collect")) {
+        } else if (collecting()) {
             BaritoneAPI.getSettings().allowBreak.value = true;
-            baritone().getMineProcess().mineByName(targetCount, "minecraft:" + string(action, "block"));
+            if (returning) baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(collectStart, 1));
+            else baritone().getMineProcess().mineByName(targetCount, "minecraft:" + string(action, "block"));
         }
     }
+
+    /** Mining often digs downward; walk back to the start, breaking blocks if needed, so later navigation is not trapped. */
+    private void beginReturn(long now) {
+        stopMotion();
+        returning = true; returnStarted = now; jobDeadline = now + 60_000_000_000L;
+        destination = collectStart;
+        if (nearDestination()) { finish("completed", "Collected requested items."); return; }
+        job.addProperty("message", "Collected requested items; returning to where collection started.");
+        BaritoneAPI.getSettings().allowBreak.value = true;
+        baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(collectStart, 1));
+    }
+
+    private boolean collecting() { return running() && string(action, "type").equals("collect"); }
 
     private void stopMotion() {
         baritone().getPathingBehavior().cancelEverything();
