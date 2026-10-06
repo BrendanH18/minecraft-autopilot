@@ -4,6 +4,7 @@
   "version": "${version}",
   "name": "Minecraft Agent",
   "description": "Hand your existing player to a local agent. F8 always returns control.",
+  "license": "MIT",
   "environment": "client",
   "entrypoints": { "client": ["dev.minecraftagent.AgentClient"] },
   "depends": {

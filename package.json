@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "description": "A local agent harness for your Minecraft Java player",
+  "license": "MIT",
+  "keywords": ["minecraft", "fabric", "mineflayer", "baritone", "mcp", "agent", "ollama"],
   "bin": { "mc-agent": "src/cli.js" },
   "scripts": {
     "start": "node src/cli.js",
