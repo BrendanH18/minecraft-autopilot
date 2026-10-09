@@ -13,6 +13,7 @@
     "check": "node scripts/check.js",
     "setup:mod": "node scripts/setup-mod.js",
     "build:mod": "npm run setup:mod && node scripts/gradle.js build && node scripts/package-mod.js",
+    "verify:mod": "node scripts/verify-mod.js",
     "dev:mod": "npm run setup:mod && node scripts/gradle.js runClient",
     "demo": "node src/cli.js demo"
   },

@@ -1,6 +1,8 @@
 import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { verifyModBundle } from '../src/bundle.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = `${root}/dist/mods`;
@@ -29,5 +31,16 @@ for (const [source, name] of files) {
   hashes.push(`${checksum(await readFile(`${output}/${name}`))}  ${name}`);
 }
 await writeFile(`${root}/dist/SHA256SUMS`, hashes.join('\n') + '\n');
+await copyFile(`${root}/LICENSE`, `${root}/dist/LICENSE`);
 await writeFile(`${root}/dist/INSTALL.md`, `# Minecraft Agent 0.1.0\n\nInstall Minecraft Java **1.21.1** with Fabric Loader **0.16.14 or newer**. Copy all three jars from this bundle's mods directory into that profile's mods directory.\n\nStart Minecraft and enter a world or Java 1.21.1 server. In this repository run:\n\n\`\`\`sh\nnpm start -- attach /path/to/game-directory/config/minecraft-agent/bridge.json\nnpm start -- observe\nnpm start -- set-home\nnpm start -- collect oak_log 8\n\`\`\`\n\nF8 returns control immediately. See the repository README.md for the CLI, local model, and server bot setup.\n\nThird-party dependencies are unmodified official releases:\n- Baritone 1.11.3: LGPL-3.0, source and license at https://github.com/cabaletta/baritone/releases/tag/v1.11.3\n- Fabric API 0.116.17: Apache-2.0, source and license at https://github.com/FabricMC/fabric\n`);
-console.log('Installable mod jars are ready in dist/mods/.');
+await verifyModBundle(`${root}/dist`);
+const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+const changes = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, encoding: 'utf8' });
+await writeFile(`${root}/dist/BUILD.json`, JSON.stringify({ version: '0.1.0', minecraft: '1.21.1',
+  sourceCommit: revision.status === 0 ? revision.stdout.trim() : null,
+  sourceModified: changes.status === 0 ? Boolean(changes.stdout.trim()) : null }, null, 2) + '\n');
+const archive = 'minecraft-agent-0.1.0.zip';
+execFileSync('jar', ['--create', '--file', `${root}/dist/${archive}`, '--no-manifest',
+  ...['mods', 'INSTALL.md', 'LICENSE', 'SHA256SUMS', 'BUILD.json'].flatMap(name => ['-C', `${root}/dist`, name])]);
+await writeFile(`${root}/dist/ARCHIVE_SHA256SUMS`, `${checksum(await readFile(`${root}/dist/${archive}`))}  ${archive}\n`);
+console.log(`Verified installable mod jars are ready in dist/mods/ and dist/${archive}.`);

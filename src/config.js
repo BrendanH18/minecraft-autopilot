@@ -8,12 +8,17 @@ export const dataDirectory = resolve(process.env.MC_AGENT_HOME || join(projectRo
 export const bridgeFile = join(dataDirectory, 'bridge.json');
 export const profileFile = join(dataDirectory, 'profile.json');
 
-export async function readBridge(path = bridgeFile) {
+export async function resolveBridgePath(path = bridgeFile) {
   if (path === bridgeFile) {
     let profile;
     try { profile = JSON.parse(await readFile(profileFile, 'utf8')); } catch {}
     if (profile?.discoveryPath) path = resolve(profile.discoveryPath);
   }
+  return path;
+}
+
+export async function readBridge(path = bridgeFile) {
+  path = await resolveBridgePath(path);
   let config;
   try { config = JSON.parse(await readFile(path, 'utf8')); }
   catch { throw new Error(`No readable bridge at ${path}. Start Minecraft with the agent mod, or use "mc-agent demo" / "mc-agent server".`); }

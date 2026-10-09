@@ -15,7 +15,7 @@ Let a local agent take over the **same Minecraft Java character a person is alre
 
 ## Setup from a fresh clone
 
-Requires Node.js 22+ and Java 21. These commands download dependencies into the repository:
+Requires Node.js 22+ and a full Java 21 JDK (`java`, `javac`, and `jar` on PATH). These commands download dependencies into the repository:
 
 ```sh
 npm ci
@@ -31,6 +31,7 @@ npm run check        # JavaScript syntax
 npm test             # Node tests
 npm start -- demo --smoke
 npm run build:mod    # compile, Java tests, package to dist/
+npm run verify:mod   # verify installation files and pinned dependency hashes
 npm run dev:mod      # Fabric development client with a test identity
 ```
 
@@ -176,4 +177,4 @@ The next milestone is **validated everyday use**. Complete these checks in order
 2. **Microsoft-authenticated multiplayer handoff.** Record UUID and inventory in the normal client, disconnect, connect the bot, perform a bounded task, disconnect the bot, then reconnect the normal client. Verify the same UUID and server-side inventory, and confirm both clients were never connected simultaneously.
 3. **Remaining gameplay coverage.** Validate cobblestone collection with a pickaxe, hostile-mob observations, and release on dimension change. Include partial collection recovery in a pit for both backends. The collection recovery changes have Node regression coverage but still need fresh live gameplay validation.
 
-CI runs the simulation smoke check and packages the installation bundle after building the mod. Successful mod jobs upload `dist/` as the `minecraft-agent-installation` artifact.
+CI runs the simulation smoke check and packages the installation bundle after building the mod. Successful mod jobs upload `dist/` as the `minecraft-agent-installation` artifact. The [v0.1 release checklist](RELEASE.md) tracks shipping scope, live acceptance checks, and how to publish the verified archive.

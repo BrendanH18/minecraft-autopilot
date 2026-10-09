@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { Command, Option, InvalidArgumentError } from 'commander';
-import { readFile, access, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { FabricAdapter } from './fabric-adapter.js';
 import { bridgeFile, dataDirectory } from './config.js';
 import { attachBridge, cleanupRuntime, assertBridgeNotRunning } from './runtime.js';
@@ -170,14 +169,8 @@ program.command('server').description('Connect a standalone bot to a Java server
 
 program.command('doctor').description('Check local prerequisites without connecting to Minecraft.')
   .action(async () => {
-    const root = fileURLToPath(new URL('../', import.meta.url));
-    const java = spawnSync('java', ['-version'], { encoding: 'utf8' });
-    let modBuilt = false;
-    try { await access(join(root, 'mod/build/libs/minecraft-agent-0.1.0.jar')); modBuilt = true; } catch {}
-    let bridge = false;
-    try { await readFile(program.opts().bridge); bridge = true; } catch {}
-    print({ node: process.version, java: java.status === 0 ? java.stderr.split('\n')[0] : 'Not installed', modBuilt,
-      bridgeDiscoveryExists: bridge, bridgeFile: program.opts().bridge, next: modBuilt ? 'Install Minecraft Java 1.21.1 with Fabric, then copy the three mod jars described in README.md.' : 'Run npm run build:mod. You can try npm start -- demo --smoke now.' });
+    const { inspectPrerequisites } = await import('./doctor.js');
+    print(await inspectPrerequisites({ discoveryPath: program.opts().bridge }));
   });
 
 try { await program.parseAsync(); }

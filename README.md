@@ -49,7 +49,7 @@ npm start -- stop
 5. Launch the Fabric profile, enter your single-player world or a Java 1.21.1 server, and close game menus. Switching to a terminal afterward is fine: taking control closes the pause menu Minecraft opens when its window loses focus.
 6. Run `npm start -- attach /path/to/your/game-directory/config/minecraft-agent/bridge.json`, then `npm start -- observe` to verify the connection. The CLI remembers the discovery-file location, so you only need to attach once per profile.
 
-On macOS, the default launcher game directory is `~/Library/Application Support/minecraft`; custom profiles and launchers can use another directory. `npm start -- doctor` checks Java, the built mod, and the bridge discovery file without connecting to the game.
+On macOS, the default launcher game directory is `~/Library/Application Support/minecraft`; custom profiles and launchers can use another directory. `npm start -- doctor` checks Node, the full Java JDK (`java`, `javac`, and `jar`), the verified installation bundle, and the selected profile's discovery file without connecting to the game or printing its token.
 
 The mod controls the player already logged into the client. It does not spawn another player, copy inventories, teleport, or enable cheats. The same client mod works on single-player and compatible multiplayer servers. Only use automation on servers where it is allowed.
 
@@ -178,7 +178,10 @@ The HTTP protocol is documented in [docs/protocol.md](docs/protocol.md). Sources
 npm run check
 npm test
 npm run build:mod
+npm run verify:mod
 ```
+
+Packaging verifies the jar manifest and pinned third-party checksums, includes this project's license, and creates `dist/minecraft-agent-0.1.0.zip` with an archive checksum. `dist/BUILD.json` records the source commit and whether the checkout had uncommitted changes. See [the release checklist](docs/RELEASE.md) for v0.1 scope and the live checks still required before shipping.
 
 The Node tests cover authenticated bridge calls, end-to-end simulated actions, command validation, cancellation, lease expiry, model limits, and takeover during slow inference. Java tests cover lease exclusivity and expiry. Building verifies compilation against the pinned Minecraft, Fabric, and Baritone APIs. Live gameplay testing is described in [the development guide](docs/DEVELOPMENT.md).
 
