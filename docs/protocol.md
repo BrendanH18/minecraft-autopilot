@@ -29,9 +29,11 @@ Actions:
 { "type": "wait", "seconds": 30 }
 ```
 
-Coordinates must be finite, X/Z within ±29,999,984 and Y within -64..320. Count must be an integer in 1..64. Wait duration is 1..3600 seconds. Collection targets are limited to the list in README.md. Most actions have a 180-second timeout; wait's timeout is its duration plus five seconds. Survival retreat has a separate 60-second limit. Collection is measured by inventory increase, not blocks broken.
+Coordinates must be finite, X/Z within ±29,999,984 and Y within -64..320. Count must be an integer in 1..64. Wait duration is 1..3600 seconds. Collection targets are listed in the [usage guide](USAGE.md#collection-and-survival). Most actions have a 180-second timeout; wait's timeout is its duration plus five seconds. Survival retreat has a separate 60-second limit. Collection is measured by inventory increase, not blocks broken. Real backends require a pickaxe for cobblestone collection and fail if no usable pickaxe remains while mining.
 
 Jobs contain `id`, `type`, `status`, and `message`. Status is `running`, `completed`, `failed`, or `cancelled`. Poll state to track the current job; at most one action runs at a time. The last terminal job remains observable until a new action starts. A terminal status means the action stopped, not that the agent's broader goal succeeded.
+
+The CLI planner's explicit inventory/home criteria are checked separately by the client; they are not bridge endpoints. See [Ollama task verification](USAGE.md#run-an-ollama-task) for their scope and exit statuses.
 
 Real-backend collection completes only when its item quota is met and the player is back near the starting point. An unreachable return trip is `failed` even if the inventory quota was met. When matching blocks run out before the quota is met, collection attempts the return trip and remains `failed`; the message reports the inventory total/target and return outcome. Always observe fresh inventory before retrying a partial collection. Cancellation, lease expiry, death, or a survival interruption does not start a collection return trip. Fabric allows up to 60 additional seconds to return after its mining deadline; the bot's return remains within the overall action deadline.
 

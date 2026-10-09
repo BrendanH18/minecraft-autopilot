@@ -1,6 +1,6 @@
 # Development guide
 
-This guide covers project status, how to build and test, the live test environment, and implementation notes. For usage, see the [README](../README.md); for the bridge API, see [the protocol](protocol.md).
+This guide covers project status, how to build and test, the live test environment, and implementation notes. Start with the [README](../README.md), use the [usage guide](USAGE.md) for commands and troubleshooting, and read [CONTRIBUTING.md](../CONTRIBUTING.md) before changing code. The [protocol](protocol.md) documents the bridge API.
 
 ## Goal
 
@@ -66,6 +66,8 @@ Single-player automation needs the game running, unpaused, and the computer awak
 - `npm run build:mod` compiles against the pinned Minecraft, Fabric, and Baritone APIs.
 
 **Live gameplay (October 2026)** used the Fabric development client and the bot against a local offline vanilla 1.21.1 server and a single-player world. Each item below was observed working:
+
+These are historical observations, not acceptance results for the latest release candidate. The [release checklist](RELEASE.md) requires fresh checks of the current packaged code.
 
 - **Fabric, multiplayer:**
   - Observation, and takeover while the game was focus-paused.
@@ -151,6 +153,7 @@ tail -f console.in | java -Xmx2G -jar server.jar nogui > server.out 2>&1   # run
 | `src/harness.js`, `src/operation-gate.js` | Node lease/job lifecycle and native operation serialization |
 | `src/mineflayer-driver.js` | Server bot actions, observations, and survival |
 | `src/agent.js`, `src/mcp.js` | Ollama planner and MCP interface |
+| `src/objective.js` | Independent inventory and home verification for explicit planner criteria |
 | `src/config.js`, `src/runtime.js`, `src/bridge-server.js` | Paths, private files, process ownership, cleanup, HTTP serving |
 | `mod/src/main/java/dev/minecraftagent/` | Fabric controller, client events, bridge, and Java lease/storage helpers |
 | `scripts/` | Dependency setup, offline build wrapper, packaging, syntax checks |
@@ -171,7 +174,7 @@ Installed game profiles use their own `config/minecraft-agent/` directory. `atta
 
 ## Suggested next work
 
-The next milestone is **validated everyday use**. Complete these checks in order and record the Minecraft/backend/model versions and observed results here:
+The next milestone is **validated everyday use**. The [roadmap](ROADMAP.md) sets priorities and the [release checklist](RELEASE.md) is the acceptance record. Complete these checks in order and record the Minecraft/backend/model versions and observed results here:
 
 1. **Normal launcher installation and a real agent task.** Install the three packaged jars in a normal Fabric 1.21.1 profile. Save a home, record starting inventory, then ask a real Ollama or MCP agent to collect eight additional oak logs and return home. With Ollama, use `--verify-collect oak_log:8 --verify-home` to check the inventory increase and original home automatically. Verify released control independently of the agent's explanation. Repeat with partial collection, an unreachable return, and F8 during inference; a failed return must not report success, and no delayed action may resume after handoff.
 2. **Microsoft-authenticated multiplayer handoff.** Record UUID and inventory in the normal client, disconnect, connect the bot, perform a bounded task, disconnect the bot, then reconnect the normal client. Verify the same UUID and server-side inventory, and confirm both clients were never connected simultaneously.

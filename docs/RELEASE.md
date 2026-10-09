@@ -9,7 +9,7 @@ v0.1.0 is an **experimental preview** of the existing Minecraft 1.21.1 player ha
 - [x] The Fabric mod compiles against the pinned APIs; Java helper tests pass.
 - [x] Explicit agent inventory/home criteria are checked independently of model explanations.
 - [x] Packaging verifies exact jar names, manifest hashes, and pinned third-party hashes; it includes the project license.
-- [x] CI runs the simulation and produces a verified installation artifact.
+- [x] CI is configured to run the simulation and produce a verified installation artifact.
 
 The CI workflow is configured, but its remote execution on the final release commit must also pass. Automated checks and simulated/mocked model replies do not substitute for the live checks below.
 
@@ -45,4 +45,4 @@ After the live checks and remote CI pass, tag the verified commit as `v0.1.0` an
 
 ## Planning estimate
 
-The code and packaging can be prepared independently of live account access. The remaining critical path is one or two focused live-testing sessions plus any fixes they uncover. This is a conditional estimate, not a scheduled release date; real-model behavior and authenticated handoff have not yet been verified.
+The code and packaging can be prepared independently of live account access. The remaining critical path is one or two focused live-testing sessions plus any fixes they uncover. This is a conditional estimate, not a scheduled release date; real-model behavior and authenticated handoff have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.

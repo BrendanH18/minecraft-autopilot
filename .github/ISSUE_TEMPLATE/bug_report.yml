@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible problem with the harness, mod, or documentation.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Review docs/USAGE.md for troubleshooting first. Redact bearer tokens, bridge discovery files, account identifiers, and authentication caches from all reports.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions and backend
+      description: Commit or release, OS, Node/Java versions, Minecraft version, Fabric or bot, and model if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include exact commands and relevant world/server conditions. Remove secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+      description: Include whether manual control was restored and any inventory progress.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs or diagnostics
+      description: Paste relevant errors or doctor output after reviewing it for private information.
+      render: text
