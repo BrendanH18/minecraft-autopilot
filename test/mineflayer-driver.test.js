@@ -116,3 +116,85 @@ test('collection walks back to its start, digging out of a pit only as a fallbac
   assert.ok(trips.slice(0, -1).every(trip => trip.canDig === false), 'only the fallback return may dig');
   assert.equal(movements, driver.movements);
 });
+
+function collectionFixture(t, { cannotReturn = false, cancelOnDig = false } = {}) {
+  const bot = new EventEmitter();
+  const registry = minecraftData('1.21.1');
+  const position = new Vec3(3, 63, 0);
+  const controller = new AbortController();
+  let collected = 0;
+  let movements;
+  const trips = [];
+  Object.assign(bot, {
+    registry, entity: { position: new Vec3(0, 64, 0) }, entities: {},
+    username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
+    health: 20, food: 20,
+    inventory: { items: () => collected ? [{ name: 'sand', count: collected, slot: 36 }] : [] },
+    pathfinder: {
+      setMovements(value) { movements = value; }, setGoal() {}, bestHarvestTool: () => null,
+      goto: async goal => {
+        trips.push({ y: goal.y, canDig: movements.canDig });
+        if (goal.y === 64 && (cannotReturn || !movements.canDig)) throw new Error('No path home');
+        bot.entity.position = new Vec3(goal.x, goal.y, goal.z);
+      },
+    },
+    findBlocks: () => collected ? [] : [position],
+    blockAt: () => ({ type: registry.blocksByName.sand.id, name: 'sand' }),
+    canDigBlock: () => true,
+    dig: async () => {
+      collected++;
+      if (cancelOnDig) controller.abort(new Error('Player took control.'));
+    },
+    clearControlStates() {}, deactivateItem() {}, stopDigging() {},
+    quit: () => bot.emit('end', 'Closed'),
+  });
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  t.after(() => driver.close());
+  return { driver, bot, controller, trips, movements: () => movements };
+}
+
+test('partial collection returns from the pit but still reports the unmet quota', async t => {
+  const { driver, bot, controller, trips, movements } = collectionFixture(t);
+  await assert.rejects(driver.execute({ type: 'collect', block: 'minecraft:sand', count: 2 }, {
+    signal: controller.signal, onProgress() {},
+  }), /No reachable.*Inventory: 1\/2.*Returned to the starting point/);
+  assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
+  assert.deepEqual(trips.slice(-2), [{ y: 64, canDig: false }, { y: 64, canDig: true }]);
+  assert.equal(movements(), driver.movements);
+});
+
+test('a met collection quota with an unreachable return trip is a failed job', async t => {
+  const { driver, trips, movements } = collectionFixture(t, { cannotReturn: true });
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  harness.start(owner, { type: 'collect', block: 'sand', count: 1 });
+  await harness.task;
+  assert.equal(harness.job.status, 'failed');
+  assert.match(harness.job.message, /Collected requested items.*1\/1.*could not return/);
+  assert.deepEqual(trips.slice(-2), [{ y: 64, canDig: false }, { y: 64, canDig: true }]);
+  assert.equal(movements(), driver.movements);
+});
+
+test('handoff during collection never starts a recovery trip', async t => {
+  const { driver, controller, trips } = collectionFixture(t, { cancelOnDig: true });
+  await assert.rejects(driver.execute({ type: 'collect', block: 'sand', count: 2 }, {
+    signal: controller.signal, onProgress() {},
+  }), /Player took control/);
+  assert.ok(trips.every(trip => trip.y !== 64));
+  assert.equal(driver.activeAction, false);
+});
+
+test('cancellation during a return trip prevents the digging fallback', async t => {
+  const { driver, controller, bot } = collectionFixture(t);
+  bot.entity.position = new Vec3(3, 63, 0);
+  let trips = 0;
+  bot.pathfinder.goto = async () => {
+    trips++;
+    controller.abort(new Error('Player took control.'));
+    throw controller.signal.reason;
+  };
+  await assert.rejects(driver.returnFromCollection(new Vec3(0, 64, 0), controller.signal), /Player took control/);
+  assert.equal(trips, 1);
+});

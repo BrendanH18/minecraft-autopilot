@@ -60,7 +60,7 @@ Single-player automation needs the game running, unpaused, and the computer awak
 ## Validation
 
 **Automated tests:**
-- 31 Node tests: bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, Mineflayer driver races, and a Minecraft protocol fixture.
+- 35 Node tests: bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, Mineflayer driver races, partial collection recovery and failed returns, and a Minecraft protocol fixture.
 - Java tests: leases, bridge ownership, and runtime paths.
 - `npm run build:mod` compiles against the pinned Minecraft, Fabric, and Baritone APIs.
 
@@ -109,8 +109,9 @@ These are behaviors found during live testing that the code depends on:
 - **Focus pause.** Minecraft opens the pause menu whenever its window loses focus, for example when you switch to a terminal. The state reports `focusPaused`, and acquire closes only that menu.
 - **Collection pits.** Mining often digs downward, and plain navigation never breaks blocks, so `collect` finishes by returning to its starting point with breaking allowed.
   - Fabric: Baritone, limited to 60 s.
-  - Bot: walks first, then digs as a fallback, because mineflayer-pathfinder replans after every broken block.
+  - Bot: walks for up to 20 s, then digs as a fallback within a 60 s return budget, because mineflayer-pathfinder replans after every broken block.
   - A low-health retreat during collection may also break blocks.
+  - Exhausting reachable blocks triggers a return attempt even when the quota is unmet. Failed returns report a failed job; inventory progress is preserved. Manual handoff never starts a return trip.
 - **Survival order.** Both backends eat before retreating, because health cannot regenerate while hungry.
 - **Mineflayer details:**
   - `consume` can take up to 2.5 s to settle after cancellation. The adapter waits up to 10 s for `stopping` to clear before takeover.
@@ -169,6 +170,10 @@ Installed game profiles use their own `config/minecraft-agent/` directory. `atta
 
 ## Suggested next work
 
-- Validate Microsoft-authenticated multiplayer handoff and a normal launcher profile.
-- Test a real local model through Ollama, or another agent through MCP.
-- Validate threats, dimension changes, and cobblestone collection with a pickaxe.
+The next milestone is **validated everyday use**. Complete these checks in order and record the Minecraft/backend/model versions and observed results here:
+
+1. **Normal launcher installation and a real agent task.** Install the three packaged jars in a normal Fabric 1.21.1 profile. Save a home, record starting inventory, then ask a real Ollama or MCP agent to collect eight additional oak logs and return home. Verify the inventory increase, final position, and released control independently of the agent's explanation. Repeat with partial collection, an unreachable return, and F8 during inference; a failed return must not report success, and no delayed action may resume after handoff.
+2. **Microsoft-authenticated multiplayer handoff.** Record UUID and inventory in the normal client, disconnect, connect the bot, perform a bounded task, disconnect the bot, then reconnect the normal client. Verify the same UUID and server-side inventory, and confirm both clients were never connected simultaneously.
+3. **Remaining gameplay coverage.** Validate cobblestone collection with a pickaxe, hostile-mob observations, and release on dimension change. Include partial collection recovery in a pit for both backends. The collection recovery changes have Node regression coverage but still need fresh live gameplay validation.
+
+CI runs the simulation smoke check and packages the installation bundle after building the mod. Successful mod jobs upload `dist/` as the `minecraft-agent-installation` artifact.

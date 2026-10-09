@@ -57,6 +57,7 @@ public final class AgentController {
     private BlockPos destination;
     private BlockPos collectStart;
     private boolean returning;
+    private String collectionFailure;
     private long returnStarted;
     private String worldIdentity;
     private boolean previousPauseOnLostFocus;
@@ -157,6 +158,7 @@ public final class AgentController {
         jobDeadline = jobStarted + (type.equals("wait") ? (long) (wait * 1e9) + 5_000_000_000L : 180_000_000_000L);
         destination = goal;
         returning = false;
+        collectionFailure = null;
         try {
             switch (type) {
                 case "set_home": {
@@ -247,7 +249,8 @@ public final class AgentController {
         }
         if (!running()) return;
         if (now > jobDeadline) {
-            if (returning) finish("completed", "Collected requested items, but could not return to the starting point in time.");
+            if (returning) finishCollectionReturn(false, "Could not return to the starting point in time.");
+            else if (collecting()) beginReturn(now, "Collection timed out before reaching the requested quota.");
             else finish("failed", "Action timed out.");
             return;
         }
@@ -260,15 +263,15 @@ public final class AgentController {
                 break;
             case "collect": {
                 if (returning) {
-                    if (nearDestination()) finish("completed", "Collected requested items and returned to the starting point.");
+                    if (nearDestination()) finishCollectionReturn(true, "Returned to the starting point.");
                     else if (now - returnStarted > 3_000_000_000L && !baritone().getCustomGoalProcess().isActive() && !baritone().getPathingBehavior().isPathing())
-                        finish("completed", "Collected requested items, but could not return to the starting point.");
+                        finishCollectionReturn(false, "Could not return to the starting point.");
                     break;
                 }
                 int have = inventoryCount(COLLECT_DROPS.get(string(action, "block")));
                 job.addProperty("message", "Inventory: " + have + "/" + targetCount);
-                if (have >= targetCount) beginReturn(now);
-                else if (now - jobStarted > 3_000_000_000L && !baritone().getMineProcess().isActive()) finish("failed", "No reachable matching blocks found.");
+                if (have >= targetCount) beginReturn(now, null);
+                else if (now - jobStarted > 3_000_000_000L && !baritone().getMineProcess().isActive()) beginReturn(now, "No reachable matching blocks found.");
                 break;
             }
             case "wait": if (now - jobStarted >= action.get("seconds").getAsDouble() * 1e9) finish("completed", "Wait finished."); break;
@@ -316,14 +319,21 @@ public final class AgentController {
     }
 
     /** Mining often digs downward; walk back to the start, breaking blocks if needed, so later navigation is not trapped. */
-    private void beginReturn(long now) {
+    private void beginReturn(long now, String failure) {
         stopMotion();
+        collectionFailure = failure;
         returning = true; returnStarted = now; jobDeadline = now + 60_000_000_000L;
         destination = collectStart;
-        if (nearDestination()) { finish("completed", "Collected requested items."); return; }
-        job.addProperty("message", "Collected requested items; returning to where collection started.");
+        if (nearDestination()) { finishCollectionReturn(true, "At the starting point."); return; }
+        job.addProperty("message", (failure == null ? "Collected requested items" : "Collection failed") + "; returning to where collection started.");
         BaritoneAPI.getSettings().allowBreak.value = true;
         baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(collectStart, 1));
+    }
+
+    private void finishCollectionReturn(boolean returned, String message) {
+        int have = inventoryCount(COLLECT_DROPS.get(string(action, "block")));
+        String outcome = collectionFailure == null ? "Collected requested items." : collectionFailure;
+        finish(returned && collectionFailure == null ? "completed" : "failed", outcome + " Inventory: " + have + "/" + targetCount + ". " + message);
     }
 
     private boolean collecting() { return running() && string(action, "type").equals("collect"); }

@@ -19,6 +19,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - run: npm start -- demo --smoke
 
   mod:
     runs-on: ubuntu-latest
@@ -34,3 +35,9 @@ jobs:
       # CI opts into downloads explicitly; local builds stay offline by default.
       - run: node scripts/setup-mod.js --allow-downloads
       - run: node scripts/gradle.js build --allow-downloads
+      - run: node scripts/package-mod.js --allow-downloads
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-agent-installation
+          path: dist/
+          if-no-files-found: error

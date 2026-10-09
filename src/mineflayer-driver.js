@@ -232,6 +232,19 @@ export class MineflayerDriver {
     finally { if (movements !== this.movements) this.bot.pathfinder.setMovements(this.movements); }
   }
 
+  async returnFromCollection(start, signal) {
+    signal.throwIfAborted();
+    if (start.distanceTo(this.bot.entity.position) <= 2) return true;
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
+    // Reserve time for digging out if walking stalls instead of failing promptly.
+    for (const movements of [this.movements, this.collectMovements]) {
+      const attempt = movements === this.movements ? AbortSignal.any([bounded, AbortSignal.timeout(20_000)]) : bounded;
+      try { await this.goTo(start, attempt, movements); return true; }
+      catch { signal.throwIfAborted(); if (bounded.aborted) break; }
+    }
+    return false;
+  }
+
   async perform(action, { signal, onProgress }) {
     switch (action.type) {
       case 'set_home':
@@ -254,37 +267,41 @@ export class MineflayerDriver {
         const target = count() + action.count;
         const start = this.bot.entity.position.clone();
         const failed = new Set();
-        while (count() < target) {
+        let collectionError;
+        try {
+          while (count() < target) {
+            signal.throwIfAborted();
+            const positions = this.bot.findBlocks({ matching: blockId, maxDistance: 48, count: 64 });
+            positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
+            const position = positions.find(pos => !failed.has(pos.toString()));
+            if (!position) throw new Error('No reachable matching blocks remain in loaded chunks.');
+            // A single block can stall the pathfinder for a minute or more; skip it and try another.
+            const step = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
+            try {
+              await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), step);
+              const block = this.bot.blockAt(position);
+              if (!block || block.type !== blockId) continue;
+              const tool = this.bot.pathfinder.bestHarvestTool(block);
+              if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), step);
+              if (!this.bot.canDigBlock(block)) { failed.add(position.toString()); continue; }
+              await this.abortable(() => this.bot.dig(block), step);
+              await this.goTo(position, step);
+              await delay(750, undefined, { signal: step });
+              onProgress(`Inventory: ${count()}/${target}`);
+            } catch (error) { if (signal.aborted) throw signal.reason; failed.add(position.toString()); }
+          }
+        } catch (error) {
+          // Handoff, death, survival interrupts, and deadlines must never start a recovery trip.
           signal.throwIfAborted();
-          const positions = this.bot.findBlocks({ matching: blockId, maxDistance: 48, count: 64 });
-          positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
-          const position = positions.find(pos => !failed.has(pos.toString()));
-          if (!position) throw new Error('No reachable matching blocks remain in loaded chunks.');
-          // A single block can stall the pathfinder for a minute or more; skip it and try another.
-          const step = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
-          try {
-            await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), step);
-            const block = this.bot.blockAt(position);
-            if (!block || block.type !== blockId) continue;
-            const tool = this.bot.pathfinder.bestHarvestTool(block);
-            if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), step);
-            if (!this.bot.canDigBlock(block)) { failed.add(position.toString()); continue; }
-            await this.abortable(() => this.bot.dig(block), step);
-            await this.goTo(position, step);
-            await delay(750, undefined, { signal: step });
-            onProgress(`Inventory: ${count()}/${target}`);
-          } catch (error) { if (signal.aborted) throw signal.reason; failed.add(position.toString()); }
+          collectionError = error;
         }
         // Mining often digs downward; return so later navigation, which cannot dig, is not trapped in a pit.
-        if (start.distanceTo(this.bot.entity.position) <= 2) return 'Collected requested items.';
-        onProgress('Collected requested items; returning to where collection started.');
-        // Walking first is fast; digging is the fallback for pits because the pathfinder replans after every broken block.
-        const returnSignal = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
-        for (const movements of [this.movements, this.collectMovements]) {
-          try { await this.goTo(start, returnSignal, movements); return 'Collected requested items and returned to the starting point.'; }
-          catch (error) { if (signal.aborted) throw signal.reason; if (returnSignal.aborted) break; }
-        }
-        return 'Collected requested items, but could not return to the starting point.';
+        const moved = start.distanceTo(this.bot.entity.position) > 2;
+        if (moved) onProgress(`${collectionError ? 'Collection failed' : 'Collected requested items'}; returning to where collection started.`);
+        const returned = await this.returnFromCollection(start, signal);
+        if (collectionError) throw new Error(`${collectionError.message} Inventory: ${count()}/${target}. ${returned ? 'Returned to the starting point.' : 'Could not return to the starting point.'}`);
+        if (!returned) throw new Error(`Collected requested items (inventory: ${count()}/${target}), but could not return to the starting point.`);
+        return moved ? 'Collected requested items and returned to the starting point.' : 'Collected requested items.';
       }
     }
   }
