@@ -10,6 +10,7 @@ import { attachBridge, cleanupRuntime, assertBridgeNotRunning } from './runtime.
 import { Harness } from './harness.js';
 import { startBridge } from './bridge-server.js';
 import { DemoDriver } from './demo-driver.js';
+import { parseCollectionCriterion } from './objective.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -102,11 +103,18 @@ program.command('agent').description('Run a bounded natural-language task using 
   .option('--ollama <url>', 'local Ollama URL', 'http://127.0.0.1:11434')
   .option('--steps <n>', 'maximum model decisions', positiveInteger, 30)
   .option('--minutes <n>', 'maximum runtime', positiveInteger, 15)
+  .option('--verify-collect <block:count>', 'verify additional collected items, for example oak_log:8', parseCollectionCriterion)
+  .option('--verify-home', 'verify return within two blocks of the home saved before the task')
   .action(async (goal, options) => {
     if (options.steps > 1000 || options.minutes > 1440) throw new Error('Limits must be <= 1000 steps and <= 1440 minutes.');
     const { runAgent } = await import('./agent.js');
     const adapter = await connect();
-    try { print(await runAgent(adapter, goal, { model: options.model, ollamaUrl: options.ollama, maxSteps: options.steps, minutes: options.minutes, signal: abortController.signal, log })); }
+    try {
+      const result = await runAgent(adapter, goal, { model: options.model, ollamaUrl: options.ollama, maxSteps: options.steps, minutes: options.minutes,
+        criteria: { collect: options.verifyCollect, returnHome: options.verifyHome }, signal: abortController.signal, log });
+      print(result);
+      if (result.status === 'criteria_unmet' || result.status === 'step_limit' && (options.verifyCollect || options.verifyHome)) process.exitCode = 2;
+    }
     finally { await adapter.close(); }
   });
 

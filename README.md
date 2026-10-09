@@ -103,6 +103,14 @@ This works with either the Fabric bridge, the standalone server bridge, or the d
 
 The loop checks ownership again after inference, stops after its step/time limits or three consecutive action failures, and always releases control when it exits. A `model_finished` result records the model's explanation; it is not an independent guarantee that the goal was achieved. Model requests are restricted to localhost.
 
+For an independently checked collection task, add explicit criteria:
+
+```sh
+npm start -- agent "Collect eight additional oak logs and return home" --model YOUR_LOCAL_MODEL --verify-collect oak_log:8 --verify-home
+```
+
+These checks compare the final inventory to the initial inventory and require the same player and dimension. `--verify-home` requires a saved home before starting and checks the original waypoint within two blocks, even if the model later replaces it. When the model stops, the result is `criteria_met` or `criteria_unmet`, with observed counts and distance. Only these explicit criteria are verified; other requirements in the goal text still need review. An unmet criterion or a step limit with verification enabled exits with code 2. Invalid input, cancellation, and other errors exit with code 1.
+
 ## Connect another local agent through MCP
 
 Start Minecraft with the mod, a server bot, or the demo first. Add this stdio server to your agent's MCP configuration, replacing the absolute path:

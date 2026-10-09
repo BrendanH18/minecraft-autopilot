@@ -60,7 +60,7 @@ Single-player automation needs the game running, unpaused, and the computer awak
 ## Validation
 
 **Automated tests:**
-- 35 Node tests: bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, Mineflayer driver races, partial collection recovery and failed returns, and a Minecraft protocol fixture.
+- Node tests cover bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, independent inventory/home criteria, Mineflayer driver races, partial collection recovery and failed returns, and a Minecraft protocol fixture. Run `npm test` for the current test count.
 - Java tests: leases, bridge ownership, and runtime paths.
 - `npm run build:mod` compiles against the pinned Minecraft, Fabric, and Baritone APIs.
 
@@ -172,7 +172,7 @@ Installed game profiles use their own `config/minecraft-agent/` directory. `atta
 
 The next milestone is **validated everyday use**. Complete these checks in order and record the Minecraft/backend/model versions and observed results here:
 
-1. **Normal launcher installation and a real agent task.** Install the three packaged jars in a normal Fabric 1.21.1 profile. Save a home, record starting inventory, then ask a real Ollama or MCP agent to collect eight additional oak logs and return home. Verify the inventory increase, final position, and released control independently of the agent's explanation. Repeat with partial collection, an unreachable return, and F8 during inference; a failed return must not report success, and no delayed action may resume after handoff.
+1. **Normal launcher installation and a real agent task.** Install the three packaged jars in a normal Fabric 1.21.1 profile. Save a home, record starting inventory, then ask a real Ollama or MCP agent to collect eight additional oak logs and return home. With Ollama, use `--verify-collect oak_log:8 --verify-home` to check the inventory increase and original home automatically. Verify released control independently of the agent's explanation. Repeat with partial collection, an unreachable return, and F8 during inference; a failed return must not report success, and no delayed action may resume after handoff.
 2. **Microsoft-authenticated multiplayer handoff.** Record UUID and inventory in the normal client, disconnect, connect the bot, perform a bounded task, disconnect the bot, then reconnect the normal client. Verify the same UUID and server-side inventory, and confirm both clients were never connected simultaneously.
 3. **Remaining gameplay coverage.** Validate cobblestone collection with a pickaxe, hostile-mob observations, and release on dimension change. Include partial collection recovery in a pit for both backends. The collection recovery changes have Node regression coverage but still need fresh live gameplay validation.
 
