@@ -263,6 +263,11 @@ export class MineflayerDriver {
         if (!COLLECT_BLOCKS.has(name)) throw new Error(`Supported collection targets: ${[...COLLECT_BLOCKS].join(', ')}`);
         const blockId = this.bot.registry.blocksByName[name]?.id;
         if (blockId === undefined) throw new Error(`Block ${name} is unavailable in this Minecraft version.`);
+        const harvestTools = this.bot.registry.blocksByName[name].harvestTools;
+        const requireTool = () => {
+          if (harvestTools && !this.bot.inventory.items().some(item => harvestTools[item.type])) throw new Error(`A suitable harvesting tool is required to collect ${name}; cobblestone needs a pickaxe.`);
+        };
+        requireTool();
         const count = () => this.bot.inventory.items().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0);
         const target = count() + action.count;
         const start = this.bot.entity.position.clone();
@@ -271,6 +276,7 @@ export class MineflayerDriver {
         try {
           while (count() < target) {
             signal.throwIfAborted();
+            requireTool();
             const positions = this.bot.findBlocks({ matching: blockId, maxDistance: 48, count: 64 });
             positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
             const position = positions.find(pos => !failed.has(pos.toString()));

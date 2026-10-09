@@ -18,6 +18,7 @@ import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
@@ -137,6 +138,7 @@ public final class AgentController {
             case "collect": {
                 block = string(requested, "block").replaceFirst("^minecraft:", "");
                 if (!COLLECT_DROPS.containsKey(block)) throw new IllegalArgumentException("Supported collection targets: " + COLLECT_DROPS.keySet());
+                if (block.equals("cobblestone") && !hasPickaxe()) throw new IllegalStateException("A pickaxe is required to collect cobblestone.");
                 if (!baritoneDropsReady()) throw new IllegalStateException("Baritone is still loading block data. Try again in a few seconds.");
                 double quantity = number(requested, "count", 1, 64);
                 if (quantity != Math.floor(quantity)) throw new IllegalArgumentException("count must be an integer.");
@@ -271,6 +273,7 @@ public final class AgentController {
                 int have = inventoryCount(COLLECT_DROPS.get(string(action, "block")));
                 job.addProperty("message", "Inventory: " + have + "/" + targetCount);
                 if (have >= targetCount) beginReturn(now, null);
+                else if (string(action, "block").equals("cobblestone") && !hasPickaxe()) beginReturn(now, "Collection stopped because no pickaxe remains.");
                 else if (now - jobStarted > 3_000_000_000L && !baritone().getMineProcess().isActive()) beginReturn(now, "No reachable matching blocks found.");
                 break;
             }
@@ -384,6 +387,13 @@ public final class AgentController {
     private boolean nearDestination() { return destination != null && destination.isWithinDistance(client.player.getPos(), 1.75); }
     private IBaritone baritone() { return BaritoneAPI.getProvider().getPrimaryBaritone(); }
     private int inventoryCountOfSlot(int slot) { return client.player.getInventory().getStack(slot).getCount(); }
+    private boolean hasPickaxe() {
+        for (int slot = 0; slot < 36; slot++) {
+            ItemStack stack = client.player.getInventory().getStack(slot);
+            if (!stack.isEmpty() && stack.isIn(ItemTags.PICKAXES)) return true;
+        }
+        return false;
+    }
     private int inventoryCount(String item) {
         Item target = Registries.ITEM.get(Identifier.of("minecraft", item));
         int count = 0;

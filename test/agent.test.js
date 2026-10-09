@@ -110,3 +110,23 @@ test('agent verifies additional items and return home through the real simulated
   assert.equal(result.verification.checks.home.distance, 0);
   assert.equal((await adapter.observe()).mode, 'manual');
 });
+
+test('an already cancelled planner never acquires control', async () => {
+  const adapter = fakeAdapter();
+  const controller = new AbortController();
+  controller.abort(new Error('Stopped by user.'));
+  await assert.rejects(runAgent(adapter, 'Anything', { model: 'test', signal: controller.signal }), /Stopped by user/);
+  assert.equal(adapter.state.mode, 'manual');
+  assert.equal(adapter.releases, 0);
+});
+
+test('cancellation during inference cannot return a late model success', async () => {
+  const adapter = fakeAdapter();
+  const controller = new AbortController();
+  await assert.rejects(runAgent(adapter, 'Anything', { model: 'test', signal: controller.signal, log() {}, fetchImpl: async () => {
+    controller.abort(new Error('Stopped by user.'));
+    return reply({ type: 'done', reason: 'All done.' });
+  } }), /Stopped by user/);
+  assert.equal(adapter.releases, 1);
+  assert.deepEqual(adapter.actions, []);
+});

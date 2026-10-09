@@ -39,8 +39,10 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname) || !['http:', 'https:'].includes(endpoint.protocol)) throw new Error('Ollama must run on localhost.');
   const deadline = AbortSignal.timeout(minutes * 60_000);
   const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  bounded.throwIfAborted();
   const initialState = await adapter.observe();
   const objective = createObjective(criteria, initialState);
+  bounded.throwIfAborted();
   await adapter.acquire();
   const history = [];
   let failures = 0;
@@ -65,6 +67,7 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
       catch { throw new Error('The model returned an invalid action. No command was executed.'); }
       // The model may have taken minutes. Recheck ownership before dispatching.
       const currentState = await adapter.observe();
+      bounded.throwIfAborted();
       if (currentState.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player while the model was thinking.');
       log(`Step ${step + 1}: ${JSON.stringify(decision)}`);
       if (decision.type === 'done') {

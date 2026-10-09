@@ -117,21 +117,23 @@ test('collection walks back to its start, digging out of a pit only as a fallbac
   assert.equal(movements, driver.movements);
 });
 
-function collectionFixture(t, { cannotReturn = false, cancelOnDig = false } = {}) {
+function collectionFixture(t, { cannotReturn = false, cancelOnDig = false, material = 'sand', withPickaxe = false, breakPickaxe = false } = {}) {
   const bot = new EventEmitter();
   const registry = minecraftData('1.21.1');
   const position = new Vec3(3, 63, 0);
   const controller = new AbortController();
   let collected = 0;
   let movements;
+  let toolBroken = false;
+  const pickaxe = { name: 'stone_pickaxe', type: registry.itemsByName.stone_pickaxe.id, count: 1, slot: 37 };
   const trips = [];
   Object.assign(bot, {
     registry, entity: { position: new Vec3(0, 64, 0) }, entities: {},
     username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
     health: 20, food: 20,
-    inventory: { items: () => collected ? [{ name: 'sand', count: collected, slot: 36 }] : [] },
+    inventory: { items: () => [...(collected ? [{ name: material, count: collected, slot: 36 }] : []), ...(withPickaxe && !toolBroken ? [pickaxe] : [])] },
     pathfinder: {
-      setMovements(value) { movements = value; }, setGoal() {}, bestHarvestTool: () => null,
+      setMovements(value) { movements = value; }, setGoal() {}, bestHarvestTool: () => withPickaxe && !toolBroken ? pickaxe : null,
       goto: async goal => {
         trips.push({ y: goal.y, canDig: movements.canDig });
         if (goal.y === 64 && (cannotReturn || !movements.canDig)) throw new Error('No path home');
@@ -139,13 +141,14 @@ function collectionFixture(t, { cannotReturn = false, cancelOnDig = false } = {}
       },
     },
     findBlocks: () => collected ? [] : [position],
-    blockAt: () => ({ type: registry.blocksByName.sand.id, name: 'sand' }),
+    blockAt: () => ({ type: registry.blocksByName[material].id, name: material }),
     canDigBlock: () => true,
     dig: async () => {
       collected++;
+      if (breakPickaxe) toolBroken = true;
       if (cancelOnDig) controller.abort(new Error('Player took control.'));
     },
-    clearControlStates() {}, deactivateItem() {}, stopDigging() {},
+    equip: async () => {}, clearControlStates() {}, deactivateItem() {}, stopDigging() {},
     quit: () => bot.emit('end', 'Closed'),
   });
   const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
@@ -197,4 +200,25 @@ test('cancellation during a return trip prevents the digging fallback', async t 
   };
   await assert.rejects(driver.returnFromCollection(new Vec3(0, 64, 0), controller.signal), /Player took control/);
   assert.equal(trips, 1);
+});
+
+test('cobblestone without a pickaxe fails before navigating or breaking any blocks', async t => {
+  const { driver, bot, controller, trips } = collectionFixture(t, { material: 'cobblestone' });
+  let dug = false;
+  bot.dig = async () => { dug = true; };
+  bot.inventory.items = () => [{ name: 'stone_axe', type: bot.registry.itemsByName.stone_axe.id, count: 1 }];
+  await assert.rejects(driver.execute({ type: 'collect', block: 'cobblestone', count: 1 }, {
+    signal: controller.signal, onProgress() {},
+  }), /pickaxe/);
+  assert.equal(dug, false);
+  assert.equal(trips.length, 0);
+});
+
+test('a broken pickaxe stops partial cobblestone collection and returns from the pit', async t => {
+  const { driver, bot, controller } = collectionFixture(t, { material: 'cobblestone', withPickaxe: true, breakPickaxe: true });
+  await assert.rejects(driver.execute({ type: 'collect', block: 'cobblestone', count: 2 }, {
+    signal: controller.signal, onProgress() {},
+  }), /pickaxe.*Inventory: 1\/2.*Returned to the starting point/);
+  assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
+  assert.equal(bot.inventory.items().find(item => item.name === 'cobblestone').count, 1);
 });
