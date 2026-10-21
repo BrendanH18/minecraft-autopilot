@@ -16,12 +16,12 @@ The CI workflow is configured, but its remote execution on the final release com
 ## Live checks required before shipping
 
 - [ ] Install the packaged jars in a normal Fabric launcher profile, enter a real world, attach the CLI, and observe the existing character.
-- [ ] Run collection with partial progress and recovery from a pit on the latest Fabric and bot code. Verify an unreachable return is reported as failed and inventory progress remains observable.
-- [ ] Run a real installed Ollama model with `--verify-collect oak_log:8 --verify-home`. Record the model name/version, initial inventory, result, and final manual control.
+- [ ] Run collection with partial progress and recovery from a pit on the latest Fabric and bot code. Verify an unreachable return is reported as failed and inventory progress remains observable. *(Bot: partial progress with a return and an unreachable home both verified on 20 October 2026. Fabric and an actual pit are still pending.)*
+- [x] Run a real installed Ollama model with `--verify-collect oak_log:8 --verify-home`. Record the model name/version, initial inventory, result, and final manual control. *(`qwen3.5:4b-mlx` with the Mineflayer bot, 20 October 2026; see [DEVELOPMENT.md](DEVELOPMENT.md#validation).)*
 - [ ] Use a real MCP agent to observe, explicitly acquire, perform an action, and stop.
 - [ ] Press F8 during inference/action; close the menu afterward and verify no command resumes. Check emergency stop and lease expiry with the packaged mod.
 - [ ] Validate authenticated client → bot → client handoff. Check the UUID and inventory at each stage; never connect both as the same account simultaneously.
-- [ ] Validate cobblestone with a pickaxe, hostile observations, and release on dimension change.
+- [ ] Validate cobblestone with a pickaxe, hostile observations, and release on dimension change. *(Bot verified on 20 October 2026; Fabric still pending.)*
 
 Earlier offline gameplay results are recorded in [DEVELOPMENT.md](DEVELOPMENT.md#validation). These boxes remain open until the latest release candidate has been observed working. Record failures and fix blocking regressions before marking them complete. Testing authenticated play requires the account owner; testing a normal launcher and F8 requires a person at the keyboard.
 

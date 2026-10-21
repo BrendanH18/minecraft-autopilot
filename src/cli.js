@@ -104,13 +104,15 @@ program.command('agent').description('Run a bounded natural-language task using 
   .option('--minutes <n>', 'maximum runtime', positiveInteger, 15)
   .option('--verify-collect <block:count>', 'verify additional collected items, for example oak_log:8', parseCollectionCriterion)
   .option('--verify-home', 'verify return within two blocks of the home saved before the task')
+  .option('--model-timeout <seconds>', 'maximum seconds to wait for each model decision', positiveInteger, 120)
+  .option('--no-thinking', 'ask thinking models to answer without reasoning first (much faster)')
   .action(async (goal, options) => {
-    if (options.steps > 1000 || options.minutes > 1440) throw new Error('Limits must be <= 1000 steps and <= 1440 minutes.');
+    if (options.steps > 1000 || options.minutes > 1440 || options.modelTimeout > 3600) throw new Error('Limits must be <= 1000 steps, <= 1440 minutes, and a model timeout <= 3600 seconds.');
     const { runAgent } = await import('./agent.js');
     const adapter = await connect();
     try {
       const result = await runAgent(adapter, goal, { model: options.model, ollamaUrl: options.ollama, maxSteps: options.steps, minutes: options.minutes,
-        criteria: { collect: options.verifyCollect, returnHome: options.verifyHome }, signal: abortController.signal, log });
+        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, returnHome: options.verifyHome }, signal: abortController.signal, log });
       print(result);
       if (result.status === 'criteria_unmet' || result.status === 'step_limit' && (options.verifyCollect || options.verifyHome)) process.exitCode = 2;
     }
