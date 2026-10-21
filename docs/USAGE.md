@@ -103,7 +103,7 @@ node src/cli.js agent "Collect eight additional oak logs and return home" \
   > .runtime/task-result.json
 ```
 
-In live testing, `qwen3.5:4b` completed this task and `granite4.2:3b` did not (see [validation](DEVELOPMENT.md#validation)). Small models can repeat an action that changed nothing; the planner refuses an exact repeat until the model chooses a different action. Automated tests use mocked model responses; a successful simulation is not a real Ollama gameplay validation.
+In live testing, `qwen3.5:4b-mlx` completed this task and `granite4.2:3b` did not (see [validation](DEVELOPMENT.md#validation)). Small models can repeat an action that changed nothing; the planner refuses an exact repeat until the model chooses a different action. Automated tests use mocked model responses; a successful simulation is not a real Ollama gameplay validation.
 
 ## Connect an MCP agent
 

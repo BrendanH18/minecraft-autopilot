@@ -97,14 +97,14 @@ These are historical observations, not acceptance results for the latest release
 
 | Model | Backend | Thinking | Result |
 | --- | --- | --- | --- |
-| qwen3.5:4b | Simulation | Off | `criteria_met`, 4 decisions, 11 s |
-| qwen3.5:4b | Simulation | On | `criteria_met`, 4 decisions, 60 s |
-| qwen3.5:4b | Bot | Off | `criteria_met`, 3 decisions, 127 s (9 → 19 logs, 1.0 block from home) |
-| qwen3.5:4b | Bot | On | `criteria_met`, 4 decisions, 370 s (28 → 42 logs). The first `collect` hit the 180 s job limit, then a second `collect` finished. |
+| qwen3.5:4b-mlx | Simulation | Off | `criteria_met`, 4 decisions, 11 s |
+| qwen3.5:4b-mlx | Simulation | On | `criteria_met`, 4 decisions, 60 s |
+| qwen3.5:4b-mlx | Bot | Off | `criteria_met`, 3 decisions, 127 s (9 → 19 logs, 1.0 block from home) |
+| qwen3.5:4b-mlx | Bot | On | `criteria_met`, 4 decisions, 370 s (28 → 42 logs). The first `collect` hit the 180 s job limit, then a second `collect` finished. |
 | granite4.2:3b | Simulation | Off/On | Exit 2. It answered `done` with a plan, then looped on `goto`. Its `set_home` attempt was refused. |
 | granite4.2:3b | Bot | Off | Exit 2 (`step_limit`). It never chose `collect` and repeated `goto` to its own position until the step limit. |
 
-Use qwen3.5:4b or a stronger model; granite4.2:3b does not follow this action format. `--no-thinking` was 5× faster for qwen with the same result.
+Use `qwen3.5:4b-mlx` or a stronger model; granite4.2:3b does not follow this action format. `--no-thinking` was 5× faster for qwen with the same result.
 
 These runs found and fixed:
 - **Model safeguards.** Models answering `done` with a plan, a planner `set_home` overwriting the player's home, and repeated no-op actions.

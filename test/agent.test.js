@@ -192,7 +192,7 @@ test('a slow model decision fails clearly without executing anything', async () 
   await assert.rejects(runAgent(adapter, 'Anything', { model: 'test', modelTimeout: 0.05, log() {}, fetchImpl: (url, request) => new Promise((resolve, reject) => {
     const socket = setInterval(() => {}, 1000);
     request.signal.addEventListener('abort', () => { clearInterval(socket); reject(request.signal.reason); });
-  }) }), /did not answer within 0.05 seconds/);
+  }) }), /did not answer within 0.05 seconds, so this decision was not executed; earlier actions/);
   assert.deepEqual(adapter.actions, []);
   assert.equal(adapter.releases, 1);
 });

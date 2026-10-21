@@ -256,6 +256,37 @@ test('a pathfinder stuck on a block edge hops free, and repeated stalls fail pro
   assert.equal(trips, 3);
 });
 
+test('stalls at separate places along a route each get their own hops', async t => {
+  const { driver, bot, controller } = collectionFixture(t);
+  bot.setControlState = () => {};
+  bot.clearControlStates = () => {};
+  let trips = 0;
+  // Each attempt advances 5 blocks before stalling, so no single spot stalls twice.
+  bot.pathfinder.goto = () => new Promise((resolve, reject) => {
+    if (trips++ >= 4) { bot.entity.position = new Vec3(30, 64, 0); resolve(); return; }
+    bot.entity.position = new Vec3(trips * 5, 64, 0);
+    bot.pathfinder.setGoal = goal => { if (goal === null) reject(new Error('The goal was changed before it could be completed!')); };
+    setImmediate().then(() => bot.emit('path_reset', 'stuck'));
+  });
+  await driver.execute({ type: 'goto', x: 30, y: 64, z: 0 }, { signal: controller.signal, onProgress() {} });
+  assert.equal(trips, 5);
+});
+
+test('a mined block above reach still counts and waits for the drop', async t => {
+  const { driver, bot, controller } = collectionFixture(t);
+  const walk = bot.pathfinder.goto;
+  // The bot digs the block from three blocks below, and the walk to the block's own position cannot arrive.
+  bot.pathfinder.goto = async goal => {
+    if (goal.rangeSq === undefined) { bot.entity.position = new Vec3(goal.x, goal.y - 3, goal.z); return; }
+    if (goal.y === 63) return;
+    return walk(goal);
+  };
+  const progress = [];
+  const result = await driver.execute({ type: 'collect', block: 'sand', count: 1 }, { signal: controller.signal, onProgress: message => progress.push(message) });
+  assert.match(result.message, /Collected requested items/);
+  assert.ok(progress.includes('Inventory: 1/1'));
+});
+
 test('cobblestone without a pickaxe fails before navigating or breaking any blocks', async t => {
   const { driver, bot, controller, trips } = collectionFixture(t, { material: 'cobblestone' });
   let dug = false;

@@ -17,7 +17,7 @@ The CI workflow is configured, but its remote execution on the final release com
 
 - [ ] Install the packaged jars in a normal Fabric launcher profile, enter a real world, attach the CLI, and observe the existing character.
 - [ ] Run collection with partial progress and recovery from a pit on the latest Fabric and bot code. Verify an unreachable return is reported as failed and inventory progress remains observable. *(Bot: partial progress with a return and an unreachable home both verified on 20 October 2026. Fabric and an actual pit are still pending.)*
-- [x] Run a real installed Ollama model with `--verify-collect oak_log:8 --verify-home`. Record the model name/version, initial inventory, result, and final manual control. *(qwen3.5:4b with the Mineflayer bot, 20 October 2026; see [DEVELOPMENT.md](DEVELOPMENT.md#validation).)*
+- [x] Run a real installed Ollama model with `--verify-collect oak_log:8 --verify-home`. Record the model name/version, initial inventory, result, and final manual control. *(`qwen3.5:4b-mlx` with the Mineflayer bot, 20 October 2026; see [DEVELOPMENT.md](DEVELOPMENT.md#validation).)*
 - [ ] Use a real MCP agent to observe, explicitly acquire, perform an action, and stop.
 - [ ] Press F8 during inference/action; close the menu afterward and verify no command resumes. Check emergency stop and lease expiry with the packaged mod.
 - [ ] Validate authenticated client → bot → client handoff. Check the UUID and inventory at each stage; never connect both as the same account simultaneously.

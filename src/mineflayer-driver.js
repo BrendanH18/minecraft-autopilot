@@ -234,6 +234,7 @@ export class MineflayerDriver {
       const goal = new goals.GoalNear(Math.floor(position.x), Math.floor(position.y), Math.floor(position.z), 1);
       // Physics can wedge the bot against a block edge (x = 32.3 beside a block ending at 32), and the pathfinder
       // then reports `stuck` forever. A hop in place frees it; fail after repeated stalls instead of waiting out the job.
+      let lastStall = null;
       for (let hops = 0; ; hops++) {
         const stalled = new AbortController();
         const onReset = reason => {
@@ -243,7 +244,14 @@ export class MineflayerDriver {
         };
         this.bot.on('path_reset', onReset);
         try { await this.abortable(() => this.bot.pathfinder.goto(goal), AbortSignal.any([signal, stalled.signal])); break; }
-        catch (error) { if (signal.aborted || !stalled.signal.aborted || hops >= 2) throw error; }
+        catch (error) {
+          if (signal.aborted || !stalled.signal.aborted) throw error;
+          // Stalls far apart are separate obstacles; only repeated stalls in one place fail the trip.
+          const here = this.bot.entity.position.clone();
+          if (lastStall && lastStall.distanceTo(here) > 2) hops = 0;
+          lastStall = here;
+          if (hops >= 2) throw error;
+        }
         finally { this.bot.off('path_reset', onReset); }
         await this.abortable(async () => {
           this.bot.setControlState('jump', true);
@@ -320,7 +328,8 @@ export class MineflayerDriver {
               if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), step);
               if (!this.bot.canDigBlock(block)) { failed.add(position.toString()); continue; }
               await this.abortable(() => this.bot.dig(block), step);
-              await this.goTo(position, step);
+              // Walk toward the drop; a mined block above reach is not a failure, so still wait for pickup.
+              await this.goTo(position, step).catch(error => { if (step.aborted) throw error; });
               await delay(750, undefined, { signal: step });
               onProgress(`Inventory: ${count()}/${target}`);
             } catch (error) { if (signal.aborted) throw signal.reason; failed.add(position.toString()); }

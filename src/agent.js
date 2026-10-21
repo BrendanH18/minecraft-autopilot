@@ -83,12 +83,12 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
         output = await response.json();
       } catch (error) {
         bounded.throwIfAborted();
-        if (requestTimeout.aborted) throw new Error(`Ollama did not answer within ${modelTimeout} seconds. No command was executed. Try --no-thinking, a smaller model, or a longer --model-timeout.`);
+        if (requestTimeout.aborted) throw new Error(`Ollama did not answer within ${modelTimeout} seconds, so this decision was not executed; earlier actions in this task still took effect. Try --no-thinking, a smaller model, or a longer --model-timeout.`);
         throw error;
       }
       let decision;
       try { decision = parseDecision(output.message?.content); }
-      catch { throw new Error('The model returned an invalid action. No command was executed.'); }
+      catch { throw new Error('The model returned an invalid action, so it was not executed; earlier actions in this task still took effect.'); }
       // The model may have taken minutes. Recheck ownership before dispatching.
       const currentState = await adapter.observe();
       bounded.throwIfAborted();
