@@ -93,15 +93,43 @@ These are historical observations, not acceptance results for the latest release
   - Stop, lease expiry, and Ctrl+C disconnect.
   - Release on death, and refusal to join as a dead character.
 
+**Real Ollama and bot checks (20 October 2026)** used Ollama 0.40.6 on Apple silicon with `qwen3.5:4b-mlx` (`61aa3858e9d3`, MLX runner) and `granite4.2:3b` (`40577dc168a3`, llama.cpp runner). The task was "Collect eight additional oak logs and return home" with `--verify-collect oak_log:8 --verify-home`. Simulation runs started from a fresh demo bridge with a home at the origin and 8 logs already held. Live runs used the Mineflayer bot on the local offline server. Every run ended in manual control.
+
+| Model | Backend | Thinking | Result |
+| --- | --- | --- | --- |
+| qwen3.5:4b | Simulation | Off | `criteria_met`, 4 decisions, 11 s |
+| qwen3.5:4b | Simulation | On | `criteria_met`, 4 decisions, 60 s |
+| qwen3.5:4b | Bot | Off | `criteria_met`, 3 decisions, 127 s (9 → 19 logs, 1.0 block from home) |
+| qwen3.5:4b | Bot | On | `criteria_met`, 4 decisions, 370 s (28 → 42 logs). The first `collect` hit the 180 s job limit, then a second `collect` finished. |
+| granite4.2:3b | Simulation | Off/On | Exit 2. It answered `done` with a plan, then looped on `goto`. Its `set_home` attempt was refused. |
+| granite4.2:3b | Bot | Off | Exit 2 (`step_limit`). It never chose `collect` and repeated `goto` to its own position until the step limit. |
+
+Use qwen3.5:4b or a stronger model; granite4.2:3b does not follow this action format. `--no-thinking` was 5× faster for qwen with the same result.
+
+These runs found and fixed:
+- **Model safeguards.** Models answering `done` with a plan, a planner `set_home` overwriting the player's home, and repeated no-op actions.
+- **Ollama limits.** The llama.cpp runner ignoring the `oneOf` output schema, and Ollama's 4096-token default context.
+- **Navigation.** mineflayer-pathfinder reporting `goto` success without arriving, and the bot wedging on a block edge.
+
+The same session also verified these with the bot:
+- A `home` to a point in mid-air fails with "Could not reach…".
+- A bot wedged on a block edge (x = 32.3) hops free and returns home.
+- `collect cobblestone` without a pickaxe fails before moving.
+- With a pickaxe one use from breaking, `collect cobblestone 3` stops at 1/3 and returns to the start.
+- A summoned zombie at 4.3 blocks appears in `threats`, while a skeleton at 18 blocks does not.
+- A Nether teleport during `guard` releases control immediately with "World or dimension changed."
+
 **Not yet verified live:**
-- Cobblestone collection, which needs a pickaxe.
-- Threat observations with hostile mobs, and dimension changes.
-- Microsoft-authenticated play, a normal launcher profile, and real Ollama inference.
+- Cobblestone, hostile observations, dimension changes, and partial collection in a pit with the Fabric client.
+- Microsoft-authenticated play and a normal launcher profile.
+- A real MCP agent.
 
 ## Known issues
 
 - On join, the bot logs a non-fatal `PartialReadError` from Mineflayer's protocol library while it decodes a 1.21.1 recipe/armor-trim packet. Gameplay continues normally.
-- Bot collection of logs high in trees is slow (about 45 s for 3) because of mineflayer-pathfinder think timeouts.
+- Bot collection of logs high in trees is slow (about 45 s for 3) because of mineflayer-pathfinder think timeouts. Once nearby trees are gone, collecting 8 logs can exceed the harness's 180 s job limit. The task can recover with another `collect`.
+- minecraft-data 3.117.0 maps 1.21.1 entity attributes with the 1.20.5 IDs; for example, movement speed is labelled `generic.step_height`. prismarine-physics uses its own step height and default speed, so bot movement is unaffected.
+- An idle server bot in manual mode has no reflexes. During testing, a skeleton killed it between runs. Respawn it in the regular client, then reconnect the bot.
 - One release during testing reported "a game menu was opened" after a window click, and it did not reproduce. Releases now log the screen class and window focus to diagnose a recurrence.
 
 ## Implementation notes

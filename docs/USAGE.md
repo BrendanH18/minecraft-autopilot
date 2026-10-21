@@ -83,9 +83,9 @@ npm start -- agent "Collect eight additional oak logs and return home" \
   --verify-collect oak_log:8 --verify-home
 ```
 
-`--steps` defaults to 30 (range 1–1000); `--minutes` defaults to 15 (range 1–1440). Each inference request has a 120-second timeout. `--ollama` changes the endpoint; only localhost HTTP/HTTPS hosts are accepted. Three consecutive action failures stop the loop. The harness does not expose shell commands or arbitrary code to the model.
+`--steps` defaults to 30 (range 1–1000); `--minutes` defaults to 15 (range 1–1440). Each decision waits up to `--model-timeout` seconds (default 120, maximum 3600) and runs with an 8192-token context. Thinking models such as `granite4.2` and `qwen3.5` can take a minute per decision; `--no-thinking` asks them to answer directly, which was about 15–20× faster in local tests but can make small models stop early. `--ollama` changes the endpoint; only localhost HTTP/HTTPS hosts are accepted. Three consecutive action failures stop the loop. The harness does not expose shell commands or arbitrary code to the model.
 
-`--verify-collect` accepts `oak_log:8` or `minecraft:oak_log:8`, with 1–64 additional items. `--verify-home` requires a home saved before the task and checks the original waypoint within a two-block three-dimensional radius. Replacing home during the task cannot make the check pass elsewhere. Both checks require the original player and dimension, a connected backend, and a living player.
+`--verify-collect` accepts `oak_log:8` or `minecraft:oak_log:8`, with 1–64 additional items. `--verify-home` requires a home saved before the task and checks the original waypoint within a two-block three-dimensional radius. The planner cannot replace a home saved before the task; move it yourself with `set-home`. Both checks require the original player and dimension, a connected backend, and a living player. The model sees the check results each turn. A `done` while a check is unmet is sent back twice; the third ends the task as `criteria_unmet`.
 
 | Result | Exit code | Meaning |
 | --- | --- | --- |
@@ -103,7 +103,7 @@ node src/cli.js agent "Collect eight additional oak logs and return home" \
   > .runtime/task-result.json
 ```
 
-Automated tests use mocked model responses; a successful simulation is not a real Ollama gameplay validation.
+In live testing, `qwen3.5:4b` completed this task and `granite4.2:3b` did not (see [validation](DEVELOPMENT.md#validation)). Small models can repeat an action that changed nothing; the planner refuses an exact repeat until the model chooses a different action. Automated tests use mocked model responses; a successful simulation is not a real Ollama gameplay validation.
 
 ## Connect an MCP agent
 

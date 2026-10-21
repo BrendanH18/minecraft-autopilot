@@ -202,6 +202,60 @@ test('cancellation during a return trip prevents the digging fallback', async t 
   assert.equal(trips, 1);
 });
 
+test('navigation that stops short of an unreachable goal is a failed job', async t => {
+  const { driver, bot } = collectionFixture(t);
+  // Like mineflayer-pathfinder, goto resolves without moving when no path segment is found.
+  bot.pathfinder.goto = async () => {};
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  harness.start(owner, { type: 'goto', x: 7.5, y: 77, z: 0 });
+  await harness.task;
+  assert.equal(harness.job.status, 'failed');
+  assert.match(harness.job.message, /Could not reach 7 77 0; stopped 15\.0 blocks away/);
+  bot.pathfinder.goto = async () => { bot.entity.position = new Vec3(7.5, 77, 0.5); };
+  harness.start(owner, { type: 'goto', x: 7.5, y: 77, z: 0 });
+  await harness.task;
+  assert.equal(harness.job.status, 'completed');
+  // A fractional home counts as reached wherever the pathfinder's goal does, more than two blocks from the floored goal.
+  bot.pathfinder.goto = async () => { bot.entity.position = new Vec3(1.69, 64.875, 0.69); };
+  harness.start(owner, { type: 'goto', x: 0.69, y: 64.875, z: 0.69 });
+  await harness.task;
+  assert.equal(harness.job.status, 'completed');
+});
+
+test('stopping clears a jump queued for the next physics tick', async t => {
+  const { driver, bot } = collectionFixture(t);
+  bot.jumpQueued = true;
+  driver.stop();
+  assert.equal(bot.jumpQueued, false);
+});
+
+test('a pathfinder stuck on a block edge hops free, and repeated stalls fail promptly', async t => {
+  const { driver, bot, controller } = collectionFixture(t);
+  const controls = [];
+  bot.setControlState = (control, state) => controls.push(`${control}:${state}`);
+  bot.clearControlStates = () => controls.push('clear');
+  let freeAfter = 1;
+  let trips = 0;
+  // Like mineflayer-pathfinder, a stall emits path_reset('stuck') and the goto stays pending until the goal is cleared.
+  bot.pathfinder.goto = () => new Promise((resolve, reject) => {
+    if (trips++ >= freeAfter) { bot.entity.position = new Vec3(10, 64, 0); resolve(); return; }
+    bot.pathfinder.setGoal = goal => { if (goal === null) reject(new Error('The goal was changed before it could be completed!')); };
+    setImmediate().then(() => bot.emit('path_reset', 'stuck'));
+  });
+  await driver.execute({ type: 'goto', x: 10, y: 64, z: 0 }, { signal: controller.signal, onProgress() {} });
+  assert.equal(trips, 2);
+  assert.ok(controls.includes('jump:true'), 'hops after the first stall');
+
+  freeAfter = Infinity; trips = 0;
+  bot.entity.position = new Vec3(0, 64, 0);
+  await assert.rejects(driver.execute({ type: 'goto', x: 10, y: 64, z: 0 }, { signal: controller.signal, onProgress() {} }),
+    /Navigation got stuck near 0 64 0/);
+  assert.equal(trips, 3);
+});
+
 test('cobblestone without a pickaxe fails before navigating or breaking any blocks', async t => {
   const { driver, bot, controller, trips } = collectionFixture(t, { material: 'cobblestone' });
   let dug = false;

@@ -13,6 +13,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - MCP stdio tools and a bounded Ollama planner using structured actions.
 - Simulation, Node/Java regression tests, and CI installation artifacts.
 - Independent inventory/home checks through `--verify-collect` and `--verify-home`.
+- Planner progress against explicit criteria, `--model-timeout`, and `--no-thinking` for faster local models.
 - Verified installation ZIP with license, checksums, and source commit/checkout metadata.
 - Usage, contributor, roadmap, protocol, troubleshooting, and release documentation.
 
@@ -25,6 +26,9 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - Eat before low-health retreat and replan after interrupted collection.
 - Handle focus-loss takeover, preload Baritone mining data, and scope homes to world/player/dimension.
 - Detect runtime-only Java and follow the selected profile without exposing credentials.
+- Reject premature model `done` replies while explicit criteria are unmet, refuse planner `set_home` over an existing home, use an 8192-token Ollama context, and explain model timeouts.
+- Constrain model output with a flat schema that Ollama's llama.cpp runner enforces, and refuse repeated actions that changed nothing.
+- Fail bot navigation that stops short of its goal, and hop free when the pathfinder is stuck on a block edge instead of waiting for the job timeout.
 
 ### Validation limits
 

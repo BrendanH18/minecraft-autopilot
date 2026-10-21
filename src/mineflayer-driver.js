@@ -147,6 +147,8 @@ export class MineflayerDriver {
   stop() {
     this.bot.pathfinder.setGoal(null);
     this.bot.clearControlStates();
+    // clearControlStates leaves a pressed jump queued for the next physics tick.
+    this.bot.jumpQueued = false;
     this.bot.deactivateItem();
     this.bot.stopDigging();
   }
@@ -228,8 +230,35 @@ export class MineflayerDriver {
 
   async goTo(position, signal, movements = this.movements) {
     this.bot.pathfinder.setMovements(movements);
-    try { await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalNear(Math.floor(position.x), Math.floor(position.y), Math.floor(position.z), 1)), signal); }
-    finally { if (movements !== this.movements) this.bot.pathfinder.setMovements(this.movements); }
+    try {
+      const goal = new goals.GoalNear(Math.floor(position.x), Math.floor(position.y), Math.floor(position.z), 1);
+      // Physics can wedge the bot against a block edge (x = 32.3 beside a block ending at 32), and the pathfinder
+      // then reports `stuck` forever. A hop in place frees it; fail after repeated stalls instead of waiting out the job.
+      for (let hops = 0; ; hops++) {
+        const stalled = new AbortController();
+        const onReset = reason => {
+          if (reason !== 'stuck') return;
+          const { x, y, z } = this.bot.entity.position.floored();
+          stalled.abort(new Error(`Navigation got stuck near ${x} ${y} ${z}.`));
+        };
+        this.bot.on('path_reset', onReset);
+        try { await this.abortable(() => this.bot.pathfinder.goto(goal), AbortSignal.any([signal, stalled.signal])); break; }
+        catch (error) { if (signal.aborted || !stalled.signal.aborted || hops >= 2) throw error; }
+        finally { this.bot.off('path_reset', onReset); }
+        await this.abortable(async () => {
+          this.bot.setControlState('jump', true);
+          await delay(400, undefined, { signal });
+          this.bot.clearControlStates();
+          await delay(600, undefined, { signal });
+        }, signal);
+      }
+      // mineflayer-pathfinder resolves goto when it finds no path segment, even if the goal is unreachable.
+      // Apply the pathfinder's own arrival test.
+      const current = this.bot.entity.position;
+      if (!goal.isEnd(current.floored()) && !goal.isEnd(current.floored().offset(0, 1, 0))) {
+        throw new Error(`Could not reach ${goal.x} ${goal.y} ${goal.z}; stopped ${current.distanceTo(position).toFixed(1)} blocks away.`);
+      }
+    } finally { if (movements !== this.movements) this.bot.pathfinder.setMovements(this.movements); }
   }
 
   async returnFromCollection(start, signal) {
