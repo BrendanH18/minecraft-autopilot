@@ -308,16 +308,17 @@ test('a broken pickaxe stops partial cobblestone collection and returns from the
   assert.equal(bot.inventory.items().find(item => item.name === 'cobblestone').count, 1);
 });
 
-function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDeposit = () => {}, start = new Vec3(10, 64, 0) } = {}) {
+function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDeposit = () => {}, start = new Vec3(10, 64, 0), item = 'oak_log' } = {}) {
   const bot = new EventEmitter();
   const registry = minecraftData('1.21.1');
   const chest = registry.blocksByName.chest;
   // A double chest: both halves face west, so the left half's partner is to the north.
   const halves = { '2,64,0': 'left', '2,64,-1': 'right' };
-  const inventory = { oak_log: held };
-  const contents = { oak_log: stored };
+  const inventory = { [item]: held };
+  const contents = { [item]: stored };
   const trips = [];
   const windows = [];
+  const batches = [];
   Object.assign(bot, {
     registry, entity: { position: start }, entities: {},
     username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
@@ -337,16 +338,17 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
         closed: false,
         containerItems: () => Object.entries(contents).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id })),
         deposit: async (type, _metadata, count) => {
-          assert.equal(type, registry.itemsByName.oak_log.id);
-          const moved = Math.min(count, capacity - contents.oak_log);
+          assert.equal(type, registry.itemsByName[item].id);
+          batches.push(count);
+          const moved = Math.min(count, capacity - contents[item]);
           // Like a real window, a failed transfer leaves the rest of the stack on the cursor, outside the inventory.
-          inventory.oak_log -= count; contents.oak_log += moved;
+          inventory[item] -= count; contents[item] += moved;
           if (moved < count) window.closeReturns = count - moved;
           onDeposit();
           if (moved < count) throw new Error('destination full');
         },
         // The server returns cursor items in a later inventory update.
-        close() { window.closed = true; setImmediate().then(() => { inventory.oak_log += window.closeReturns || 0; }); },
+        close() { window.closed = true; setImmediate().then(() => { inventory[item] += window.closeReturns || 0; }); },
       };
       windows.push(window);
       return window;
@@ -356,7 +358,7 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
   });
   const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
   t.after(() => driver.close());
-  return { driver, trips, windows, inventory, contents };
+  return { driver, trips, windows, inventory, contents, batches };
 }
 
 test('deposit stores every held item in a double chest recorded once, with its prior contents as the baseline', async t => {
@@ -406,6 +408,15 @@ test('a container that never opens fails without holding the bot busy', async t 
   driver.containerTimeoutMs = 20;
   await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log' }, { signal: new AbortController().signal, onProgress() {} }), /did not open/);
   assert.equal(driver.isBusy(), false);
+});
+
+test('deposits move one real stack at a time, so items that stack to 16 stop on handoff after 16', async t => {
+  const controller = new AbortController();
+  const { driver, batches, contents } = depositFixture(t, { item: 'ender_pearl', held: 40, stored: 0, onDeposit: () => controller.abort(new Error('Player took control.')) });
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'ender_pearl' }, { signal: controller.signal, onProgress() {} }), /Player took control/);
+  await driver.operations.waitForIdle(new AbortController().signal);
+  assert.deepEqual(batches, [16]);
+  assert.equal(contents.ender_pearl, 16);
 });
 
 test('deposit without enough items fails before walking anywhere', async t => {

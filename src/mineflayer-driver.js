@@ -444,10 +444,11 @@ export class MineflayerDriver {
       const initial = stored(window);
       try {
         this.recordContainer(position, block.name, window);
-        // Move one stack per click sequence so handoff stops the transfer between stacks.
-        for (let remaining = amount; remaining > 0; remaining -= Math.min(64, remaining)) {
+        // Move one stack per click sequence so handoff stops the transfer between stacks (16 for pearls, 1 for tools).
+        const stack = this.bot.registry.items[type].stackSize;
+        for (let remaining = amount; remaining > 0; remaining -= Math.min(stack, remaining)) {
           signal.throwIfAborted();
-          await window.deposit(type, null, Math.min(64, remaining));
+          await window.deposit(type, null, Math.min(stack, remaining));
         }
       } catch (error) { depositError = error; }
       finally {
