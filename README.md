@@ -7,7 +7,7 @@ Let a local agent take over **the Minecraft Java character you're already playin
 
 Minecraft Autopilot combines a Fabric client mod, a standalone server bot, a CLI, an MCP server, and an Ollama planner. Fabric controls your logged-in player; the bot provides a separate connection while your regular client is closed. Actions run through an authenticated localhost bridge with exclusive control leases and an emergency stop.
 
-**Status: experimental; v0.1.0 is in preparation.** Basic gameplay and handoff have recorded live validation in development worlds. Automated checks cover control ownership, simulated tasks, and independent task criteria. Normal launcher installation, Microsoft-authenticated handoff, real local-model runs, and the latest recovery changes still need live acceptance testing. See the [release checklist](docs/RELEASE.md) and [validation record](docs/DEVELOPMENT.md#validation).
+**Status: experimental; v0.1.0 is in preparation.** Basic gameplay and handoff have recorded live validation in development worlds. Automated checks cover control ownership, simulated tasks, and independent task criteria. A real Ollama model and a real MCP agent have completed bot tasks. Normal launcher installation, Microsoft-authenticated handoff, and the latest Fabric recovery changes still need live acceptance testing. See the [release checklist](docs/RELEASE.md) and [validation record](docs/DEVELOPMENT.md#validation).
 
 ## What it can do
 
