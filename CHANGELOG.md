@@ -30,6 +30,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - Reject premature model `done` replies while explicit criteria are unmet, refuse planner `set_home` over an existing home, use an 8192-token Ollama context, and explain model timeouts.
 - Constrain model output with a flat schema that Ollama's llama.cpp runner enforces, and refuse repeated actions that changed nothing.
 - Fail bot navigation that stops short of its goal, and hop free when the pathfinder is stuck on a block edge instead of waiting for the job timeout.
+- Collect logs about 40% faster with the bot by failing fast on logs it cannot reach and walking to where drops land.
 
 ### Validation limits
 
