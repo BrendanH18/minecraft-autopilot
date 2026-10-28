@@ -45,14 +45,14 @@ npm run dev:mod      # Fabric development client with a test identity
 2. **Standalone server bot** (Mineflayer) with Microsoft device authentication, or explicit offline authentication for development servers.
 3. **CLI and bridge:**
    - An authenticated localhost HTTP API.
-   - Observations, home waypoints, navigation, collection, eating, and `guard`.
+   - Observations, home waypoints, navigation, collection, eating, chest deposits (bot and demo), and `guard`.
    - Emergency stop, `doctor`, profile `attach`, and selective cleanup.
 4. **MCP stdio server:** observe, explicit takeover, validated actions, cancel, and stop.
 5. **Local planner:** a bounded Ollama loop that chooses one structured action at a time.
 6. **Simulation:** a deterministic demo that exercises the real HTTP adapter and CLI.
 
 **Not implemented:**
-- Combat, crafting, building, and chest deposits.
+- Combat, crafting, building, and chest deposits with the Fabric client.
 - Seamless reconnect or account transfer between the client and the bot.
 - Automatic takeover from ordinary mouse or movement input.
 
@@ -121,6 +121,15 @@ The same session also verified these with the bot:
 
 **Real MCP agent check (27 October 2026)** used Claude Code 2.1.312 in headless mode (`claude -p --strict-mcp-config`) with only the five Minecraft MCP tools allowed. The MCP server was `node src/cli.js mcp` against the Mineflayer bot as a fresh offline account on the local server (peaceful, daytime). The agent was asked to observe, take control, save a home, collect 3 additional sand, verify, stop, and confirm manual mode. It called `minecraft_observe` → `minecraft_take_control` → `set_home` → `collect` sand 3 → `minecraft_observe` → `minecraft_stop` → `minecraft_observe`. The raw tool results showed inventory going from empty to 3 sand and the bot ending 1.97 blocks from home. A separate CLI `observe` then confirmed the 3 sand and `manual` mode independently of the agent, and the MCP server process exited with the client.
 
+**Chest deposits with the bot (27 October 2026)** used the Mineflayer bot as a fresh offline account on the local 1.21.1 server. Containers were placed and inspected with server commands, and every result below was confirmed with the server's `data get block`, not the bot's report.
+- A double chest is one container in observations. Depositing 8 of 20 oak logs and then the remaining 12 from 10 blocks away put 20 logs in the chest; the 5 cobblestone already in the other half stayed.
+- A barrel with room for 4 logs failed `deposit oak_log 10` with "deposited 4 of 10"; 6 logs stayed in inventory.
+- A broken barrel disappears from `containers`.
+- A stone block on the chest lid fails the deposit with "did not open" after 5 s without leaving the bridge stopping. After the lid is cleared, the next deposit succeeds.
+- `qwen3.5:4b-mlx` (`--no-thinking`) ran "Collect eight additional oak logs, then store them in the nearby chest." with `--verify-deposit oak_log:8`. It returned `criteria_met` in 5 decisions and 123 s (goto, goto, collect 8, deposit, done; the first goto was unreachable). The server showed the chest going from 30 to 38 logs.
+
+Live testing found and fixed: a chest already in reach failed when the bot first tried to stand next to it; the pathfinder giving up planning ("Took to long to decide path") after walking most of the way; a full container reporting every item as deposited because leftovers sit on the cursor until the window closes; and the model sending collect's block as `item`.
+
 **Not yet verified live:**
 - Cobblestone, hostile observations, dimension changes, and partial collection in a pit with the Fabric client.
 - Microsoft-authenticated play and a normal launcher profile.
@@ -151,6 +160,7 @@ These are behaviors found during live testing that the code depends on:
   - `timers/promises` rejects with a generic `AbortError`, so the driver rethrows the signal's reason.
   - Joining as a dead character emits `death` but never `spawn`.
   - Each block attempt during collection is capped at 20 s.
+  - Deposits open the container from wherever it is in reach (4 blocks from the eyes), and walk with `GoalGetToBlock` otherwise. They count stored items from the container window, because a failed transfer leaves the remainder on the cursor until the window closes.
 - **Death screen.** Servers can send the death screen before the health update, so Fabric treats `DeathScreen` as death.
 - **CLI version flag.** The CLI's own version flag is `-V, --cli-version` so that `server --version` reaches the subcommand.
 

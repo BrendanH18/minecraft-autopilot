@@ -9,32 +9,37 @@ const decisionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('set_home') }).strict(),
   z.object({ type: z.literal('collect'), block: z.string(), count: z.number().int().min(1).max(64) }).strict(),
   z.object({ type: z.literal('eat') }).strict(),
+  z.object({ type: z.literal('deposit'), item: z.string(), count: z.number().int().min(1).max(64).optional() }).strict(),
   z.object({ type: z.literal('wait'), seconds: z.number().min(1).max(60) }).strict(),
 ]);
 
 // Ollama's llama.cpp runner ignores top-level oneOf/anyOf, so constrain a flat object and let zod check each action's fields.
-const actionFields = { done: ['reason'], goto: ['x', 'y', 'z'], home: [], set_home: [], collect: ['block', 'count'], eat: [], wait: ['seconds'] };
+const actionFields = { done: ['reason'], goto: ['x', 'y', 'z'], home: [], set_home: [], collect: ['block', 'count'], eat: [], deposit: ['item', 'count'], wait: ['seconds'] };
 export const decisionJsonSchema = {
   type: 'object',
   properties: { type: { enum: Object.keys(actionFields) }, reason: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' },
-    block: { type: 'string' }, count: { type: 'integer', minimum: 1, maximum: 64 }, seconds: { type: 'number', minimum: 1, maximum: 60 } },
+    block: { type: 'string' }, item: { type: 'string' }, count: { type: 'integer', minimum: 1, maximum: 64 }, seconds: { type: 'number', minimum: 1, maximum: 60 } },
   required: ['type'], additionalProperties: false,
 };
 
 // What a completed action can visibly change; a repeat that changed none of it is a model loop.
 const footprint = state => JSON.stringify([state.player?.position && ['x', 'y', 'z'].map(axis => Math.floor(state.player.position[axis])),
-  state.player?.health, state.player?.hunger, state.inventory, state.home]);
+  state.player?.health, state.player?.hunger, state.inventory, state.home, state.containers]);
 
 function parseDecision(content) {
   const output = JSON.parse(content);
+  // Small models swap collect's block and deposit's item (seen live with qwen3.5:4b); both name a Minecraft item.
+  const [alias, field] = { collect: ['item', 'block'], deposit: ['block', 'item'] }[output?.type] || [];
+  if (alias && output[field] === undefined) output[field] = output[alias];
   // Fields belonging to other actions are ignored; missing or invalid fields for this action are rejected.
   const fields = Object.hasOwn(actionFields, output?.type) ? actionFields[output.type] : [];
   return decisionSchema.parse(Object.fromEntries(Object.entries(output).filter(([key]) => key === 'type' || fields.includes(key))));
 }
 
 const systemPrompt = `You control a Minecraft Java player through a local harness. Choose one action per turn and output ONLY the required JSON.
-Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, wait(seconds), done(reason).
+Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, deposit(item,count), wait(seconds), done(reason).
 collect adds count items to the existing inventory. Supported blocks: oak_log, birch_log, spruce_log, jungle_log, acacia_log, dark_oak_log, cherry_log, mangrove_log, dirt, cobblestone, sand.
+deposit walks to the nearest chest or barrel within 16 blocks and stores the item there; omit count to store all of it. containers lists nearby storage and the contents last seen inside (items is null until opened).
 Use observations and the initial inventory to verify the requested quantity. Never repeat a full collection quota after partial progress.
 Save a home only if the user requested it or the goal needs it. set_home is refused when a home was saved before the task; only the player can move it.
 Nearby blocks and threats are partial observations of loaded chunks. Do not invent locations or capabilities.

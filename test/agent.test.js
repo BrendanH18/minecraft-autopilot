@@ -62,6 +62,13 @@ test('a flat output schema is enforced, and only the chosen action\'s fields are
   assert.equal(incomplete.releases, 1);
 });
 
+test('collect and deposit accept each other\'s item field name', async () => {
+  const adapter = fakeAdapter();
+  const decisions = [{ type: 'collect', item: 'oak_log', count: 8 }, { type: 'deposit', block: 'oak_log' }, { type: 'done', reason: 'Stored.' }];
+  await runAgent(adapter, 'Store logs', { model: 'test', log() {}, fetchImpl: async () => reply(decisions.shift()) });
+  assert.deepEqual(adapter.actions, [{ type: 'collect', block: 'oak_log', count: 8 }, { type: 'deposit', item: 'oak_log' }]);
+});
+
 test('an exact repeat of an action that changed nothing is refused, but waits and effective repeats run', async () => {
   const adapter = verifiableAdapter();
   adapter.execute = async function (action) {
@@ -235,6 +242,23 @@ test('agent verifies additional items and return home through the real simulated
   assert.equal(result.verification.checks.inventory.currentCount, 18);
   assert.equal(result.verification.checks.home.distance, 0);
   assert.equal((await adapter.observe()).mode, 'manual');
+});
+
+test('agent verifies a deposit through the real simulated bridge', async t => {
+  const directory = await testDirectory(t, 'deposit-agent-');
+  const discoveryPath = join(directory, 'bridge.json');
+  const driver = new DemoDriver();
+  driver.chest.items = [{ name: 'minecraft:oak_log', count: 4 }];
+  driver.inventory.push({ name: 'minecraft:oak_log', count: 3, slot: 1 });
+  const bridge = await startBridge(new Harness(driver), { discoveryPath });
+  const adapter = await FabricAdapter.connect(discoveryPath);
+  t.after(async () => { await adapter.close(); await bridge.close(); });
+  const decisions = [{ type: 'collect', block: 'oak_log', count: 5 }, { type: 'deposit', item: 'oak_log' }, { type: 'done', reason: 'Stored the logs.' }];
+  const result = await runAgent(adapter, 'Store eight logs in the chest', { model: 'test', log() {},
+    criteria: { deposit: { item: 'oak_log', count: 8 } }, fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_met');
+  assert.deepEqual(result.verification.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, met: true });
+  assert.deepEqual(driver.chest.items, [{ name: 'minecraft:oak_log', count: 12 }]);
 });
 
 test('an already cancelled planner never acquires control', async () => {

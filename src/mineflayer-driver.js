@@ -4,11 +4,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { dataDirectory, writePrivateJson } from './config.js';
+import { Vec3 } from 'vec3';
 import { OperationGate } from './operation-gate.js';
 
 const { pathfinder, Movements, goals } = pathfinderPackage;
 const COLLECT_BLOCKS = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'dirt', 'cobblestone', 'sand']);
 const SAFE_FOOD = new Set(['bread', 'apple', 'golden_carrot', 'carrot', 'baked_potato', 'cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'cooked_mutton', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon', 'melon_slice', 'beetroot']);
+const CONTAINERS = new Set(['chest', 'trapped_chest', 'barrel']);
+const CLOCKWISE = { north: 'east', east: 'south', south: 'west', west: 'north' };
+const OFFSETS = { north: [0, 0, -1], east: [1, 0, 0], south: [0, 0, 1], west: [-1, 0, 0] };
 const HOSTILES = new Set(['zombie', 'husk', 'drowned', 'skeleton', 'stray', 'wither_skeleton', 'creeper', 'spider', 'cave_spider', 'endermite', 'silverfish', 'witch', 'pillager', 'vindicator', 'evoker', 'ravager', 'guardian', 'elder_guardian', 'blaze', 'ghast', 'magma_cube', 'slime', 'phantom', 'warden']);
 
 export class MineflayerDriver {
@@ -17,6 +21,8 @@ export class MineflayerDriver {
     this.options = options;
     this.homes = homes;
     this.homesFile = homesFile;
+    // Last contents this session read from each opened container, per world/player/dimension.
+    this.containers = {};
     this.connected = true;
     this.lastError = null;
     this.survival = 'Ready';
@@ -40,6 +46,7 @@ export class MineflayerDriver {
     bot.on('kicked', reason => { this.connected = false; this.lastError = typeof reason === 'string' ? reason : JSON.stringify(reason); this.controlController?.abort(new Error('Disconnected.')); });
     bot.on('error', error => { this.lastError = error.message; });
     bot.on('death', () => this.controlController?.abort(new Error('Player died.')));
+    this.containerTimeoutMs = 5000;
     bot.on('game', () => {
       if (this.controlIdentity && this.identity() !== this.controlIdentity) this.controlController?.abort(new Error('World or dimension changed.'));
     });
@@ -141,7 +148,62 @@ export class MineflayerDriver {
       threats: Object.values(bot.entities).filter(entity => entity.position && HOSTILES.has(entity.name) && entity.position.distanceTo(bot.entity.position) <= 16)
         .slice(0, 16).map(entity => ({ type: `minecraft:${entity.name}`, distance: entity.position.distanceTo(bot.entity.position) })),
       blocks: positions.map(position => ({ name: `minecraft:${bot.blockAt(position).name}`, x: position.x, y: position.y, z: position.z })),
+      containers: this.observeContainers(),
     };
+  }
+
+  // A double chest is one inventory; key it by its lower half so its contents are never counted twice.
+  containerPosition(position) {
+    const block = this.bot.blockAt(position);
+    const { facing, type } = block?.getProperties?.() || {};
+    if (!CLOCKWISE[facing] || !['left', 'right'].includes(type)) return position;
+    const direction = type === 'left' ? CLOCKWISE[facing] : Object.keys(CLOCKWISE).find(key => CLOCKWISE[key] === facing);
+    const partner = position.offset(...OFFSETS[direction]);
+    if (this.bot.blockAt(partner)?.name !== block.name) return position;
+    return partner.x < position.x || partner.z < position.z ? partner : position;
+  }
+
+  nearbyContainers() {
+    const ids = [...CONTAINERS].map(name => this.bot.registry.blocksByName[name]?.id).filter(id => id !== undefined);
+    const found = new Map();
+    for (const position of this.bot.findBlocks({ matching: ids, maxDistance: 16, count: 32 })) {
+      const key = this.containerPosition(position);
+      if (!found.has(key.toString())) found.set(key.toString(), { position: key, name: this.bot.blockAt(key).name });
+    }
+    return [...found.values()].sort((a, b) => a.position.distanceTo(this.bot.entity.position) - b.position.distanceTo(this.bot.entity.position));
+  }
+
+  observeContainers() {
+    const known = this.containers[this.identity()] || {};
+    // Forget a container that was broken or replaced; unloaded chunks (null) keep their last contents.
+    for (const [key, record] of Object.entries(known)) {
+      const block = this.bot.blockAt(new Vec3(record.x, record.y, record.z));
+      if (block && `minecraft:${block.name}` !== record.name) delete known[key];
+    }
+    const unopened = this.nearbyContainers().filter(({ position }) => !known[position.toString()]).slice(0, 8)
+      .map(({ position, name }) => ({ name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: null }));
+    return [...Object.values(known).map(record => structuredClone(record)), ...unopened];
+  }
+
+  recordContainer(position, name, window) {
+    const items = {};
+    for (const item of window.containerItems()) items[`minecraft:${item.name}`] = (items[`minecraft:${item.name}`] || 0) + item.count;
+    const contents = Object.entries(items).map(([itemName, count]) => ({ name: itemName, count }));
+    const known = this.containers[this.identity()] ??= {};
+    const previous = known[position.toString()];
+    // firstSeen is the contents before this session's first deposit, a baseline for independent verification.
+    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents };
+  }
+
+  // Mineflayer cannot cancel an opening, and a blocked lid never answers, so stop waiting rather than hold the operation gate.
+  // A window the server opens late performs no clicks, and the next opening replaces it.
+  async openContainer(block) {
+    let timer;
+    try {
+      return await Promise.race([this.bot.openContainer(block), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('The container did not open; something may be blocking its lid.')), this.containerTimeoutMs);
+      })]);
+    } finally { clearTimeout(timer); }
   }
 
   stop() {
@@ -294,6 +356,7 @@ export class MineflayerDriver {
       }
       case 'goto': await this.goTo(action, signal); return;
       case 'eat': await this.eat(signal); return;
+      case 'deposit': return this.deposit(action, signal);
       case 'wait': await delay(action.seconds * 1000, undefined, { signal }); return;
       case 'collect': {
         const name = action.block.replace('minecraft:', '');
@@ -348,6 +411,56 @@ export class MineflayerDriver {
         return moved ? 'Collected requested items and returned to the starting point.' : 'Collected requested items.';
       }
     }
+  }
+
+  async deposit(action, signal) {
+    const name = action.item.replace('minecraft:', '');
+    const type = this.bot.registry.itemsByName[name]?.id;
+    if (type === undefined) throw new Error(`Unknown item ${name}.`);
+    const held = () => this.bot.inventory.items().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0);
+    const before = held();
+    if (before === 0) throw new Error(`No ${name} in inventory to deposit.`);
+    if (action.count > before) throw new Error(`Only ${before} ${name} in inventory; cannot deposit ${action.count}.`);
+    const amount = action.count ?? before;
+    const target = this.nearbyContainers()[0];
+    if (!target) throw new Error('No chest or barrel within 16 blocks. Move near storage first.');
+    const { position } = target;
+    // Open from wherever the chest is in reach; a walk to an adjacent block can fail beside furniture and walls.
+    const inReach = () => this.bot.entity.position.offset(0, 1.62, 0).distanceTo(position.offset(0.5, 0.5, 0.5)) <= 4;
+    // The pathfinder can give up planning ("Took to long to decide path") after walking most of the way; judge by reach.
+    for (let attempt = 0; attempt < 2 && !inReach(); attempt++) {
+      await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), signal)
+        .catch(error => { if (signal.aborted) throw error; });
+    }
+    if (!inReach()) throw new Error(`Could not reach the ${target.name} at ${position.x} ${position.y} ${position.z}.`);
+    const block = this.bot.blockAt(position);
+    if (!block || !CONTAINERS.has(block.name)) throw new Error(`The container at ${position.x} ${position.y} ${position.z} is gone.`);
+    let depositError;
+    let deposited = 0;
+    // Count from the container: after a failed click, leftovers sit on the cursor until the window closes.
+    const stored = window => window.containerItems().filter(item => item.type === type).reduce((sum, item) => sum + item.count, 0);
+    await this.abortable(async () => {
+      const window = await this.openContainer(block);
+      const initial = stored(window);
+      try {
+        this.recordContainer(position, block.name, window);
+        // Move one stack per click sequence so handoff stops the transfer between stacks (16 for pearls, 1 for tools).
+        const stack = this.bot.registry.items[type].stackSize;
+        for (let remaining = amount; remaining > 0; remaining -= Math.min(stack, remaining)) {
+          signal.throwIfAborted();
+          await window.deposit(type, null, Math.min(stack, remaining));
+        }
+      } catch (error) { depositError = error; }
+      finally {
+        deposited = stored(window) - initial;
+        this.recordContainer(position, block.name, window);
+        window.close();
+      }
+    }, signal);
+    const where = `${block.name} at ${position.x} ${position.y} ${position.z}`;
+    if (depositError?.message === 'destination full') throw new Error(`The ${where} is full; deposited ${deposited} of ${amount} ${name}.`);
+    if (depositError) throw depositError;
+    return `Deposited ${deposited} ${name} into the ${where}.`;
   }
 
   close() {
