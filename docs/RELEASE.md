@@ -1,6 +1,6 @@
 # v0.1 release checklist
 
-v0.1.0 is an **experimental preview** of the existing Minecraft 1.21.1 player harness. It includes Fabric control, the standalone bot, CLI, MCP, local Ollama planning, bounded collection/navigation/eating, and explicit handoff. It does not include combat, crafting, building, chest deposits, automatic reconnect transfer, or guaranteed survival.
+v0.1.0 is an **experimental preview** of the existing Minecraft 1.21.1 player harness. It includes Fabric control, the standalone bot, CLI, MCP, local Ollama planning, bounded collection/navigation/eating, chest deposits with the bot, and explicit handoff. It does not include combat, crafting, building, Fabric deposits, automatic reconnect transfer, or guaranteed survival.
 
 ## Automated release checks
 

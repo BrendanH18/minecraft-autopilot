@@ -22,7 +22,7 @@ Candidates to evaluate after validation, rather than promised release dates:
 
 | Candidate | Purpose |
 | --- | --- |
-| Chest deposits | A repeatable gather-and-store workflow |
+| Fabric chest deposits | Bring the bot's gather-and-store workflow to the Fabric client |
 | Better collection/path recovery | Improve difficult trees, terrain, tools, and inventory capacity |
 | More task criteria | Verify more concrete outcomes independently of model explanations |
 | Crafting and building | Expand actions after the current lifecycle is reliable |

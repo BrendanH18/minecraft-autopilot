@@ -13,6 +13,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - MCP stdio tools and a bounded Ollama planner using structured actions.
 - Simulation, Node/Java regression tests, and CI installation artifacts.
 - Independent inventory/home checks through `--verify-collect` and `--verify-home`.
+- Chest and barrel deposits for the server bot and demo through `deposit`, MCP, and the planner, with container observations and an independent `--verify-deposit` check.
 - Planner progress against explicit criteria, `--model-timeout`, and `--no-thinking` for faster local models.
 - Verified installation ZIP with license, checksums, and source commit/checkout metadata.
 - Usage, contributor, roadmap, protocol, troubleshooting, and release documentation.
@@ -32,4 +33,4 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Validation limits
 
-Recorded live tests used development single-player/offline multiplayer. Real Ollama planning and a real MCP agent (Claude Code) were validated with the bot. Authenticated handoff, normal launcher installation, and Fabric recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, deposits, seamless transfer, and guaranteed survival are not implemented.
+Recorded live tests used development single-player/offline multiplayer. Real Ollama planning and a real MCP agent (Claude Code) were validated with the bot. Authenticated handoff, normal launcher installation, and Fabric recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, Fabric deposits, seamless transfer, and guaranteed survival are not implemented.

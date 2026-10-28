@@ -307,3 +307,110 @@ test('a broken pickaxe stops partial cobblestone collection and returns from the
   assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
   assert.equal(bot.inventory.items().find(item => item.name === 'cobblestone').count, 1);
 });
+
+function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDeposit = () => {}, start = new Vec3(10, 64, 0) } = {}) {
+  const bot = new EventEmitter();
+  const registry = minecraftData('1.21.1');
+  const chest = registry.blocksByName.chest;
+  // A double chest: both halves face west, so the left half's partner is to the north.
+  const halves = { '2,64,0': 'left', '2,64,-1': 'right' };
+  const inventory = { oak_log: held };
+  const contents = { oak_log: stored };
+  const trips = [];
+  const windows = [];
+  Object.assign(bot, {
+    registry, entity: { position: start }, entities: {},
+    username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
+    health: 20, food: 20,
+    inventory: { items: () => Object.entries(inventory).filter(([, count]) => count > 0).map(([name, count], slot) => ({ name, count, slot: 36 + slot })) },
+    pathfinder: {
+      setMovements() {}, setGoal() {},
+      goto: async goal => { trips.push({ x: goal.x, y: goal.y, z: goal.z }); bot.entity.position = new Vec3(goal.x + 1, goal.y, goal.z); },
+    },
+    findBlocks: ({ matching }) => (Array.isArray(matching) && matching.includes(chest.id) ? [new Vec3(2, 64, 0), new Vec3(2, 64, -1)] : []),
+    blockAt: position => {
+      const type = halves[`${position.x},${position.y},${position.z}`];
+      return type ? { name: 'chest', type: chest.id, position, getProperties: () => ({ facing: 'west', type, waterlogged: false }) } : null;
+    },
+    openContainer: async () => {
+      const window = {
+        closed: false,
+        containerItems: () => Object.entries(contents).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id })),
+        deposit: async (type, _metadata, count) => {
+          assert.equal(type, registry.itemsByName.oak_log.id);
+          const moved = Math.min(count, capacity - contents.oak_log);
+          // Like a real window, a failed transfer leaves the rest of the stack on the cursor, outside the inventory.
+          inventory.oak_log -= count; contents.oak_log += moved;
+          if (moved < count) window.closeReturns = count - moved;
+          onDeposit();
+          if (moved < count) throw new Error('destination full');
+        },
+        // The server returns cursor items in a later inventory update.
+        close() { window.closed = true; setImmediate().then(() => { inventory.oak_log += window.closeReturns || 0; }); },
+      };
+      windows.push(window);
+      return window;
+    },
+    clearControlStates() {}, deactivateItem() {}, stopDigging() {},
+    quit: () => bot.emit('end', 'Closed'),
+  });
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  t.after(() => driver.close());
+  return { driver, trips, windows, inventory, contents };
+}
+
+test('deposit stores every held item in a double chest recorded once, with its prior contents as the baseline', async t => {
+  const { driver, trips, windows, inventory } = depositFixture(t);
+  assert.deepEqual(driver.observe().containers, [{ name: 'minecraft:chest', x: 2, y: 64, z: -1, items: null }]);
+  const result = await driver.execute({ type: 'deposit', item: 'minecraft:oak_log' }, { signal: new AbortController().signal, onProgress() {} });
+  assert.equal(result.message, 'Deposited 20 oak_log into the chest at 2 64 -1.');
+  assert.deepEqual(trips, [{ x: 2, y: 64, z: -1 }]);
+  assert.equal(inventory.oak_log, 0);
+  assert.equal(windows.length, 1); assert.equal(windows[0].closed, true);
+  assert.deepEqual(driver.observe().containers, [{ name: 'minecraft:chest', x: 2, y: 64, z: -1,
+    items: [{ name: 'minecraft:oak_log', count: 25 }], firstSeen: [{ name: 'minecraft:oak_log', count: 5 }] }]);
+  Object.assign(driver.bot, { blockAt: position => ({ name: 'air', position }), findBlocks: () => [] });
+  assert.deepEqual(driver.observe().containers, [], 'a broken chest is forgotten');
+});
+
+test('a full chest fails the deposit with partial progress and the contents it observed', async t => {
+  // Live bug: a chest already in reach failed when the bot tried to walk beside it first.
+  const { driver, windows, trips } = depositFixture(t, { capacity: 15, start: new Vec3(0.5, 64, -1.5) });
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log', count: 20 }, { signal: new AbortController().signal, onProgress() {} }),
+    /chest at 2 64 -1 is full; deposited 10 of 20 oak_log/);
+  assert.equal(windows[0].closed, true);
+  assert.deepEqual(driver.observe().containers[0].items, [{ name: 'minecraft:oak_log', count: 15 }]);
+  assert.deepEqual(trips, []);
+});
+
+test('handoff between stacks stops the deposit and closes the chest', async t => {
+  const controller = new AbortController();
+  const { driver, windows, contents } = depositFixture(t, { held: 130, onDeposit: () => controller.abort(new Error('Player took control.')) });
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log' }, { signal: controller.signal, onProgress() {} }), /Player took control/);
+  await driver.operations.waitForIdle(new AbortController().signal);
+  assert.equal(contents.oak_log, 5 + 64);
+  assert.equal(windows[0].closed, true);
+});
+
+test('a chest the pathfinder cannot reach fails after a retry without opening it', async t => {
+  const { driver, trips, windows } = depositFixture(t);
+  driver.bot.pathfinder.goto = async goal => { trips.push({ x: goal.x, y: goal.y, z: goal.z }); throw new Error('Took to long to decide path to goal!'); };
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log' }, { signal: new AbortController().signal, onProgress() {} }), /Could not reach the chest at 2 64 -1/);
+  assert.equal(trips.length, 2);
+  assert.equal(windows.length, 0);
+});
+
+test('a container that never opens fails without holding the bot busy', async t => {
+  const { driver } = depositFixture(t, { start: new Vec3(0.5, 64, -1.5) });
+  driver.bot.openContainer = () => new Promise(() => {});
+  driver.containerTimeoutMs = 20;
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log' }, { signal: new AbortController().signal, onProgress() {} }), /did not open/);
+  assert.equal(driver.isBusy(), false);
+});
+
+test('deposit without enough items fails before walking anywhere', async t => {
+  const { driver, trips } = depositFixture(t, { held: 3 });
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal: new AbortController().signal, onProgress() {} }), /Only 3 oak_log/);
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'cobblestone' }, { signal: new AbortController().signal, onProgress() {} }), /No cobblestone/);
+  assert.deepEqual(trips, []);
+});

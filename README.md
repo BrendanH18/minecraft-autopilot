@@ -17,12 +17,13 @@ Minecraft Autopilot combines a Fabric client mod, a standalone server bot, a CLI
 | Navigate | Walk to coordinates or a saved home |
 | Collect | Additional logs, dirt, sand, or cobblestone, with a bounded return attempt |
 | Eat and guard | Eat supported food and attempt a low-health retreat to a saved shelter |
+| Store | Deposit items into the nearest chest or barrel (server bot and demo; not yet Fabric) |
 | Local planning | One validated Ollama action at a time, with time and step limits |
 | Agent integration | Five MCP tools for observation, takeover, actions, cancellation, and stop |
 | Handoff | F8/menu takeover in Fabric, emergency stop, and heartbeat expiry |
-| Verify tasks | Check additional inventory and return to the original home independently of the model |
+| Verify tasks | Check additional inventory, items stored in containers, and return to the original home independently of the model |
 
-Combat, crafting, building, chest deposits, automatic reconnect transfer, and ordinary mouse/movement takeover are future work. Guard reacts to hunger and health; it does not fight enemies or construct shelter.
+Combat, crafting, building, Fabric chest deposits, automatic reconnect transfer, and ordinary mouse/movement takeover are future work. Guard reacts to hunger and health; it does not fight enemies or construct shelter.
 
 ## Try it in two minutes
 
@@ -35,7 +36,7 @@ npm ci
 npm start -- demo --smoke
 ```
 
-This runs a **simulation** through the real bridge: save home, move, collect eight logs, eat, return home, and release control. Neither Minecraft nor a model is required.
+This runs a **simulation** through the real bridge: save home, move, collect eight logs, store them in a chest, eat, return home, and release control. Neither Minecraft nor a model is required.
 
 For an interactive simulation, leave `npm start -- demo` running in one terminal. In another, from the same checkout:
 

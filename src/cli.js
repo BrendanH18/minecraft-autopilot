@@ -9,7 +9,7 @@ import { attachBridge, cleanupRuntime, assertBridgeNotRunning } from './runtime.
 import { Harness } from './harness.js';
 import { startBridge } from './bridge-server.js';
 import { DemoDriver } from './demo-driver.js';
-import { parseCollectionCriterion } from './objective.js';
+import { parseCollectionCriterion, parseDepositCriterion } from './objective.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -72,6 +72,9 @@ program.command('collect').description('Collect additional logs, dirt, sand, or 
   .argument('<block>', 'Minecraft block name').argument('<count>', 'additional item count', positiveInteger)
   .action((block, count) => perform({ type: 'collect', block, count }));
 program.command('eat').description('Eat supported food from inventory.').action(() => perform({ type: 'eat' }));
+program.command('deposit').description('Store an item in the nearest chest or barrel within 16 blocks (server bot and demo).')
+  .argument('<item>', 'Minecraft item name').argument('[count]', 'items to store; all when omitted', positiveInteger)
+  .action((item, count) => perform({ type: 'deposit', item, ...(count !== undefined && { count }) }));
 program.command('guard').description('Stay under agent control with local eating and low-health retreat behavior.')
   .option('--seconds <n>', 'duration, between 1 and 3600 seconds', positiveInteger, 300)
   .action(async options => {
@@ -103,6 +106,7 @@ program.command('agent').description('Run a bounded natural-language task using 
   .option('--steps <n>', 'maximum model decisions', positiveInteger, 30)
   .option('--minutes <n>', 'maximum runtime', positiveInteger, 15)
   .option('--verify-collect <block:count>', 'verify additional collected items, for example oak_log:8', parseCollectionCriterion)
+  .option('--verify-deposit <item:count>', 'verify additional items stored in nearby containers, for example oak_log:8', parseDepositCriterion)
   .option('--verify-home', 'verify return within two blocks of the home saved before the task')
   .option('--model-timeout <seconds>', 'maximum seconds to wait for each model decision', positiveInteger, 120)
   .option('--no-thinking', 'ask thinking models to answer without reasoning first (much faster)')
@@ -112,9 +116,9 @@ program.command('agent').description('Run a bounded natural-language task using 
     const adapter = await connect();
     try {
       const result = await runAgent(adapter, goal, { model: options.model, ollamaUrl: options.ollama, maxSteps: options.steps, minutes: options.minutes,
-        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, returnHome: options.verifyHome }, signal: abortController.signal, log });
+        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, deposit: options.verifyDeposit, returnHome: options.verifyHome }, signal: abortController.signal, log });
       print(result);
-      if (result.status === 'criteria_unmet' || result.status === 'step_limit' && (options.verifyCollect || options.verifyHome)) process.exitCode = 2;
+      if (result.status === 'criteria_unmet' || result.status === 'step_limit' && (options.verifyCollect || options.verifyDeposit || options.verifyHome)) process.exitCode = 2;
     }
     finally { await adapter.close(); }
   });
@@ -144,6 +148,7 @@ program.command('demo').description('Run a simulated player bridge; no Minecraft
       await adapter.execute({ type: 'set_home' });
       await adapter.execute({ type: 'goto', x: 5, y: 64, z: 5 });
       await adapter.execute({ type: 'collect', block: 'oak_log', count: 8 });
+      await adapter.execute({ type: 'deposit', item: 'oak_log', count: 8 });
       await adapter.execute({ type: 'eat' });
       await adapter.execute({ type: 'home' });
       await adapter.release();

@@ -22,7 +22,7 @@ export async function serveMcp(adapter) {
     await adapter.acquire(); return { controlled: true };
   }));
   server.registerTool('minecraft_action', {
-    description: 'Execute one bounded gameplay action and wait for its result. Requires prior minecraft_take_control. collect adds items to current inventory. Home is scoped to the world, account, and dimension.',
+    description: 'Execute one bounded gameplay action and wait for its result. Requires prior minecraft_take_control. collect adds items to current inventory. deposit stores an item in the nearest chest or barrel within 16 blocks (server bot and demo only). Home is scoped to the world, account, and dimension.',
     inputSchema: { action: actionSchema },
   }, wrap(async ({ action }, extra) => {
     if (!adapter.leaseId || adapter.leaseError) throw new Error('Use minecraft_take_control first.');
