@@ -331,6 +331,24 @@ export class MineflayerDriver {
     } finally { if (movements !== this.movements) this.bot.pathfinder.setMovements(this.movements); }
   }
 
+  // Unreachable blocks (high in trees) cost the pathfinder's whole planning budget; nearby reachable ones plan in well under a second.
+  async approach(position, signal, patient = false) {
+    const thinkTimeout = this.bot.pathfinder.thinkTimeout;
+    if (!patient) this.bot.pathfinder.thinkTimeout = 2000;
+    try { await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), signal); }
+    finally { this.bot.pathfinder.thinkTimeout = thinkTimeout; }
+  }
+
+  // A drop falls straight down from the mined block; walk to where it lands rather than to the block, which may be in the air.
+  // An uncollected drop is not a failure, so give up after a few seconds and keep collecting.
+  async pickUpDrop(position, collected, signal) {
+    let landing = position;
+    while (landing.y > position.y - 16 && this.bot.blockAt(landing.offset(0, -1, 0))?.boundingBox === 'empty') landing = landing.offset(0, -1, 0);
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
+    await this.goTo(landing, bounded).catch(() => signal.throwIfAborted());
+    for (let waited = 0; !collected() && waited < 750; waited += 250) await delay(250, undefined, { signal });
+  }
+
   async returnFromCollection(start, signal) {
     signal.throwIfAborted();
     if (start.distanceTo(this.bot.entity.position) <= 2) return true;
@@ -372,6 +390,8 @@ export class MineflayerDriver {
         const target = count() + action.count;
         const start = this.bot.entity.position.clone();
         const failed = new Set();
+        // Blocks whose path took too long to plan; retried with the full planning budget once quicker ones run out.
+        const slow = new Set();
         let collectionError;
         try {
           while (count() < target) {
@@ -379,23 +399,27 @@ export class MineflayerDriver {
             requireTool();
             const positions = this.bot.findBlocks({ matching: blockId, maxDistance: 48, count: 64 });
             positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
-            const position = positions.find(pos => !failed.has(pos.toString()));
+            const candidates = positions.filter(pos => !failed.has(pos.toString()));
+            const position = candidates.find(pos => !slow.has(pos.toString())) || candidates[0];
             if (!position) throw new Error('No reachable matching blocks remain in loaded chunks.');
+            const patient = slow.has(position.toString());
             // A single block can stall the pathfinder for a minute or more; skip it and try another.
             const step = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
             try {
-              await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), step);
+              await this.approach(position, step, patient);
               const block = this.bot.blockAt(position);
               if (!block || block.type !== blockId) continue;
               const tool = this.bot.pathfinder.bestHarvestTool(block);
               if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), step);
               if (!this.bot.canDigBlock(block)) { failed.add(position.toString()); continue; }
+              const before = count();
               await this.abortable(() => this.bot.dig(block), step);
-              // Walk toward the drop; a mined block above reach is not a failure, so still wait for pickup.
-              await this.goTo(position, step).catch(error => { if (step.aborted) throw error; });
-              await delay(750, undefined, { signal: step });
+              await this.pickUpDrop(position, () => count() > before, step);
               onProgress(`Inventory: ${count()}/${target}`);
-            } catch (error) { if (signal.aborted) throw signal.reason; failed.add(position.toString()); }
+            } catch (error) {
+              if (signal.aborted) throw signal.reason;
+              (!patient && /Took to long to decide path/.test(error.message) ? slow : failed).add(position.toString());
+            }
           }
         } catch (error) {
           // Handoff, death, survival interrupts, and deadlines must never start a recovery trip.

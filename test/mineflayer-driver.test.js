@@ -425,3 +425,59 @@ test('deposit without enough items fails before walking anywhere', async t => {
   await assert.rejects(driver.execute({ type: 'deposit', item: 'cobblestone' }, { signal: new AbortController().signal, onProgress() {} }), /No cobblestone/);
   assert.deepEqual(trips, []);
 });
+
+test('a log slow to plan is deferred behind quicker ones, then retried with the full planning budget', async t => {
+  const bot = new EventEmitter();
+  const registry = minecraftData('1.21.1');
+  const log = registry.blocksByName.oak_log;
+  const slow = new Vec3(5, 64, 0);
+  const quick = new Vec3(8, 64, 0);
+  const remaining = new Set([slow.toString(), quick.toString()]);
+  let collected = 0;
+  const attempts = [];
+  Object.assign(bot, {
+    registry, entity: { position: new Vec3(0, 64, 0) }, entities: {},
+    username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
+    health: 20, food: 20,
+    inventory: { items: () => (collected ? [{ name: 'oak_log', count: collected, slot: 36 }] : []) },
+    pathfinder: {
+      thinkTimeout: 5000, setMovements() {}, setGoal() {}, bestHarvestTool: () => null,
+      goto: async goal => {
+        const target = new Vec3(goal.x, goal.y, goal.z);
+        if (goal.constructor.name === 'GoalGetToBlock') {
+          attempts.push({ target: target.toString(), thinkTimeout: bot.pathfinder.thinkTimeout });
+          if (target.equals(slow) && bot.pathfinder.thinkTimeout < 5000) throw new Error('Took to long to decide path to goal!');
+        }
+        bot.entity.position = target.offset(goal.constructor.name === 'GoalGetToBlock' ? -1 : 0, 0, 0);
+      },
+    },
+    findBlocks: () => [slow, quick].filter(position => remaining.has(position.toString())),
+    blockAt: position => (remaining.has(position.toString()) ? { type: log.id, name: 'oak_log', position } : { type: 0, name: 'stone', boundingBox: 'block' }),
+    canDigBlock: () => true,
+    dig: async block => { remaining.delete(block.position.toString()); collected++; },
+    equip: async () => {}, clearControlStates() {}, deactivateItem() {}, stopDigging() {},
+    quit: () => bot.emit('end', 'Closed'),
+  });
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  t.after(() => driver.close());
+  await driver.execute({ type: 'collect', block: 'oak_log', count: 2 }, { signal: new AbortController().signal, onProgress() {} });
+  assert.deepEqual(attempts, [
+    { target: slow.toString(), thinkTimeout: 2000 },
+    { target: quick.toString(), thinkTimeout: 2000 },
+    { target: slow.toString(), thinkTimeout: 5000 },
+  ]);
+  assert.equal(collected, 2);
+  assert.equal(bot.pathfinder.thinkTimeout, 5000);
+});
+
+test('after mining a high log the bot walks to where its drop lands, not to the empty block', async t => {
+  const { driver, bot, trips } = collectionFixture(t);
+  const mined = new Vec3(3, 67, 0);
+  // Air below the mined log down to the ground at y = 63.
+  bot.findBlocks = () => (bot.inventory.items().length ? [] : [mined]);
+  const sand = bot.registry.blocksByName.sand;
+  bot.blockAt = position => (position.y > 63 && !position.equals(mined) ? { type: 0, name: 'air', boundingBox: 'empty' } : { type: sand.id, name: 'sand', boundingBox: 'block', position });
+  await driver.execute({ type: 'collect', block: 'sand', count: 1 }, { signal: new AbortController().signal, onProgress() {} });
+  assert.ok(trips.some(trip => trip.y === 64), `expected a walk to the landing spot at y = 64, got ${JSON.stringify(trips)}`);
+  assert.equal(trips.filter(trip => trip.y === 67).length, 1, 'only the approach targets the log; no walk to the empty block in the air');
+});

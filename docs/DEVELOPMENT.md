@@ -130,6 +130,15 @@ The same session also verified these with the bot:
 
 Live testing found and fixed: a chest already in reach failed when the bot first tried to stand next to it; the pathfinder giving up planning ("Took to long to decide path") after walking most of the way; a full container reporting every item as deposited because leftovers sit on the cursor until the window closes; and the model sending collect's block as `item`.
 
+**Faster bot log collection (27 October 2026)** was benchmarked on the local offline server from a restored world snapshot. A fresh offline bot was teleported to the same spot with an empty inventory and ran `collect oak_log N`; times include the return trip.
+
+| Quota | Before | After |
+| --- | --- | --- |
+| 8 logs | 86.4 s, 92.7 s | 52.7 s, 52.8 s |
+| 16 logs | 125.3 s | 91.2 s |
+
+Instrumentation showed where the time went. Each unreachable log cost a 5 s planning timeout, and walking to a mined block high in the air cost up to 10 s. Digging by hand takes about 3 s per log and is unchanged.
+
 **Not yet verified live:**
 - Cobblestone, hostile observations, dimension changes, and partial collection in a pit with the Fabric client.
 - Microsoft-authenticated play and a normal launcher profile.
@@ -138,7 +147,7 @@ Live testing found and fixed: a chest already in reach failed when the bot first
 ## Known issues
 
 - On join, the bot logs a non-fatal `PartialReadError` from Mineflayer's protocol library while it decodes a 1.21.1 recipe/armor-trim packet. Gameplay continues normally.
-- Bot collection of logs high in trees is slow (about 45 s for 3) because of mineflayer-pathfinder think timeouts. Once nearby trees are gone, collecting 8 logs can exceed the harness's 180 s job limit. The task can recover with another `collect`.
+- Bot log collection is bounded by digging by hand (about 3 s per log) and by logs it cannot reach high in trees. After the October 2026 speedup, 8 logs took 53 s and 16 took 91 s from the test spot. Once nearby trees are gone, a large quota can still exceed the harness's 180 s job limit; the task can recover with another `collect`.
 - minecraft-data 3.117.0 maps 1.21.1 entity attributes with the 1.20.5 IDs; for example, movement speed is labelled `generic.step_height`. prismarine-physics uses its own step height and default speed, so bot movement is unaffected.
 - An idle server bot in manual mode has no reflexes. During testing, a skeleton killed it between runs. Respawn it in the regular client, then reconnect the bot.
 - One release during testing reported "a game menu was opened" after a window click, and it did not reproduce. Releases now log the screen class and window focus to diagnose a recurrence.
@@ -161,6 +170,8 @@ These are behaviors found during live testing that the code depends on:
   - Joining as a dead character emits `death` but never `spawn`.
   - Each block attempt during collection is capped at 20 s.
   - Deposits open the container from wherever it is in reach (4 blocks from the eyes), and walk with `GoalGetToBlock` otherwise. They count stored items from the container window, because a failed transfer leaves the remainder on the cursor until the window closes.
+  - Planning a path to a collection target gets 2 s instead of the pathfinder's 5 s default. An unreachable log high in a tree used to burn the full 5 s; a block that times out is retried with the full budget only after quicker blocks run out.
+  - After mining, the bot walks to where the drop lands (the first solid block below), not to the mined block, which may be in the air. Walking to a point in the air cost up to 10 s per log.
 - **Death screen.** Servers can send the death screen before the health update, so Fabric treats `DeathScreen` as death.
 - **CLI version flag.** The CLI's own version flag is `-V, --cli-version` so that `server --version` reaches the subcommand.
 
