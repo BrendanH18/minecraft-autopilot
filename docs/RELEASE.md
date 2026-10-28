@@ -45,4 +45,4 @@ After the live checks and remote CI pass, tag the verified commit as `v0.1.0` an
 
 ## Planning estimate
 
-The code and packaging can be prepared independently of live account access. The remaining critical path is one or two focused live-testing sessions plus any fixes they uncover. This is a conditional estimate, not a scheduled release date; authenticated handoff and Fabric gameplay with the packaged mod have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.
+The code and packaging can be prepared independently of live account access. The remaining critical path is one or two focused live-testing sessions plus any fixes they uncover, then remote CI and a clean-source artifact rebuild on the release commit. This is a conditional estimate, not a scheduled release date; authenticated handoff and Fabric gameplay with the packaged mod have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.
