@@ -9,7 +9,7 @@ Implemented: Fabric control, server bot, authenticated bridge/leases, CLI, MCP, 
 ## v0.1 acceptance work
 
 1. Install in a normal Fabric launcher and test current recovery/handoff behavior.
-2. ~~Run a real Ollama task with inventory/home criteria~~ (done with the bot on 20 October 2026) and exercise a real MCP agent.
+2. ~~Run a real Ollama task with inventory/home criteria~~ (done with the bot on 20 October 2026) and ~~exercise a real MCP agent~~ (done with the bot on 27 October 2026).
 3. Validate authenticated client → bot → client continuity using UUID and inventory.
 4. Validate cobblestone/tool loss, hostile observations, dimension changes, partial collection, and failed returns in live worlds. The bot passed these on 20 October 2026; Fabric and an actual pit remain.
 5. Confirm remote CI, rebuild a clean-source artifact, and publish the preview with tested configurations and limitations.

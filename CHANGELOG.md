@@ -32,4 +32,4 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Validation limits
 
-Recorded live tests used development single-player/offline multiplayer. Real Ollama/MCP use, authenticated handoff, normal launcher installation, and latest recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, deposits, seamless transfer, and guaranteed survival are not implemented.
+Recorded live tests used development single-player/offline multiplayer. Real Ollama planning and a real MCP agent (Claude Code) were validated with the bot. Authenticated handoff, normal launcher installation, and Fabric recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, deposits, seamless transfer, and guaranteed survival are not implemented.

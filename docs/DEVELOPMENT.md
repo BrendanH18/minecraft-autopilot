@@ -119,10 +119,12 @@ The same session also verified these with the bot:
 - A summoned zombie at 4.3 blocks appears in `threats`, while a skeleton at 18 blocks does not.
 - A Nether teleport during `guard` releases control immediately with "World or dimension changed."
 
+**Real MCP agent check (27 October 2026)** used Claude Code 2.1.312 in headless mode (`claude -p --strict-mcp-config`) with only the five Minecraft MCP tools allowed. The MCP server was `node src/cli.js mcp` against the Mineflayer bot as a fresh offline account on the local server (peaceful, daytime). The agent was asked to observe, take control, save a home, collect 3 additional sand, verify, stop, and confirm manual mode. It called `minecraft_observe` → `minecraft_take_control` → `set_home` → `collect` sand 3 → `minecraft_observe` → `minecraft_stop` → `minecraft_observe`. The raw tool results showed inventory going from empty to 3 sand and the bot ending 1.97 blocks from home. A separate CLI `observe` then confirmed the 3 sand and `manual` mode independently of the agent, and the MCP server process exited with the client.
+
 **Not yet verified live:**
 - Cobblestone, hostile observations, dimension changes, and partial collection in a pit with the Fabric client.
 - Microsoft-authenticated play and a normal launcher profile.
-- A real MCP agent.
+- A real MCP agent with the Fabric client.
 
 ## Known issues
 
