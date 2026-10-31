@@ -12,3 +12,11 @@
   and test servers after validation.
 - This repo is public: keep personal notes and machine-specific details out of
   tracked files.
+
+## Context maintenance
+
+- Keep project rules and durable project knowledge in tracked `AGENTS.md` and
+  repository docs; do not store them in agent auto-memory or machine-local notes.
+- `CLAUDE.md` contains only `@AGENTS.md`. Shared hooks, scripts and settings
+  belong in tracked files. Do not ignore instruction files or shared settings;
+  ignore only machine-local settings and agent worktrees.
