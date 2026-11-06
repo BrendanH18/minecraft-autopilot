@@ -11,14 +11,19 @@ const requested = process.argv.slice(2);
 const downloadsAllowed = requested.includes('--allow-downloads');
 const argumentsToPass = requested.filter(value => value !== '--allow-downloads');
 if (!downloadsAllowed) {
-  const distributions = join(root, '.gradle-user/wrapper/dists/gradle-8.12.1-bin');
+  // Use the Gradle version the wrapper pins, so a wrapper upgrade needs no change here.
+  const wrapperProperties = await readFile(join(root, 'mod/gradle/wrapper/gradle-wrapper.properties'), 'utf8');
+  const distribution = wrapperProperties.match(/distributionUrl=.*\/(gradle-([^/-]+)-(?:bin|all))\.zip/);
+  if (!distribution) throw new Error('Could not read the Gradle version from mod/gradle/wrapper/gradle-wrapper.properties.');
+  const [, distributionName, gradleVersion] = distribution;
+  const distributions = join(root, '.gradle-user/wrapper/dists', distributionName);
   let cached = false;
   try {
     for (const directory of await readdir(distributions)) {
-      try { await access(join(distributions, directory, 'gradle-8.12.1/bin', windows ? 'gradle.bat' : 'gradle')); cached = true; } catch {}
+      try { await access(join(distributions, directory, `gradle-${gradleVersion}/bin`, windows ? 'gradle.bat' : 'gradle')); cached = true; } catch {}
     }
   } catch {}
-  if (!cached) throw new Error('Gradle 8.12.1 is not cached in this project. No download was made. Use --allow-downloads only after approving the download.');
+  if (!cached) throw new Error(`Gradle ${gradleVersion} is not cached in this project. No download was made. Use --allow-downloads only after approving the download.`);
   argumentsToPass.unshift('--offline');
   if (argumentsToPass.includes('runClient')) {
     const assetsRoot = join(root, '.gradle-user/caches/fabric-loom/assets');
