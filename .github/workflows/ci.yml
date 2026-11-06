@@ -4,25 +4,40 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly build without caches so broken upstream downloads (Gradle, Minecraft,
+  # Fabric, Baritone) show up even when nothing is pushed.
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run. Every other run (main,
+# schedule, manual) gets its own group, so it is never cancelled or queued.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   node:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          # .npmrc points the npm cache at .npm-cache; setup-node reads it from npm config.
+          cache: npm
       - run: npm ci
       - run: npm run check
       - run: npm test
       - run: npm start -- demo --smoke
 
   mod:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,10 +47,35 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      # scripts/gradle.js keeps GRADLE_USER_HOME in .gradle-user/ and setup downloads
+      # into .deps/, so setup-java's Gradle cache would miss them. The key covers the
+      # Gradle build files, the wrapper, and the scripts that pin the Baritone and
+      # Fabric API jars. Scheduled runs skip the cache to exercise every download.
+      - uses: actions/cache@v4
+        if: github.event_name != 'schedule'
+        with:
+          path: |
+            .gradle-user/caches
+            .gradle-user/wrapper
+            .deps
+          key: mod-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mod/*.gradle', 'mod/gradle.properties', 'mod/gradle/wrapper/gradle-wrapper.properties', 'scripts/setup-mod.js', 'scripts/package-mod.js') }}
+          restore-keys: |
+            mod-deps-${{ runner.os }}-${{ runner.arch }}-
       # CI opts into downloads explicitly; local builds stay offline by default.
-      - run: node scripts/setup-mod.js --allow-downloads
-      - run: node scripts/gradle.js build --allow-downloads
-      - run: node scripts/package-mod.js --allow-downloads
+      - name: Download dependencies and build
+        run: |
+          node scripts/setup-mod.js --allow-downloads
+          node scripts/gradle.js build --allow-downloads
+          node scripts/package-mod.js --allow-downloads
+      # Rebuild from a clean output with the everyday offline commands to check the
+      # "no implicit downloads" rule: gradle.js passes --offline, and setup/package
+      # fail instead of fetching if a pinned jar is missing.
+      - name: Offline rebuild and verify
+        run: |
+          rm -rf dist
+          node scripts/gradle.js clean
+          npm run build:mod
+          npm run verify:mod
       - uses: actions/upload-artifact@v4
         with:
           name: minecraft-agent-installation
