@@ -8,9 +8,14 @@ updates:
       npm:
         patterns: ['*']
 
-  # Covers the Gradle plugins, libraries and wrapper in mod/. The Baritone and
-  # Fabric API jars that scripts/setup-mod.js and scripts/package-mod.js pin by
-  # SHA-256 are not visible to Dependabot and are updated by hand.
+  # Covers what mod/build.gradle declares literally (the fabric-loom plugin) and
+  # the Gradle wrapper. A wrapper bump also needs the version hard-coded in
+  # scripts/gradle.js updated, or the offline build check fails.
+  # Not covered, and updated by hand together: the Minecraft, Yarn, Fabric
+  # Loader and Fabric API versions in mod/gradle.properties (Dependabot doesn't
+  # resolve them through ${project.*}, and they must move with the Minecraft
+  # version), and the Baritone and Fabric API jars that scripts/setup-mod.js
+  # and scripts/package-mod.js pin by SHA-256.
   - package-ecosystem: gradle
     directory: /mod
     schedule:
