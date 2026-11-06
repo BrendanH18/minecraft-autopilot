@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ['*']
+
+  # Covers the Gradle plugins, libraries and wrapper in mod/. The Baritone and
+  # Fabric API jars that scripts/setup-mod.js and scripts/package-mod.js pin by
+  # SHA-256 are not visible to Dependabot and are updated by hand.
+  - package-ecosystem: gradle
+    directory: /mod
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
