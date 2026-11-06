@@ -29,7 +29,7 @@ dependencies {
     // Loom does not put this local mod's nested library on the development classpath.
     // The unmodified release jar already includes it for normal launcher installs.
     modRuntimeOnly files('../.deps/nether-pathfinder-1.6.jar')
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
