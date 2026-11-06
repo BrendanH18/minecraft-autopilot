@@ -9,8 +9,8 @@ updates:
         patterns: ['*']
 
   # Covers what mod/build.gradle declares literally (the fabric-loom plugin) and
-  # the Gradle wrapper. A wrapper bump also needs the version hard-coded in
-  # scripts/gradle.js updated, or the offline build check fails.
+  # the Gradle wrapper. scripts/gradle.js reads the wrapper's version, so a
+  # wrapper bump needs no other change.
   # Not covered, and updated by hand together: the Minecraft, Yarn, Fabric
   # Loader and Fabric API versions in mod/gradle.properties (Dependabot doesn't
   # resolve them through ${project.*}, and they must move with the Minecraft
