@@ -20,11 +20,11 @@
   "engines": { "node": ">=22" },
   "overrides": { "uuid": "11.1.1" },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
-    "commander": "14.0.2",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "commander": "15.0.0",
     "mineflayer": "4.39.0",
     "mineflayer-pathfinder": "2.4.5",
-    "vec3": "0.1.10",
-    "zod": "3.25.76"
+    "vec3": "0.2.0",
+    "zod": "4.6.7"
   }
 }
