@@ -15,7 +15,7 @@ Let a local agent take over the **same Minecraft Java character a person is alre
 
 ## Setup from a fresh clone
 
-Requires Node.js 22+ and a full Java 21 JDK (`java`, `javac`, and `jar` on PATH). These commands download dependencies into the repository:
+Requires Node.js 22.12+ and a full Java 21 JDK (`java`, `javac`, and `jar` on PATH). These commands download dependencies into the repository:
 
 ```sh
 npm ci

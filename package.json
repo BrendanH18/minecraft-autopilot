@@ -17,7 +17,7 @@
     "dev:mod": "npm run setup:mod && node scripts/gradle.js runClient",
     "demo": "node src/cli.js demo"
   },
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.12" },
   "overrides": { "uuid": "11.1.1" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

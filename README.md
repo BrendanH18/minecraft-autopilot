@@ -54,13 +54,13 @@ npm start -- stop
 | --- | --- | --- |
 | Fabric client | An agent should control your single-player or multiplayer character | Minecraft Java 1.21.1, Fabric Loader 0.16.14+, three mod jars, and a running game |
 | Server bot | A dedicated server should stay connected while your regular client is closed | A compatible Java server and your account; authenticated handoff still needs live validation |
-| Demo | You want to test the CLI, bridge, MCP, or planner without touching a world | Node.js 22+ |
+| Demo | You want to test the CLI, bridge, MCP, or planner without touching a world | Node.js 22.12+ |
 
 A closed single-player world cannot continue through the bot. Keep it open in Fabric or host it on a dedicated server. Only use automation on servers where it is allowed.
 
 ## Install the Fabric mod
 
-The pinned stack is Minecraft Java **1.21.1**, Fabric Loader **0.16.14**, Fabric API **0.116.17+1.21.1**, and Baritone **1.11.3**. Building requires a full **Java 21 JDK** with `java`, `javac`, and `jar` on PATH; the CLI requires Node.js 22+.
+The pinned stack is Minecraft Java **1.21.1**, Fabric Loader **0.16.14**, Fabric API **0.116.17+1.21.1**, and Baritone **1.11.3**. Building requires a full **Java 21 JDK** with `java`, `javac`, and `jar` on PATH; the CLI requires Node.js 22.12+.
 
 From the checkout above, first-time setup explicitly downloads the build dependencies:
 
