@@ -54,3 +54,42 @@ test('CLI verification returns exit 2 for a false success claim and exit 0 for o
   assert.deepEqual(thinking, [undefined, undefined, undefined, false, false, false]);
   assert.equal(harness.observe().mode, 'manual');
 });
+
+
+test('CLI exposes final-state criteria and returns exit 2 at a step limit', { timeout: 15_000 }, async t => {
+  const directory = await testDirectory(t, 'criteria-cli-');
+  const driver = new DemoDriver();
+  driver.home = { ...driver.player.position };
+  const harness = new Harness(driver);
+  const discoveryPath = join(directory, 'bridge.json');
+  const bridge = await startBridge(harness, { discoveryPath });
+  let decision = { type: 'done', reason: 'Observed final state.' };
+  const model = createServer((request, response) => {
+    request.resume();
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ message: { content: JSON.stringify(decision) } }));
+  });
+  await new Promise(resolve => model.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await bridge.close();
+    model.closeAllConnections();
+    await new Promise(resolve => model.close(resolve));
+  });
+  const run = (...flags) => new Promise(resolve => execFile(process.execPath, [join(projectRoot, 'src/cli.js'), '--bridge', discoveryPath,
+    'agent', 'Check the final state', '--model', 'mock', '--steps', '1', '--ollama', `http://127.0.0.1:${model.address().port}`, ...flags],
+    { timeout: 10_000 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+  const passed = await run('--verify-health', '20', '--verify-hunger', '14', '--verify-at', '0,64,0,0',
+    '--verify-inventory', 'bread:8', '--verify-max-threats', '0', '--verify-home', '--verify-home-radius', '0');
+  assert.equal(passed.error, null, passed.stderr);
+  const result = JSON.parse(passed.stdout);
+  assert.equal(result.status, 'criteria_met');
+  for (const check of Object.values(result.verification.checks)) assert.equal(check.met, true);
+  decision = { type: 'goto', x: 0, y: 64, z: 0 };
+  const limited = await run('--verify-hunger', '20');
+  assert.equal(limited.error?.code, 2, limited.stderr);
+  assert.equal(JSON.parse(limited.stdout).status, 'step_limit');
+  const invalid = await run('--verify-home-radius', '1');
+  assert.equal(invalid.error?.code, 1);
+  assert.match(invalid.stderr, /requires returnHome/);
+  assert.equal(harness.observe().mode, 'manual');
+});

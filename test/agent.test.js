@@ -398,3 +398,99 @@ test('repeated food interruptions remain bounded by the overall task deadline', 
   assert.equal(inspections, 1);
   assert.equal(adapter.releases, 1);
 });
+
+test('planner rejects missing or oversized task and model text before takeover', async () => {
+  for (const [goal, model] of [[' ', 'test'], [null, 'test'], ['a'.repeat(16001), 'test'], ['Task', ' '], ['Task', 4], ['Task', 'a'.repeat(201)]]) {
+    const adapter = fakeAdapter();
+    await assert.rejects(runAgent(adapter, goal, { model }), /goal|model/);
+    assert.equal(adapter.state.mode, 'manual');
+  }
+});
+
+test('API callers receive the same bounded planner limits as CLI callers', async () => {
+  for (const options of [{ maxSteps: 0 }, { maxSteps: 1.5 }, { maxSteps: 1001 }, { minutes: NaN }, { minutes: 0 }, { minutes: 1441 }, { modelTimeout: Infinity }, { modelTimeout: -1 }, { modelTimeout: 3601 }, { think: 'false' }]) {
+    const adapter = fakeAdapter();
+    await assert.rejects(runAgent(adapter, 'Task', { model: 'test', ...options }), /steps|boolean/);
+    assert.equal(adapter.state.mode, 'manual');
+  }
+});
+
+test('planner refuses credentials embedded in local Ollama URLs before takeover', async () => {
+  const adapter = fakeAdapter();
+  await assert.rejects(runAgent(adapter, 'Task', { model: 'test', ollamaUrl: 'http://user:secret@localhost:11434' }), /must not contain credentials/);
+  assert.equal(adapter.state.mode, 'manual');
+});
+
+test('local connection failures explain how to restore Ollama and release control', async () => {
+  const adapter = fakeAdapter();
+  const cause = new TypeError('fetch failed');
+  await assert.rejects(runAgent(adapter, 'Task', { model: 'test', fetchImpl: async () => { throw cause; } }), error => {
+    assert.match(error.message, /Start Ollama/);
+    assert.equal(error.cause, cause);
+    return true;
+  });
+  assert.equal(adapter.releases, 1);
+});
+
+test('empty model action gives a thinking-model recovery hint', async () => {
+  for (const content of ['', '   ', undefined]) {
+    const adapter = fakeAdapter();
+    await assert.rejects(runAgent(adapter, 'Task', { model: 'test', fetchImpl: async () => new Response(JSON.stringify({ message: { content } })) }), /no action.*--no-thinking/);
+    assert.deepEqual(adapter.actions, []);
+    assert.equal(adapter.releases, 1);
+  }
+});
+
+test('oversized model actions are rejected before parsing or execution', async () => {
+  const adapter = fakeAdapter();
+  await assert.rejects(runAgent(adapter, 'Task', { model: 'test', fetchImpl: async () => new Response(JSON.stringify({ message: { content: ' '.repeat(65536) + '{}' } })) }), /oversized action/);
+  assert.deepEqual(adapter.actions, []);
+  assert.equal(adapter.releases, 1);
+});
+
+test('planner validates world bounds and item names before dispatching to adapters', async () => {
+  for (const action of [{ type: 'goto', x: 30000000, y: 64, z: 0 }, { type: 'goto', x: 0, y: -65, z: 0 }, { type: 'collect', block: 'not an identifier', count: 1 }, { type: 'deposit', item: '../oak_log' }]) {
+    const adapter = fakeAdapter();
+    await assert.rejects(runAgent(adapter, 'Task', { model: 'test', fetchImpl: async () => reply(action) }), /invalid action/);
+    assert.deepEqual(adapter.actions, []);
+    assert.equal(adapter.releases, 1);
+  }
+});
+
+test('model can refresh storage only on backends that expose containers', async () => {
+  assert.ok(decisionJsonSchema.properties.type.enum.includes('inspect_storage'));
+  for (const supported of [true, false]) {
+    const adapter = fakeAdapter();
+    if (supported) adapter.state.containers = [];
+    const inputs = [];
+    const decisions = [{ type: 'inspect_storage' }, { type: 'done', reason: 'Checked.' }];
+    await runAgent(adapter, 'Inspect storage', { model: 'test', log() {}, fetchImpl: async (url, request) => {
+      inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
+      return reply(decisions.shift());
+    } });
+    assert.deepEqual(adapter.actions, supported ? [{ type: 'inspect_storage' }] : []);
+    if (!supported) assert.match(inputs[1].history[0].error, /does not support/);
+  }
+});
+
+test('terminal failed and cancelled action results count toward the failure stop', async () => {
+  for (const status of ['failed', 'cancelled']) {
+    const adapter = fakeAdapter();
+    adapter.execute = async function (action) { this.actions.push(action); return { status, message: 'Path blocked.' }; };
+    await assert.rejects(runAgent(adapter, 'Task', { model: 'test', log() {}, fetchImpl: async () => reply({ type: 'home' }) }), /Three consecutive actions failed/);
+    assert.equal(adapter.actions.length, 3);
+    assert.equal(adapter.releases, 1);
+  }
+});
+
+test('namespace aliases cannot bypass repeated ineffective action detection', async () => {
+  const adapter = fakeAdapter();
+  const decisions = [{ type: 'collect', block: 'oak_log', count: 1 }, { type: 'collect', block: 'minecraft:oak_log', count: 1 }, { type: 'done', reason: 'No progress.' }];
+  const inputs = [];
+  await runAgent(adapter, 'Task', { model: 'test', log() {}, fetchImpl: async (url, request) => {
+    inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
+    return reply(decisions.shift());
+  } });
+  assert.equal(adapter.actions.length, 1);
+  assert.match(inputs[2].history[1].rejected, /without changing/);
+});
