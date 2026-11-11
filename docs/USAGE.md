@@ -184,3 +184,55 @@ Default cleanup preserves sign-in caches, homes, development worlds, and unrelat
 | Dead-character join refused | Respawn in the regular client, disconnect, then retry |
 
 Run `npm start -- doctor` for offline diagnostics. [Known issues](DEVELOPMENT.md#known-issues) include a protocol decode warning, slow tree collection, and an intermittent menu-release observation. Report versions, backend, command, expected behavior, and redacted logs; omit tokens and sign-in caches.
+
+
+## Focused observations and final-state checks
+
+These commands read the connected player's current observations without taking control:
+
+```sh
+npm start -- inventory --item bread
+npm start -- blocks --name oak_log --radius 16 --limit 10
+npm start -- threats --radius 16 --limit 5
+npm start -- home-info
+npm start -- storage --radius 16
+npm start -- distance 10 64 10
+npm start -- position
+npm start -- health
+```
+
+`inventory` combines stacks and reports total items and occupied slots in the selected result.
+Spatial views sort by distance and default to 20 results. Their radius and limit must be positive;
+`--limit` accepts a positive integer. Blocks, threats, and storage include only observations supplied by the
+backend, not a full world scan. Storage contents are labelled `last_observed`, and unsupported
+backends return `supported: false`. `distance` reports straight-line and horizontal distances
+plus the signed vertical offset. These views preserve any existing control lease.
+
+`npm start -- inspect-storage` explicitly acquires control to refresh known containers (server
+bot/demo only); it may walk and returns near its starting point. `npm start -- wait 5` acquires
+control for a bounded wait of 1–3600 seconds with the normal survival response and cancellation.
+Both return control on exit.
+
+Additional independent final-state criteria can be combined with existing collection/deposit checks:
+
+```sh
+npm start -- agent "Eat and return with bread" --model YOUR_LOCAL_MODEL \
+  --verify-health 16 --verify-hunger 18 --verify-inventory bread:2 \
+  --verify-home --verify-home-radius 3 --verify-max-threats 0
+npm start -- agent "Walk to the destination" --model YOUR_LOCAL_MODEL --verify-at 10,64,10,2
+```
+
+Health accepts 1–20, hunger an integer 0–20, and inventory 1–2304 total held items (not additional
+items or deposited items). Destinations use `x,y,z[,radius]` with the same coordinate bounds as
+`goto`; radius defaults to 2. Destination/home radii accept 0–64; `--verify-home-radius` requires
+`--verify-home`. Maximum threats accepts a nonnegative integer and checks only the observed
+count; it does not certify safety outside loaded observations. Missing hunger/threat data cannot
+satisfy the corresponding check. All configured criteria must pass. A decision limit with any
+criteria exits 2, including zero-valued hunger/threat criteria.
+
+Planner calls validate their goal, model, limits, local URL, and action fields before dispatch.
+Empty model replies suggest recovery options; actions above 65,536 characters are rejected.
+Credential-bearing Ollama URLs are refused. The planner can choose `inspect_storage` when the
+backend supplies containers; returned failed/cancelled actions count toward its existing
+three-failure stop. Ineffective repeat detection treats namespaced and short item names alike.
+See [the 30-change inventory](IMPROVEMENTS.md) for this batch and its validation coverage.

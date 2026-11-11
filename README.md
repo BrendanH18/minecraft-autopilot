@@ -125,6 +125,8 @@ Minecraft must remain running and unpaused, and the computer must remain awake. 
 
 Heartbeats run every two seconds; the bridge cancels activity after eight seconds without one. A frozen game enforces expiry when its event loop resumes. Local survival behavior runs only during an active session. A saved home is a waypoint, not a guarantee of safety.
 
+Focused read-only commands include `inventory`, `blocks`, `threats`, `home-info`, `storage`, `distance`, `position`, and `health`. Use `inspect-storage` to refresh known containers or `wait` for a bounded controlled pause. [Additional final-state checks](docs/USAGE.md#focused-observations-and-final-state-checks) verify health, hunger, destinations, held inventory, observed threats, and a configurable home radius.
+
 ## Documentation
 
 | Guide | Purpose |

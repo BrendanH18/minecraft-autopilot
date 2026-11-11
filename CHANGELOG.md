@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Ten focused CLI commands, six final-state verification criteria/options, and planner/storage reliability improvements; see [the 30-change inventory](docs/IMPROVEMENTS.md).
+
 - Fabric 1.21.1 control of the logged-in character through Baritone.
 - Mineflayer server bot with Microsoft device authentication and explicit offline development mode.
 - CLI observation, waypoints, navigation, collection, eating, guard, profile attachment, diagnostics, and cleanup.

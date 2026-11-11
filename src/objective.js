@@ -1,15 +1,21 @@
 import { z } from 'zod';
-import { normalizeAction } from './protocol.js';
+import { normalizeAction, positionSchema } from './protocol.js';
 
 const collectible = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'dirt', 'cobblestone', 'sand']);
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
 const inventory = z.array(z.object({ name: z.string(), count: z.number().int().nonnegative() }));
 const containers = z.array(z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int(),
-  items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).optional() }));
+  items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).min(1).optional() }));
 const criteriaSchema = z.object({
   collect: z.object({ block: z.string(), count: z.number().int().min(1).max(64) }).strict().optional(),
   deposit: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
   returnHome: z.boolean().optional(),
+  homeRadius: z.number().finite().min(0).max(64).optional(),
+  minHealth: z.number().finite().min(1).max(20).optional(),
+  minHunger: z.number().int().min(0).max(20).optional(),
+  destination: positionSchema.extend({ radius: z.number().finite().min(0).max(64).default(2) }).optional(),
+  inventory: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
+  maxThreats: z.number().int().min(0).optional(),
 }).strict();
 
 export function parseCollectionCriterion(value) {
@@ -26,10 +32,23 @@ export function parseDepositCriterion(value) {
   return { item, count };
 }
 
+export function parseInventoryCriterion(value) {
+  return parseDepositCriterion(value);
+}
+
+export function parseDestinationCriterion(value) {
+  const parts = value.split(',');
+  if (parts.length < 3 || parts.length > 4 || parts.some(part => !part.trim())) throw new Error('Use x,y,z or x,y,z,radius for a destination.');
+  const [x, y, z, radius = 2] = parts.map(Number);
+  return criteriaSchema.shape.destination.parse({ x, y, z, radius });
+}
+
 /** Checks explicit criteria only; free-form goal text is never parsed as a contract. */
 export function createObjective(criteria, initialState) {
   const parsed = criteriaSchema.parse(criteria);
-  if (!parsed.collect && !parsed.deposit && !parsed.returnHome) return null;
+  if (parsed.homeRadius !== undefined && !parsed.returnHome) throw new Error('homeRadius requires returnHome.');
+  if (!parsed.collect && !parsed.deposit && !parsed.returnHome && parsed.minHealth === undefined && parsed.minHunger === undefined && !parsed.destination && !parsed.inventory && parsed.maxThreats === undefined) return null;
+  const requiredInventory = parsed.inventory ? parseInventoryCriterion(`${parsed.inventory.item}:${parsed.inventory.count}`) : null;
   const player = z.object({ uuid: z.string().min(1), dimension: z.string().min(1) }).parse(initialState.player);
   const collect = parsed.collect ? parseCollectionCriterion(`${parsed.collect.block}:${parsed.collect.count}`) : null;
   const count = state => inventory.parse(state.inventory).filter(item => item.name === collect.block).reduce((total, item) => total + item.count, 0);
@@ -43,7 +62,12 @@ export function createObjective(criteria, initialState) {
   if (deposit) {
     if (!Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs the server bot or demo.');
     // Contents known before the task are the baseline; a container first opened during the task uses what it held then.
-    initialStored = containers.parse(initialState.containers).filter(container => container.items);
+    const seenInitial = new Set();
+    initialStored = containers.parse(initialState.containers).filter(container => {
+      if (!container.items || seenInitial.has(key(container))) return false;
+      seenInitial.add(key(container));
+      return true;
+    });
     for (const container of initialStored) for (const source of sources(container)) initialSources.add(source.id);
   }
   const held = (items, name) => items.filter(item => item.name === name).reduce((total, item) => total + item.count, 0);
@@ -53,9 +77,15 @@ export function createObjective(criteria, initialState) {
     home = point.parse(initialState.home);
   }
   return {
-    description: { collect: collect ? { ...collect, initialCount } : null, deposit, home: home || null },
+    description: { collect: collect ? { ...collect, initialCount } : null, deposit, home: home || null,
+      ...(home && { homeRadius: parsed.homeRadius ?? 2 }),
+      ...(parsed.minHealth !== undefined && { minHealth: parsed.minHealth }),
+      ...(parsed.minHunger !== undefined && { minHunger: parsed.minHunger }),
+      ...(parsed.destination && { destination: parsed.destination }),
+      ...(requiredInventory && { inventory: requiredInventory }),
+      ...(parsed.maxThreats !== undefined && { maxThreats: parsed.maxThreats }) },
     check(state, { storageRefreshed = false } = {}) {
-      const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && state.player.health > 0;
+      const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && Number.isFinite(state.player.health) && state.player.health > 0;
       const checks = {};
       let stored = null;
       if (deposit) {
@@ -65,7 +95,7 @@ export function createObjective(criteria, initialState) {
           // Only current coordinates deduplicate inventory; historical sources never hide a separate container.
           if (seen.has(key(container))) return total;
           seen.add(key(container));
-          for (const source of sources(container)) if (!initialSources.has(source.id)) discoveredSources.set(source.id, source.items);
+          for (const source of sources(container)) if (!initialSources.has(source.id) && !discoveredSources.has(source.id)) discoveredSources.set(source.id, source.items);
           return total + held(container.items, deposit.item);
         }, 0);
         const baseline = initialStored.reduce((total, container) => total + held(container.items, deposit.item), 0)
@@ -85,7 +115,29 @@ export function createObjective(criteria, initialState) {
       if (home) {
         const position = samePlayer ? point.parse(state.player.position) : null;
         const distance = position ? Math.hypot(position.x - home.x, position.y - home.y, position.z - home.z) : null;
-        checks.home = { target: home, distance, met: distance !== null && distance <= 2 };
+        checks.home = { target: home, distance, radius: parsed.homeRadius ?? 2, met: distance !== null && distance <= (parsed.homeRadius ?? 2) };
+      }
+      if (parsed.minHealth !== undefined) {
+        const current = samePlayer ? state.player.health : null;
+        checks.health = { current, required: parsed.minHealth, met: current !== null && current >= parsed.minHealth };
+      }
+      if (parsed.minHunger !== undefined) {
+        const current = samePlayer && Number.isInteger(state.player.hunger) && state.player.hunger >= 0 && state.player.hunger <= 20 ? state.player.hunger : null;
+        checks.hunger = { current, required: parsed.minHunger, met: current !== null && current >= parsed.minHunger };
+      }
+      if (parsed.destination) {
+        const position = samePlayer ? point.parse(state.player.position) : null;
+        const target = parsed.destination;
+        const distance = position ? Math.hypot(position.x - target.x, position.y - target.y, position.z - target.z) : null;
+        checks.destination = { target, distance, met: distance !== null && distance <= target.radius };
+      }
+      if (requiredInventory) {
+        const current = samePlayer ? held(inventory.parse(state.inventory), requiredInventory.item) : null;
+        checks.heldInventory = { item: requiredInventory.item, current, required: requiredInventory.count, met: current !== null && current >= requiredInventory.count };
+      }
+      if (parsed.maxThreats !== undefined) {
+        const current = samePlayer && Array.isArray(state.threats) ? state.threats.length : null;
+        checks.threats = { observed: current, maximum: parsed.maxThreats, met: current !== null && current <= parsed.maxThreats };
       }
       return { met: samePlayer && Object.values(checks).every(check => check.met), samePlayer, checks };
     },

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createObjective, parseCollectionCriterion, parseDepositCriterion } from '../src/objective.js';
+import { createObjective, parseCollectionCriterion, parseDepositCriterion, parseInventoryCriterion, parseDestinationCriterion } from '../src/objective.js';
 
 function state() {
   return { connected: true, player: { uuid: 'player-1', dimension: 'minecraft:overworld', health: 20, position: { x: 0, y: 64, z: 0 } },
@@ -90,4 +90,96 @@ test('a missing initial container cannot turn transfers of old stock into a depo
   const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, initial);
   const current = { ...state(), containers: [{ x: 2, y: 64, z: 0, items: logs(30) }] };
   assert.equal(objective.check(current).met, false);
+});
+
+
+test('minimum health requires a living player at the requested threshold', () => {
+  const objective = createObjective({ minHealth: 16 }, state());
+  const current = state(); current.player.health = 15;
+  assert.equal(objective.check(current).met, false);
+  current.player.health = 16;
+  assert.equal(objective.check(current).met, true);
+  assert.throws(() => createObjective({ minHealth: 21 }, state()));
+});
+
+test('minimum hunger treats missing or malformed food levels as unmet', () => {
+  const objective = createObjective({ minHunger: 18 }, state());
+  const current = state();
+  for (const hunger of [undefined, NaN, Infinity, 21, -1, 17, 18.5]) {
+    current.player.hunger = hunger;
+    assert.equal(objective.check(current).met, false);
+  }
+  current.player.hunger = 18;
+  assert.equal(objective.check(current).met, true);
+  assert.throws(() => createObjective({ minHunger: 21 }, current));
+});
+
+test('destination checks use bounded world coordinates and an explicit spherical radius', () => {
+  assert.deepEqual(parseDestinationCriterion('3,64,4'), { x: 3, y: 64, z: 4, radius: 2 });
+  const destination = parseDestinationCriterion('3,64,4,5');
+  const objective = createObjective({ destination }, state());
+  assert.equal(objective.check(state()).met, true);
+  const current = state(); current.player.position.y--;
+  assert.equal(objective.check(current).met, false);
+  for (const input of ['1,2', '1,2,', '1,2,3,4,5', 'Infinity,2,3', '0,321,0', '0,64,0,-1']) assert.throws(() => parseDestinationCriterion(input));
+});
+
+test('absolute inventory requirements sum matching slots without requiring new collection', () => {
+  assert.deepEqual(parseInventoryCriterion('oak_log:12'), { item: 'minecraft:oak_log', count: 12 });
+  const objective = createObjective({ inventory: { item: 'oak_log', count: 12 } }, state());
+  assert.equal(objective.check(state()).met, false);
+  const current = state(); current.inventory.push({ name: 'minecraft:oak_log', count: 2 });
+  assert.equal(objective.check(current).met, true);
+  assert.equal(objective.check(current).checks.heldInventory.current, 12);
+  assert.throws(() => parseInventoryCriterion('oak_log:0'));
+});
+
+test('maximum observed threats checks available observations and never assumes missing means safe', () => {
+  const objective = createObjective({ maxThreats: 0 }, state());
+  const current = state();
+  assert.equal(objective.check(current).met, false);
+  current.threats = [{ type: 'minecraft:zombie', distance: 5 }];
+  assert.equal(objective.check(current).met, false);
+  current.threats = [];
+  assert.equal(objective.check(current).met, true);
+  assert.throws(() => createObjective({ maxThreats: -1 }, state()));
+});
+
+test('home verification radius is configurable and must accompany returnHome', () => {
+  const objective = createObjective({ returnHome: true, homeRadius: 0 }, state());
+  const current = state();
+  assert.equal(objective.check(current).met, true);
+  current.player.position.x = 0.01;
+  assert.equal(objective.check(current).met, false);
+  assert.equal(createObjective({ returnHome: true, homeRadius: 4 }, state()).check({ ...current, player: { ...current.player, position: { x: 4, y: 64, z: 0 } } }).met, true);
+  assert.throws(() => createObjective({ homeRadius: 4 }, state()), /requires returnHome/);
+});
+
+test('duplicate initial container coordinates do not inflate the deposit baseline', () => {
+  const chest = count => ({ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count }] });
+  const initial = { ...state(), containers: [chest(10), chest(10)] };
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, initial);
+  assert.equal(objective.check({ ...state(), containers: [chest(18)] }).met, true);
+});
+
+test('a source baseline freezes when first discovered rather than following later contents', () => {
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, { ...state(), containers: [] });
+  const chest = (contents, baseline) => ({ x: 1, y: 64, z: 0, items: logs(contents), sources: [{ id: 'chest', items: logs(baseline) }] });
+  assert.equal(objective.check({ ...state(), containers: [chest(10, 10)] }).met, false);
+  assert.equal(objective.check({ ...state(), containers: [chest(18, 18)] }).met, true);
+});
+
+test('empty explicit source provenance cannot misrepresent preexisting container stock as a gain', () => {
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, { ...state(), containers: [] });
+  const current = { ...state(), containers: [{ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 10 }], sources: [] }] };
+  assert.throws(() => objective.check(current));
+});
+
+test('nonfinite health cannot satisfy any verification criterion', () => {
+  const objective = createObjective({ returnHome: true }, state());
+  for (const health of [NaN, Infinity, -Infinity, '20', undefined]) {
+    const current = state(); current.player.health = health;
+    assert.equal(objective.check(current).met, false);
+  }
 });

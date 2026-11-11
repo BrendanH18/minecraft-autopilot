@@ -9,7 +9,9 @@ import { attachBridge, cleanupRuntime, assertBridgeNotRunning } from './runtime.
 import { Harness } from './harness.js';
 import { startBridge } from './bridge-server.js';
 import { DemoDriver } from './demo-driver.js';
-import { parseCollectionCriterion, parseDepositCriterion } from './objective.js';
+import { parseCollectionCriterion, parseDepositCriterion, parseInventoryCriterion, parseDestinationCriterion } from './objective.js';
+import { positionSchema, normalizeAction } from './protocol.js';
+import { inventoryView, nearbyView, homeView, storageView, distanceTo, playerPosition, healthView, itemName } from './cli-views.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -39,6 +41,11 @@ function number(value) {
 function positiveInteger(value) {
   const parsed = number(value);
   if (!Number.isInteger(parsed) || parsed < 1) throw new InvalidArgumentError('Must be a positive integer.');
+  return parsed;
+}
+function positiveNumber(value) {
+  const parsed = number(value);
+  if (parsed <= 0) throw new InvalidArgumentError('Must be greater than zero.');
   return parsed;
 }
 function print(value) { console.log(JSON.stringify(value, null, 2)); }
@@ -75,6 +82,44 @@ program.command('eat').description('Eat supported food from inventory.').action(
 program.command('deposit').description('Store an item in the nearest chest or barrel within 16 blocks (server bot and demo).')
   .argument('<item>', 'Minecraft item name').argument('[count]', 'items to store; all when omitted', positiveInteger)
   .action((item, count) => perform({ type: 'deposit', item, ...(count !== undefined && { count }) }));
+async function view(select) {
+  const adapter = await connect();
+  try { print(select(await adapter.observe())); }
+  finally { await adapter.close(); }
+}
+program.command('inventory').description('Show combined item counts and occupied inventory slots without taking control.')
+  .option('--item <name>', 'only show this item', itemName)
+  .action(options => view(state => inventoryView(state, options)));
+program.command('blocks').description('List observed loaded blocks nearest first; this is a partial observation.')
+  .option('--name <name>', 'only show this block', itemName)
+  .option('--radius <blocks>', 'maximum distance from the player', positiveNumber)
+  .option('--limit <n>', 'maximum results', positiveInteger, 20)
+  .action(options => view(state => nearbyView(state, 'blocks', options)));
+program.command('threats').description('List observed hostile entities nearest first; absence does not prove safety.')
+  .option('--radius <blocks>', 'maximum distance from the player', positiveNumber)
+  .option('--limit <n>', 'maximum results', positiveInteger, 20)
+  .action(options => view(state => nearbyView(state, 'threats', options)));
+program.command('home-info').description('Show the saved home and its distance without taking control.')
+  .action(() => view(homeView));
+program.command('storage').description('Show nearby storage and last observed contents without opening containers.')
+  .option('--radius <blocks>', 'maximum distance from the player', positiveNumber)
+  .option('--limit <n>', 'maximum results', positiveInteger, 20)
+  .action(options => view(state => storageView(state, options)));
+program.command('distance').description('Measure straight-line and horizontal distance to a coordinate without moving.')
+  .argument('<x>', 'X coordinate', number).argument('<y>', 'Y coordinate', number).argument('<z>', 'Z coordinate', number)
+  .action((x, y, z) => {
+    const target = positionSchema.parse({ x, y, z });
+    return view(state => distanceTo(state, target));
+  });
+program.command('position').description('Show current coordinates and dimension without taking control.')
+  .action(() => view(state => ({ position: playerPosition(state), dimension: state.player.dimension })));
+program.command('health').description('Show health, hunger, and survival status without taking control.')
+  .action(() => view(healthView));
+program.command('inspect-storage').description('Open known storage to refresh observed contents (server bot and demo); takes control.')
+  .action(() => perform({ type: 'inspect_storage' }));
+program.command('wait').description('Stay under agent control for 1–3600 seconds with local survival behavior.')
+  .argument('<seconds>', 'duration in seconds', positiveNumber)
+  .action(seconds => perform(normalizeAction({ type: 'wait', seconds })));
 program.command('guard').description('Stay under agent control with local eating and low-health retreat behavior.')
   .option('--seconds <n>', 'duration, between 1 and 3600 seconds', positiveInteger, 300)
   .action(async options => {
@@ -108,6 +153,12 @@ program.command('agent').description('Run a bounded natural-language task using 
   .option('--verify-collect <block:count>', 'verify additional collected items, for example oak_log:8', parseCollectionCriterion)
   .option('--verify-deposit <item:count>', 'verify additional items stored in nearby containers, for example oak_log:8', parseDepositCriterion)
   .option('--verify-home', 'verify return within two blocks of the home saved before the task')
+  .option('--verify-health <n>', 'minimum final health, from 1 to 20', number)
+  .option('--verify-hunger <n>', 'minimum final hunger, from 0 to 20', number)
+  .option('--verify-at <x,y,z[,radius]>', 'verify a destination; radius defaults to 2', parseDestinationCriterion)
+  .option('--verify-inventory <item:count>', 'verify total items held at completion', parseInventoryCriterion)
+  .option('--verify-max-threats <n>', 'maximum observed threats at completion', number)
+  .option('--verify-home-radius <n>', 'home verification radius from 0 to 64; requires --verify-home', number)
   .option('--model-timeout <seconds>', 'maximum seconds to wait for each model decision', positiveInteger, 120)
   .option('--no-thinking', 'ask thinking models to answer without reasoning first (much faster)')
   .action(async (goal, options) => {
@@ -116,9 +167,9 @@ program.command('agent').description('Run a bounded natural-language task using 
     const adapter = await connect();
     try {
       const result = await runAgent(adapter, goal, { model: options.model, ollamaUrl: options.ollama, maxSteps: options.steps, minutes: options.minutes,
-        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, deposit: options.verifyDeposit, returnHome: options.verifyHome }, signal: abortController.signal, log });
+        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, deposit: options.verifyDeposit, returnHome: options.verifyHome, minHealth: options.verifyHealth, minHunger: options.verifyHunger, destination: options.verifyAt, inventory: options.verifyInventory, maxThreats: options.verifyMaxThreats, homeRadius: options.verifyHomeRadius }, signal: abortController.signal, log });
       print(result);
-      if (result.status === 'criteria_unmet' || result.status === 'step_limit' && (options.verifyCollect || options.verifyDeposit || options.verifyHome)) process.exitCode = 2;
+      if (result.status === 'criteria_unmet' || result.status === 'step_limit' && result.verification) process.exitCode = 2;
     }
     finally { await adapter.close(); }
   });
