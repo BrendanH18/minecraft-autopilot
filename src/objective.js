@@ -5,7 +5,7 @@ const collectible = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log',
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
 const inventory = z.array(z.object({ name: z.string(), count: z.number().int().nonnegative() }));
 const containers = z.array(z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int(),
-  items: inventory.nullable(), firstSeen: inventory.optional() }));
+  items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).optional() }));
 const criteriaSchema = z.object({
   collect: z.object({ block: z.string(), count: z.number().int().min(1).max(64) }).strict().optional(),
   deposit: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
@@ -36,11 +36,15 @@ export function createObjective(criteria, initialState) {
   const initialCount = collect ? count(initialState) : null;
   const deposit = parsed.deposit ? parseDepositCriterion(`${parsed.deposit.item}:${parsed.deposit.count}`) : null;
   let initialStored;
+  const initialSources = new Set();
+  const discoveredSources = new Map();
+  const key = container => `${container.x},${container.y},${container.z}`;
+  const sources = container => container.sources ?? [{ id: key(container), items: container.firstSeen ?? container.items }];
   if (deposit) {
     if (!Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs the server bot or demo.');
     // Contents known before the task are the baseline; a container first opened during the task uses what it held then.
-    initialStored = new Map(containers.parse(initialState.containers).filter(container => container.items)
-      .map(container => [`${container.x},${container.y},${container.z}`, container.items]));
+    initialStored = containers.parse(initialState.containers).filter(container => container.items);
+    for (const container of initialStored) for (const source of sources(container)) initialSources.add(source.id);
   }
   const held = (items, name) => items.filter(item => item.name === name).reduce((total, item) => total + item.count, 0);
   let home;
@@ -50,21 +54,33 @@ export function createObjective(criteria, initialState) {
   }
   return {
     description: { collect: collect ? { ...collect, initialCount } : null, deposit, home: home || null },
-    check(state) {
+    check(state, { storageRefreshed = false } = {}) {
       const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && state.player.health > 0;
       const checks = {};
-      if (collect) {
-        const currentCount = samePlayer ? count(state) : null;
-        checks.inventory = { item: collect.block, initialCount, currentCount, requiredAdditional: collect.count,
-          met: currentCount !== null && currentCount - initialCount >= collect.count };
-      }
+      let stored = null;
       if (deposit) {
         const current = samePlayer ? containers.parse(state.containers || []).filter(container => container.items) : null;
-        const stored = current && current.reduce((total, container) => {
-          const baseline = initialStored.get(`${container.x},${container.y},${container.z}`) ?? container.firstSeen ?? container.items;
-          return total + held(container.items, deposit.item) - held(baseline, deposit.item);
+        const seen = new Set();
+        const contents = current && current.reduce((total, container) => {
+          // Only current coordinates deduplicate inventory; historical sources never hide a separate container.
+          if (seen.has(key(container))) return total;
+          seen.add(key(container));
+          for (const source of sources(container)) if (!initialSources.has(source.id)) discoveredSources.set(source.id, source.items);
+          return total + held(container.items, deposit.item);
         }, 0);
-        checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count, met: stored !== null && stored >= deposit.count };
+        const baseline = initialStored.reduce((total, container) => total + held(container.items, deposit.item), 0)
+          + [...discoveredSources.values()].reduce((total, items) => total + held(items, deposit.item), 0);
+        stored = contents === null ? null : contents - baseline;
+        checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count,
+          evidence: storageRefreshed ? 'refreshed' : 'last_observed', met: stored !== null && stored >= deposit.count };
+      }
+      if (collect) {
+        const currentCount = samePlayer ? count(state) : null;
+        // For gather-and-store, moving existing inventory into a chest must not count as newly collected.
+        const storedAdditional = deposit?.item === collect.block ? stored : 0;
+        checks.inventory = { item: collect.block, initialCount, currentCount, requiredAdditional: collect.count,
+          ...(deposit?.item === collect.block && { storedAdditional }),
+          met: currentCount !== null && storedAdditional !== null && currentCount - initialCount + storedAdditional >= collect.count };
       }
       if (home) {
         const position = samePlayer ? point.parse(state.player.position) : null;

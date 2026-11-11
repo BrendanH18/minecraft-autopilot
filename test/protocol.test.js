@@ -22,3 +22,11 @@ test('deposit actions name an item, default to everything held, and are refused 
   const adapter = new FabricAdapter({ backend: 'fabric', url: 'http://127.0.0.1:9/', token: 'x'.repeat(32), protocol: 1 });
   await assert.rejects(adapter.execute({ type: 'deposit', item: 'oak_log' }), /Fabric mod does not support them yet/);
 });
+
+
+test('storage inspection is bounded to an action with no model-supplied fields and is refused by Fabric', async () => {
+  assert.deepEqual(normalizeAction({ type: 'inspect_storage' }), { type: 'inspect_storage' });
+  assert.throws(() => normalizeAction({ type: 'inspect_storage', x: 100 }));
+  const adapter = new FabricAdapter({ backend: 'fabric', url: 'http://127.0.0.1:9/', token: 'x'.repeat(32), protocol: 1 });
+  await assert.rejects(adapter.execute({ type: 'inspect_storage' }), /Fabric mod does not support/);
+});

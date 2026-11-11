@@ -15,6 +15,7 @@ export class DemoDriver {
   }
   async execute(action, { signal, onProgress }) {
     signal.throwIfAborted();
+    if (action.type === 'inspect_storage') { this.chest.observedAt = Date.now(); return { message: 'Inspected demo storage.' }; }
     if (action.type === 'set_home') { this.home = { ...this.player.position }; return { message: 'Saved demo home.' }; }
     if (action.type === 'wait') { await delay(action.seconds * 1000, undefined, { signal }); return; }
     if (action.type === 'eat') {
@@ -45,6 +46,7 @@ export class DemoDriver {
       const stored = items.find(item => item.name === action.item);
       if (stored) stored.count += amount; else items.push({ name: action.item, count: amount });
       this.chest.items = items;
+      this.chest.observedAt = Date.now();
       return { message: `Simulated depositing ${amount} ${action.item}.` };
     }
     const target = action.type === 'home' ? this.home : { x: action.x, y: action.y, z: action.z };

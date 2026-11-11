@@ -62,8 +62,10 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **Automated tests:**
 - Node tests cover bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, independent inventory/home criteria, Mineflayer driver races, partial collection recovery and failed returns, and a Minecraft protocol fixture. Run `npm test` for the current test count.
-- Java tests: leases, bridge ownership, and runtime paths.
+- Java tests: leases, bridge ownership, runtime paths, and isolated action/retreat deadlines and failed-eating backoff. The controller enforces deadlines before food handling; these helper tests do not replace game integration checks.
 - `npm run build:mod` compiles against the pinned Minecraft, Fabric, and Baritone APIs.
+
+**November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
 **Live gameplay (October 2026)** used the Fabric development client and the bot against a local offline vanilla 1.21.1 server and a single-player world. Each item below was observed working:
 
