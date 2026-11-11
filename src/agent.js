@@ -70,7 +70,22 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
   try {
     if (criteria.deposit) {
       // Baseline known containers from live reads, not contents cached before this task.
-      await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
+      while (true) {
+        bounded.throwIfAborted();
+        const state = await adapter.observe();
+        if (state.mode !== 'agent' || adapter.leaseError) throw adapter.leaseError || new Error('Control returned to the player.');
+        if (state.recovering) { await delay(500, undefined, { signal: bounded }); continue; }
+        try {
+          await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
+          break;
+        } catch (error) {
+          bounded.throwIfAborted();
+          if (error.message !== 'Interrupted to eat. Food consumed; replan from fresh state.') throw error;
+          history.push({ action: { type: 'inspect_storage' }, error: error.message });
+          log('Food consumed; retrying the storage baseline inspection.');
+          await delay(250, undefined, { signal: bounded });
+        }
+      }
       initialState = { ...initialState, containers: (await adapter.observe()).containers };
       objective = createObjective(criteria, initialState);
     }

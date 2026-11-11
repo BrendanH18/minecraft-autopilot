@@ -5,7 +5,7 @@ const collectible = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log',
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
 const inventory = z.array(z.object({ name: z.string(), count: z.number().int().nonnegative() }));
 const containers = z.array(z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int(),
-  items: inventory.nullable(), firstSeen: inventory.optional() }));
+  items: inventory.nullable(), firstSeen: inventory.optional(), aliases: z.array(z.string().regex(/^-?\d+,-?\d+,-?\d+$/)).optional() }));
 const criteriaSchema = z.object({
   collect: z.object({ block: z.string(), count: z.number().int().min(1).max(64) }).strict().optional(),
   deposit: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
@@ -56,13 +56,20 @@ export function createObjective(criteria, initialState) {
       let stored = null;
       if (deposit) {
         const current = samePlayer ? containers.parse(state.containers || []).filter(container => container.items) : null;
+        const seen = new Set();
+        const countedBaselines = new Set();
         stored = current && current.reduce((total, container) => {
-          const baseline = initialStored.get(`${container.x},${container.y},${container.z}`) ?? container.firstSeen ?? container.items;
-          return total + held(container.items, deposit.item) - held(baseline, deposit.item);
+          const keys = [`${container.x},${container.y},${container.z}`, ...(container.aliases || [])];
+          if (keys.some(key => seen.has(key))) return total;
+          for (const key of keys) seen.add(key);
+          const baselines = keys.filter(key => initialStored.has(key) && !countedBaselines.has(key));
+          for (const key of baselines) countedBaselines.add(key);
+          const baseline = baselines.length ? baselines.reduce((sum, key) => sum + held(initialStored.get(key), deposit.item), 0)
+            : held(container.firstSeen ?? container.items, deposit.item);
+          return total + held(container.items, deposit.item) - baseline;
         }, 0);
         if (current) {
-          const present = new Set(current.map(container => `${container.x},${container.y},${container.z}`));
-          for (const [key, baseline] of initialStored) if (!present.has(key)) stored -= held(baseline, deposit.item);
+          for (const [key, baseline] of initialStored) if (!countedBaselines.has(key)) stored -= held(baseline, deposit.item);
         }
         checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count,
           evidence: storageRefreshed ? 'refreshed' : 'last_observed', met: stored !== null && stored >= deposit.count };

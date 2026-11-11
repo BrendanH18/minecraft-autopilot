@@ -348,3 +348,53 @@ test('deposit baseline is refreshed before the task rather than using pre-task c
   assert.equal(result.status, 'criteria_met');
   assert.equal(result.verification.checks.deposit.storedAdditional, 8);
 });
+
+test('eating during the starting inspection retries before establishing the storage baseline', async () => {
+  const adapter = verifiableAdapter();
+  adapter.state.containers = [{ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 30 }] }];
+  let inspections = 0;
+  let decisions = 0;
+  adapter.execute = async function (action) {
+    assert.equal(action.type, 'inspect_storage');
+    if (++inspections === 1) {
+      assert.equal(decisions, 0);
+      this.state.player.hunger = 20;
+      throw new Error('Interrupted to eat. Food consumed; replan from fresh state.');
+    }
+    return { status: 'completed' };
+  };
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => { decisions++; return reply({ type: 'done', reason: 'Unable to store.' }); } });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.equal(decisions, 3);
+  assert.equal(inspections, 5, 'interrupted baseline, retry, and three final inspections');
+  assert.equal(adapter.releases, 1);
+});
+
+test('takeover during a recoverable starting inspection prevents a retry', async () => {
+  const adapter = verifiableAdapter();
+  adapter.state.containers = [];
+  let inspections = 0;
+  adapter.execute = async () => {
+    inspections++;
+    adapter.state.mode = 'manual';
+    throw new Error('Interrupted to eat. Food consumed; replan from fresh state.');
+  };
+  await assert.rejects(runAgent(adapter, 'Store logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } } }), /returned to the player/);
+  assert.equal(inspections, 1);
+  assert.equal(adapter.releases, 1);
+});
+
+test('repeated food interruptions remain bounded by the overall task deadline', async () => {
+  const adapter = verifiableAdapter();
+  adapter.state.containers = [];
+  let inspections = 0;
+  adapter.execute = async () => {
+    inspections++;
+    throw new Error('Interrupted to eat. Food consumed; replan from fresh state.');
+  };
+  await assert.rejects(runAgent(adapter, 'Store logs', { model: 'test', minutes: 0.001, log() {},
+    criteria: { deposit: { item: 'oak_log', count: 8 } } }), /timeout|aborted/i);
+  assert.equal(inspections, 1);
+  assert.equal(adapter.releases, 1);
+});

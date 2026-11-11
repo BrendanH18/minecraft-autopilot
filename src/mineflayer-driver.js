@@ -173,8 +173,32 @@ export class MineflayerDriver {
     return [...found.values()].sort((a, b) => a.position.distanceTo(this.bot.entity.position) - b.position.distanceTo(this.bot.entity.position));
   }
 
+  normalizeContainers() {
+    const identity = this.identity();
+    const normalized = {};
+    for (const [oldKey, record] of Object.entries(this.containers[identity] || {})) {
+      const position = this.containerPosition(new Vec3(record.x, record.y, record.z));
+      const key = position.toString();
+      const previous = normalized[key];
+      const original = `${record.x},${record.y},${record.z}`;
+      const canonical = `${position.x},${position.y},${position.z}`;
+      const aliases = [...new Set([original, ...(record.aliases || []), ...(previous?.aliases || [])])].filter(alias => alias !== canonical);
+      let firstSeen = record.firstSeen ?? record.items ?? [];
+      if (previous) {
+        const totals = new Map();
+        for (const item of [...(previous.firstSeen || []), ...firstSeen]) totals.set(item.name, (totals.get(item.name) || 0) + item.count);
+        firstSeen = [...totals].map(([name, count]) => ({ name, count }));
+      }
+      // A topology change invalidates the last read: two formerly separate inventories now share one window.
+      normalized[key] = { ...record, x: position.x, y: position.y, z: position.z, firstSeen,
+        ...(aliases.length && { aliases }), items: previous || key !== oldKey ? null : record.items };
+    }
+    this.containers[identity] = normalized;
+    return normalized;
+  }
+
   observeContainers() {
-    const known = this.containers[this.identity()] || {};
+    const known = this.normalizeContainers();
     // Forget a container that was broken or replaced; unloaded chunks (null) keep their last contents.
     for (const [key, record] of Object.entries(known)) {
       const block = this.bot.blockAt(new Vec3(record.x, record.y, record.z));
@@ -189,10 +213,11 @@ export class MineflayerDriver {
     const items = {};
     for (const item of window.containerItems()) items[`minecraft:${item.name}`] = (items[`minecraft:${item.name}`] || 0) + item.count;
     const contents = Object.entries(items).map(([itemName, count]) => ({ name: itemName, count }));
-    const known = this.containers[this.identity()] ??= {};
+    const known = this.normalizeContainers();
+    position = this.containerPosition(position);
     const previous = known[position.toString()];
     // firstSeen is the contents before this session's first deposit, a baseline for independent verification.
-    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents, observedAt: Date.now() };
+    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents, observedAt: Date.now(), ...(previous?.aliases && { aliases: previous.aliases }) };
   }
 
   // Mineflayer cannot cancel an opening, and a blocked lid never answers, so stop waiting rather than hold the operation gate.
@@ -462,7 +487,7 @@ export class MineflayerDriver {
 
   async inspectStorage(signal) {
     // Never substitute cached contents when a required container is gone, blocked, or out of reach.
-    const records = Object.values(this.containers[this.identity()] || {});
+    const records = Object.values(this.normalizeContainers());
     const start = this.bot.entity.position.clone();
     for (const record of records) {
       signal.throwIfAborted();

@@ -8,6 +8,7 @@ import minecraftData from 'minecraft-data';
 import { Vec3 } from 'vec3';
 import { MineflayerDriver } from '../src/mineflayer-driver.js';
 import { Harness } from '../src/harness.js';
+import { createObjective } from '../src/objective.js';
 
 test('handoff during food equip prevents consumption and waits for the late inventory reply', async t => {
   const bot = new EventEmitter();
@@ -329,7 +330,7 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
       setMovements() {}, setGoal() {},
       goto: async goal => { trips.push({ x: goal.x, y: goal.y, z: goal.z }); bot.entity.position = new Vec3(goal.x + 1, goal.y, goal.z); },
     },
-    findBlocks: ({ matching }) => (Array.isArray(matching) && matching.includes(chest.id) ? [new Vec3(2, 64, 0), new Vec3(2, 64, -1)] : []),
+    findBlocks: ({ matching }) => (Array.isArray(matching) && matching.includes(chest.id) ? Object.keys(halves).map(key => new Vec3(...key.split(',').map(Number))) : []),
     blockAt: position => {
       const type = halves[`${position.x},${position.y},${position.z}`];
       return type ? { name: 'chest', type: chest.id, position, getProperties: () => ({ facing: 'west', type, waterlogged: false }) } : null;
@@ -359,7 +360,7 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
   });
   const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
   t.after(() => driver.close());
-  return { driver, trips, windows, inventory, contents, batches };
+  return { driver, trips, windows, inventory, contents, batches, halves };
 }
 
 test('deposit stores every held item in a double chest recorded once, with its prior contents as the baseline', async t => {
@@ -559,4 +560,48 @@ test('handoff during storage opening prevents late reads and closes the window',
   await setImmediate();
   assert.equal(closed, true);
   assert.deepEqual(driver.observe().containers[0], cached);
+});
+
+test('adding a lower chest half rekeys one known inventory without doubling verification gains', async t => {
+  const { driver, halves, inventory } = depositFixture(t);
+  halves['2,64,0'] = 'single';
+  delete halves['2,64,-1'];
+  const upper = new Vec3(2, 64, 0);
+  driver.recordContainer(upper, 'chest', { containerItems: () => [{ name: 'oak_log', count: 5 }] });
+  const initial = driver.observe();
+  const criteria = count => createObjective({ collect: { block: 'oak_log', count }, deposit: { item: 'oak_log', count } }, initial);
+  halves['2,64,0'] = 'left';
+  halves['2,64,-1'] = 'right';
+  inventory.oak_log += 8;
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  const current = driver.observe();
+  assert.equal(current.containers.length, 1);
+  assert.equal(current.containers[0].items[0].count, 13);
+  assert.equal(criteria(8).check(current).met, true);
+  assert.equal(criteria(16).check(current).met, false);
+});
+
+test('merging two previously opened single chests preserves both starting baselines', async t => {
+  const { driver, halves, inventory, contents, windows } = depositFixture(t);
+  halves['2,64,0'] = 'single';
+  halves['2,64,-1'] = 'single';
+  driver.recordContainer(new Vec3(2, 64, 0), 'chest', { containerItems: () => [{ name: 'oak_log', count: 5 }] });
+  driver.recordContainer(new Vec3(2, 64, -1), 'chest', { containerItems: () => [{ name: 'oak_log', count: 7 }] });
+  const initial = driver.observe();
+  const objective = count => createObjective({ collect: { block: 'oak_log', count }, deposit: { item: 'oak_log', count } }, initial);
+  halves['2,64,0'] = 'left';
+  halves['2,64,-1'] = 'right';
+  contents.oak_log = 12;
+  inventory.oak_log += 8;
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  const current = driver.observe();
+  assert.equal(current.containers.length, 1);
+  assert.equal(windows.length, 2, 'one deposit and one inspection of the shared inventory');
+  assert.deepEqual(current.containers[0].firstSeen, [{ name: 'minecraft:oak_log', count: 12 }]);
+  assert.equal(objective(8).check(current).met, true);
+  assert.equal(objective(16).check(current).met, false);
 });
