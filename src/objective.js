@@ -50,21 +50,30 @@ export function createObjective(criteria, initialState) {
   }
   return {
     description: { collect: collect ? { ...collect, initialCount } : null, deposit, home: home || null },
-    check(state) {
+    check(state, { storageRefreshed = false } = {}) {
       const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && state.player.health > 0;
       const checks = {};
-      if (collect) {
-        const currentCount = samePlayer ? count(state) : null;
-        checks.inventory = { item: collect.block, initialCount, currentCount, requiredAdditional: collect.count,
-          met: currentCount !== null && currentCount - initialCount >= collect.count };
-      }
+      let stored = null;
       if (deposit) {
         const current = samePlayer ? containers.parse(state.containers || []).filter(container => container.items) : null;
-        const stored = current && current.reduce((total, container) => {
+        stored = current && current.reduce((total, container) => {
           const baseline = initialStored.get(`${container.x},${container.y},${container.z}`) ?? container.firstSeen ?? container.items;
           return total + held(container.items, deposit.item) - held(baseline, deposit.item);
         }, 0);
-        checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count, met: stored !== null && stored >= deposit.count };
+        if (current) {
+          const present = new Set(current.map(container => `${container.x},${container.y},${container.z}`));
+          for (const [key, baseline] of initialStored) if (!present.has(key)) stored -= held(baseline, deposit.item);
+        }
+        checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count,
+          evidence: storageRefreshed ? 'refreshed' : 'last_observed', met: stored !== null && stored >= deposit.count };
+      }
+      if (collect) {
+        const currentCount = samePlayer ? count(state) : null;
+        // For gather-and-store, moving existing inventory into a chest must not count as newly collected.
+        const storedAdditional = deposit?.item === collect.block ? stored : 0;
+        checks.inventory = { item: collect.block, initialCount, currentCount, requiredAdditional: collect.count,
+          ...(deposit?.item === collect.block && { storedAdditional }),
+          met: currentCount !== null && storedAdditional !== null && currentCount - initialCount + storedAdditional >= collect.count };
       }
       if (home) {
         const position = samePlayer ? point.parse(state.player.position) : null;

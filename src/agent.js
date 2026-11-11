@@ -40,7 +40,7 @@ const systemPrompt = `You control a Minecraft Java player through a local harnes
 Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, deposit(item,count), wait(seconds), done(reason).
 collect adds count items to the existing inventory. Supported blocks: oak_log, birch_log, spruce_log, jungle_log, acacia_log, dark_oak_log, cherry_log, mangrove_log, dirt, cobblestone, sand.
 deposit walks to the nearest chest or barrel within 16 blocks and stores the item there; omit count to store all of it. containers lists nearby storage and the contents last seen inside (items is null until opened).
-Use observations and the initial inventory to verify the requested quantity. Never repeat a full collection quota after partial progress.
+Use observations and the initial inventory to verify the requested quantity. When collection and deposit criteria name the same item, collection counts the net increase across inventory and storage. Storage is reopened automatically before final deposit verification; return near all previously opened containers before answering done. Never repeat a full collection quota after partial progress.
 Save a home only if the user requested it or the goal needs it. set_home is refused when a home was saved before the task; only the player can move it.
 Nearby blocks and threats are partial observations of loaded chunks. Do not invent locations or capabilities.
 Prioritize eating and returning to saved shelter when health is low. A saved home is a waypoint, not a guarantee of safety.
@@ -59,8 +59,8 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
   const deadline = AbortSignal.timeout(minutes * 60_000);
   const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
   bounded.throwIfAborted();
-  const initialState = await adapter.observe();
-  const objective = createObjective(criteria, initialState);
+  let initialState = await adapter.observe();
+  let objective = createObjective(criteria, initialState);
   bounded.throwIfAborted();
   await adapter.acquire();
   const history = [];
@@ -68,6 +68,12 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
   let rejectedDone = 0;
   let completed = null;
   try {
+    if (criteria.deposit) {
+      // Baseline known containers from live reads, not contents cached before this task.
+      await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
+      initialState = { ...initialState, containers: (await adapter.observe()).containers };
+      objective = createObjective(criteria, initialState);
+    }
     for (let step = 0; step < maxSteps; step++) {
       bounded.throwIfAborted();
       // Never implicitly reacquire after F8, disconnect, or emergency stop.
@@ -95,15 +101,34 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
       try { decision = parseDecision(output.message?.content); }
       catch { throw new Error('The model returned an invalid action, so it was not executed; earlier actions in this task still took effect.'); }
       // The model may have taken minutes. Recheck ownership before dispatching.
-      const currentState = await adapter.observe();
+      let currentState = await adapter.observe();
       bounded.throwIfAborted();
       if (currentState.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player while the model was thinking.');
       log(`Step ${step + 1}: ${JSON.stringify(decision)}`);
       if (decision.type === 'done') {
-        const verification = objective?.check(currentState);
+        let verification;
+        let inspectionError;
+        if (criteria.deposit) {
+          try {
+            // Reopen storage before claiming success; other players may have changed it during inference.
+            await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
+          } catch (error) {
+            bounded.throwIfAborted();
+            if ((await adapter.observe()).mode !== 'agent' || adapter.leaseError) throw error;
+            inspectionError = error.message;
+          }
+          currentState = await adapter.observe();
+          bounded.throwIfAborted();
+          if (currentState.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player during storage verification.');
+        }
+        verification = objective?.check(currentState, { storageRefreshed: !!criteria.deposit && !inspectionError });
+        if (inspectionError) {
+          verification.met = false;
+          Object.assign(verification.checks.deposit, { met: false, error: inspectionError });
+        }
         // Small models sometimes answer done with a plan. Show them the unmet criteria, but let them stop honestly on a third done.
         if (verification && !verification.met && rejectedDone++ < 2) {
-          history.push({ action: decision, rejected: 'Explicit criteria are not met. Continue, or answer done again to stop unmet.' });
+          history.push({ action: decision, rejected: inspectionError ? `Storage verification failed: ${inspectionError}` : 'Explicit criteria are not met. Continue, or answer done again to stop unmet.', verification });
           log('Criteria not met; the model must continue or confirm it is stopping.');
           continue;
         }

@@ -16,6 +16,7 @@ export const actionSchema = z.discriminatedUnion('type', [
     count: z.number().int().min(1).max(64),
   }).strict(),
   z.object({ type: z.literal('eat') }).strict(),
+  z.object({ type: z.literal('inspect_storage') }).strict(),
   z.object({
     type: z.literal('deposit'),
     item: z.string().regex(/^(?:minecraft:)?[a-z0-9_]+$/).max(100),

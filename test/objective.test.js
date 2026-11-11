@@ -60,7 +60,7 @@ test('deposit verification counts items added to containers since the task began
   assert.equal(objective.check(initial).met, false, 'contents stored before the task do not count');
   const current = { ...state(), containers: [chest(1, [{ name: 'minecraft:oak_log', count: 33 }], [{ name: 'minecraft:oak_log', count: 2 }]),
     chest(2, [{ name: 'minecraft:oak_log', count: 14 }], [{ name: 'minecraft:oak_log', count: 9 }])] };
-  assert.deepEqual(objective.check(current).checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, met: true });
+  assert.deepEqual(objective.check(current).checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, evidence: 'last_observed', met: true });
   current.containers[1].items[0].count = 13;
   assert.equal(objective.check(current).met, false);
   current.containers[1].items[0].count = 14;
@@ -69,4 +69,25 @@ test('deposit verification counts items added to containers since the task began
   assert.throws(() => createObjective({ deposit: { item: 'oak_log', count: 8 } }, state()), /does not report container contents/);
   assert.deepEqual(parseDepositCriterion('minecraft:cobblestone:100'), { item: 'minecraft:cobblestone', count: 100 });
   assert.throws(() => parseDepositCriterion('oak_log'), /item and count/);
+});
+
+test('gather-and-store counts net new items across inventory and storage without counting transfers twice', () => {
+  const chest = items => ({ x: 1, y: 64, z: 0, items });
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const initial = { ...state(), containers: [chest(logs(30))] };
+  const objective = createObjective({ collect: { block: 'oak_log', count: 8 }, deposit: { item: 'oak_log', count: 8 } }, initial);
+  const current = { ...state(), inventory: logs(2), containers: [chest(logs(38))] };
+  assert.equal(objective.check(current).met, false, 'depositing eight previously held logs is not collection');
+  current.inventory = logs(10);
+  assert.equal(objective.check(current).met, true, 'eight newly gathered logs may all be stored');
+  current.containers[0].items = logs(37);
+  assert.equal(objective.check(current).met, false, 'missing stored items invalidate the collection total too');
+});
+
+test('a missing initial container cannot turn transfers of old stock into a deposit gain', () => {
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const initial = { ...state(), containers: [{ x: 1, y: 64, z: 0, items: logs(30) }, { x: 2, y: 64, z: 0, items: logs(0) }] };
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, initial);
+  const current = { ...state(), containers: [{ x: 2, y: 64, z: 0, items: logs(30) }] };
+  assert.equal(objective.check(current).met, false);
 });

@@ -192,7 +192,7 @@ export class MineflayerDriver {
     const known = this.containers[this.identity()] ??= {};
     const previous = known[position.toString()];
     // firstSeen is the contents before this session's first deposit, a baseline for independent verification.
-    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents };
+    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents, observedAt: Date.now() };
   }
 
   // Mineflayer cannot cancel an opening, and a blocked lid never answers, so stop waiting rather than hold the operation gate.
@@ -233,7 +233,7 @@ export class MineflayerDriver {
     await this.abortable(() => this.bot.consume(), signal);
   }
 
-  async execute(action, { signal, onProgress }) {
+  async execute(action, { signal, onProgress, collectionTimeoutMs = 180_000 }) {
     signal.throwIfAborted();
     if (this.isBusy()) throw new Error('Previous activity is still running or stopping; wait before acting.');
     this.activeAction = true;
@@ -265,7 +265,7 @@ export class MineflayerDriver {
     };
     const guard = setInterval(() => { check().catch(error => local.abort(error)); }, 250);
     try {
-      return { message: await this.perform(action, { signal: combined, onProgress }) || 'Completed.' };
+      return { message: await this.perform(action, { signal: combined, onProgress, collectionTimeoutMs }) || 'Completed.' };
     } catch (error) {
       if (interruptedForFood && !scopedSignal.aborted) {
         clearInterval(guard);
@@ -362,7 +362,7 @@ export class MineflayerDriver {
     return false;
   }
 
-  async perform(action, { signal, onProgress }) {
+  async perform(action, { signal, onProgress, collectionTimeoutMs = 180_000 }) {
     switch (action.type) {
       case 'set_home':
         this.homes[this.identity()] = { x: this.bot.entity.position.x, y: this.bot.entity.position.y, z: this.bot.entity.position.z };
@@ -375,6 +375,7 @@ export class MineflayerDriver {
       case 'goto': await this.goTo(action, signal); return;
       case 'eat': await this.eat(signal); return;
       case 'deposit': return this.deposit(action, signal);
+      case 'inspect_storage': return this.inspectStorage(signal);
       case 'wait': await delay(action.seconds * 1000, undefined, { signal }); return;
       case 'collect': {
         const name = action.block.replace('minecraft:', '');
@@ -393,9 +394,12 @@ export class MineflayerDriver {
         // Blocks whose path took too long to plan; retried with the full planning budget once quicker ones run out.
         const slow = new Set();
         let collectionError;
+        // Only the mining phase expires here. The session signal still cancels both mining and recovery immediately.
+        const miningDeadline = AbortSignal.timeout(collectionTimeoutMs);
+        const miningSignal = AbortSignal.any([signal, miningDeadline]);
         try {
           while (count() < target) {
-            signal.throwIfAborted();
+            miningSignal.throwIfAborted();
             requireTool();
             const positions = this.bot.findBlocks({ matching: blockId, maxDistance: 48, count: 64 });
             positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
@@ -404,7 +408,7 @@ export class MineflayerDriver {
             if (!position) throw new Error('No reachable matching blocks remain in loaded chunks.');
             const patient = slow.has(position.toString());
             // A single block can stall the pathfinder for a minute or more; skip it and try another.
-            const step = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
+            const step = AbortSignal.any([miningSignal, AbortSignal.timeout(20_000)]);
             try {
               await this.approach(position, step, patient);
               const block = this.bot.blockAt(position);
@@ -417,14 +421,14 @@ export class MineflayerDriver {
               await this.pickUpDrop(position, () => count() > before, step);
               onProgress(`Inventory: ${count()}/${target}`);
             } catch (error) {
-              if (signal.aborted) throw signal.reason;
+              miningSignal.throwIfAborted();
               (!patient && /Took to long to decide path/.test(error.message) ? slow : failed).add(position.toString());
             }
           }
         } catch (error) {
-          // Handoff, death, survival interrupts, and deadlines must never start a recovery trip.
+          // Handoff, death, and survival interrupts must never start a recovery trip.
           signal.throwIfAborted();
-          collectionError = error;
+          collectionError = miningDeadline.aborted ? new Error('Collection timed out before reaching the requested quota.') : error;
         }
         // Mining often digs downward; return so later navigation, which cannot dig, is not trapped in a pit.
         const moved = start.distanceTo(this.bot.entity.position) > 2;
@@ -435,6 +439,44 @@ export class MineflayerDriver {
         return moved ? 'Collected requested items and returned to the starting point.' : 'Collected requested items.';
       }
     }
+  }
+
+  async reachContainer(position, signal) {
+    const block = this.bot.blockAt(position);
+    if (!block || !CONTAINERS.has(block.name)) throw new Error(`The container at ${position.x} ${position.y} ${position.z} is gone.`);
+    if (this.bot.entity.position.distanceTo(position) > 16) throw new Error('Storage inspection requires all previously opened containers to be within 16 blocks. Return near storage before finishing.');
+    // Open from wherever the chest is in reach; a walk to an adjacent block can fail beside furniture and walls.
+    const inReach = () => this.bot.entity.position.offset(0, 1.62, 0).distanceTo(position.offset(0.5, 0.5, 0.5)) <= 4;
+    // The pathfinder can give up planning ("Took to long to decide path") after walking most of the way; judge by reach.
+    for (let attempt = 0; attempt < 2 && !inReach(); attempt++) {
+      await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), signal)
+        .catch(error => { if (signal.aborted) throw error; });
+    }
+    if (!inReach()) throw new Error(`Could not reach the ${block.name} at ${position.x} ${position.y} ${position.z}.`);
+
+    signal.throwIfAborted();
+    const current = this.bot.blockAt(position);
+    if (!current || !CONTAINERS.has(current.name)) throw new Error('The container disappeared before it could be opened.');
+    return current;
+  }
+
+  async inspectStorage(signal) {
+    // Never substitute cached contents when a required container is gone, blocked, or out of reach.
+    const records = Object.values(this.containers[this.identity()] || {});
+    const start = this.bot.entity.position.clone();
+    for (const record of records) {
+      signal.throwIfAborted();
+      const position = new Vec3(record.x, record.y, record.z);
+      const block = await this.reachContainer(position, signal);
+      await this.abortable(async () => {
+        const window = await this.openContainer(block);
+        try { signal.throwIfAborted(); this.recordContainer(position, block.name, window); }
+        finally { window.close(); }
+      }, signal);
+    }
+    // Inspection must not silently invalidate a completed return-home task.
+    if (start.distanceTo(this.bot.entity.position) > 2) await this.goTo(start, signal);
+    return 'Refreshed previously opened storage from the server.';
   }
 
   async deposit(action, signal) {
@@ -449,16 +491,7 @@ export class MineflayerDriver {
     const target = this.nearbyContainers()[0];
     if (!target) throw new Error('No chest or barrel within 16 blocks. Move near storage first.');
     const { position } = target;
-    // Open from wherever the chest is in reach; a walk to an adjacent block can fail beside furniture and walls.
-    const inReach = () => this.bot.entity.position.offset(0, 1.62, 0).distanceTo(position.offset(0.5, 0.5, 0.5)) <= 4;
-    // The pathfinder can give up planning ("Took to long to decide path") after walking most of the way; judge by reach.
-    for (let attempt = 0; attempt < 2 && !inReach(); attempt++) {
-      await this.abortable(() => this.bot.pathfinder.goto(new goals.GoalGetToBlock(position.x, position.y, position.z)), signal)
-        .catch(error => { if (signal.aborted) throw error; });
-    }
-    if (!inReach()) throw new Error(`Could not reach the ${target.name} at ${position.x} ${position.y} ${position.z}.`);
-    const block = this.bot.blockAt(position);
-    if (!block || !CONTAINERS.has(block.name)) throw new Error(`The container at ${position.x} ${position.y} ${position.z} is gone.`);
+    const block = await this.reachContainer(position, signal);
     let depositError;
     let deposited = 0;
     // Count from the container: after a failed click, leftovers sit on the cursor until the window closes.

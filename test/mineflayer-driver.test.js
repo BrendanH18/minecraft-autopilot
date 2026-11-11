@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { setImmediate } from 'node:timers/promises';
 import minecraftData from 'minecraft-data';
 import { Vec3 } from 'vec3';
@@ -363,16 +364,16 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
 
 test('deposit stores every held item in a double chest recorded once, with its prior contents as the baseline', async t => {
   const { driver, trips, windows, inventory } = depositFixture(t);
-  assert.deepEqual(driver.observe().containers, [{ name: 'minecraft:chest', x: 2, y: 64, z: -1, items: null }]);
+  assert.deepEqual(driver.observe().containers.map(({ observedAt, ...record }) => record), [{ name: 'minecraft:chest', x: 2, y: 64, z: -1, items: null }]);
   const result = await driver.execute({ type: 'deposit', item: 'minecraft:oak_log' }, { signal: new AbortController().signal, onProgress() {} });
   assert.equal(result.message, 'Deposited 20 oak_log into the chest at 2 64 -1.');
   assert.deepEqual(trips, [{ x: 2, y: 64, z: -1 }]);
   assert.equal(inventory.oak_log, 0);
   assert.equal(windows.length, 1); assert.equal(windows[0].closed, true);
-  assert.deepEqual(driver.observe().containers, [{ name: 'minecraft:chest', x: 2, y: 64, z: -1,
+  assert.deepEqual(driver.observe().containers.map(({ observedAt, ...record }) => record), [{ name: 'minecraft:chest', x: 2, y: 64, z: -1,
     items: [{ name: 'minecraft:oak_log', count: 25 }], firstSeen: [{ name: 'minecraft:oak_log', count: 5 }] }]);
   Object.assign(driver.bot, { blockAt: position => ({ name: 'air', position }), findBlocks: () => [] });
-  assert.deepEqual(driver.observe().containers, [], 'a broken chest is forgotten');
+  assert.deepEqual(driver.observe().containers.map(({ observedAt, ...record }) => record), [], 'a broken chest is forgotten');
 });
 
 test('a full chest fails the deposit with partial progress and the contents it observed', async t => {
@@ -480,4 +481,82 @@ test('after mining a high log the bot walks to where its drop lands, not to the 
   await driver.execute({ type: 'collect', block: 'sand', count: 1 }, { signal: new AbortController().signal, onProgress() {} });
   assert.ok(trips.some(trip => trip.y === 64), `expected a walk to the landing spot at y = 64, got ${JSON.stringify(trips)}`);
   assert.equal(trips.filter(trip => trip.y === 67).length, 1, 'only the approach targets the log; no walk to the empty block in the air');
+});
+
+test('mining deadline reserves recovery time and reports failure after returning from a pit', async t => {
+  const { driver, bot, trips } = collectionFixture(t);
+  driver.approach = async (_position, signal) => {
+    bot.entity.position = new Vec3(3, 61, 0);
+    await delay(10_000, undefined, { signal });
+  };
+  const harness = new Harness(driver, { jobTimeoutMs: 20 });
+  t.after(() => harness.close());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  harness.start(owner, { type: 'collect', block: 'sand', count: 2 });
+  await harness.task;
+  assert.equal(harness.job.status, 'failed');
+  assert.match(harness.job.message, /Collection timed out.*Inventory: 0\/2.*Returned/);
+  assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
+  assert.deepEqual(trips.slice(-2), [{ y: 64, canDig: false }, { y: 64, canDig: true }]);
+});
+
+test('takeover after the mining deadline cancels recovery without a digging fallback', async t => {
+  const { driver, bot, controller, trips } = collectionFixture(t);
+  driver.approach = async (_position, signal) => {
+    bot.entity.position = new Vec3(3, 61, 0);
+    await delay(10_000, undefined, { signal });
+  };
+  bot.pathfinder.goto = async () => {
+    trips.push('walking');
+    controller.abort(new Error('Player took control.'));
+    throw controller.signal.reason;
+  };
+  await assert.rejects(driver.execute({ type: 'collect', block: 'sand', count: 2 }, {
+    signal: controller.signal, collectionTimeoutMs: 20, onProgress() {},
+  }), /Player took control/);
+  assert.deepEqual(trips, ['walking']);
+});
+
+test('storage inspection reopens a chest and sees items removed since the deposit', async t => {
+  const { driver, contents, windows } = depositFixture(t);
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  const cached = driver.observe().containers[0];
+  assert.equal(cached.items[0].count, 13);
+  contents.oak_log = 5; // Another player takes the newly deposited logs.
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  assert.equal(driver.observe().containers[0].items[0].count, 5);
+  assert.equal(windows.length, 2);
+  assert.ok(driver.observe().containers[0].observedAt >= cached.observedAt);
+});
+
+test('storage inspection returns near its original position after walking to the chest', async t => {
+  const { driver } = depositFixture(t);
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  const start = driver.bot.entity.position = new Vec3(10, 64, 0);
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  assert.ok(driver.bot.entity.position.distanceTo(start) <= 2);
+});
+
+test('handoff during storage opening prevents late reads and closes the window', async t => {
+  const { driver } = depositFixture(t);
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  const cached = driver.observe().containers[0];
+  let opened;
+  const started = new Promise(resolve => { opened = resolve; });
+  let finishOpen;
+  driver.bot.openContainer = () => { opened(); return new Promise(resolve => { finishOpen = resolve; }); };
+  const controller = new AbortController();
+  const inspection = driver.execute({ type: 'inspect_storage' }, { signal: controller.signal, onProgress() {} });
+  await started;
+  controller.abort(new Error('Player took control.'));
+  await assert.rejects(inspection, /Player took control/);
+  let closed = false;
+  finishOpen({ containerItems() { assert.fail('No late container read after handoff'); }, close() { closed = true; } });
+  await setImmediate();
+  assert.equal(closed, true);
+  assert.deepEqual(driver.observe().containers[0], cached);
 });

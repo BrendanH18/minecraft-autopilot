@@ -20,6 +20,10 @@ The CI workflow is configured, but its remote execution on the final release com
 - [x] Run a real installed Ollama model with `--verify-collect oak_log:8 --verify-home`. Record the model name/version, initial inventory, result, and final manual control. *(`qwen3.5:4b-mlx` with the Mineflayer bot, 20 October 2026; see [DEVELOPMENT.md](DEVELOPMENT.md#validation).)*
 - [x] Use a real MCP agent to observe, explicitly acquire, perform an action, and stop. *(Claude Code 2.1.312 headless with only the five Minecraft tools, against the Mineflayer bot, 27 October 2026; see [DEVELOPMENT.md](DEVELOPMENT.md#validation).)*
 - [ ] Press F8 during inference/action; close the menu afterward and verify no command resumes. Check emergency stop and lease expiry with the packaged mod.
+- [ ] With the packaged Fabric mod, force failed food consumption while hungry and low on health. Verify eating backoff, retreat, and action/retreat deadlines; interrupt eating and recovery with F8 and stop.
+- [ ] Force a bot mining timeout in a real pit. Verify the bounded return attempt, failure status, preserved inventory progress, and immediate cancellation during recovery.
+- [ ] Run collect-and-store with both criteria. Remove stored items during inference and block inspection; stale contents must not produce success. Verify final inspection preserves return-home criteria or reports failure.
+- [ ] Run a real local model and an actual MCP agent against the packaged Fabric mod; historical bot acceptance does not close this gate.
 - [ ] Validate authenticated client → bot → client handoff. Check the UUID and inventory at each stage; never connect both as the same account simultaneously.
 - [ ] Validate cobblestone with a pickaxe, hostile observations, and release on dimension change. *(Bot verified on 20 October 2026; Fabric still pending.)*
 
@@ -45,4 +49,4 @@ After the live checks and remote CI pass, tag the verified commit as `v0.1.0` an
 
 ## Planning estimate
 
-The code and packaging can be prepared independently of live account access. The remaining critical path is one or two focused live-testing sessions plus any fixes they uncover, then remote CI and a clean-source artifact rebuild on the release commit. This is a conditional estimate, not a scheduled release date; authenticated handoff and Fabric gameplay with the packaged mod have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.
+The code and packaging can be prepared independently of live account access. The remaining critical path is packaged Fabric acceptance, recovery/storage failure scenarios, authenticated handoff, and any resulting fixes, then remote CI and a clean-source artifact rebuild on the release commit. There is no fixed session-count estimate. There is no scheduled release date; authenticated handoff and Fabric gameplay with the packaged mod have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.

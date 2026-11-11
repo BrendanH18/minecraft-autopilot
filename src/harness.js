@@ -63,13 +63,14 @@ export class Harness {
     this.job = job;
     const controller = new AbortController();
     this.abortController = controller;
-    const deadline = setTimeout(() => controller.abort(new Error('Action timed out.')), parsed.type === 'wait' ? parsed.seconds * 1000 + 5000 : this.jobTimeoutMs);
+    const deadline = setTimeout(() => controller.abort(new Error('Action timed out.')), parsed.type === 'wait' ? parsed.seconds * 1000 + 5000 : this.jobTimeoutMs + (parsed.type === 'collect' ? 60_000 : 0));
     deadline.unref();
     this.task = Promise.resolve().then(() => {
       controller.signal.throwIfAborted();
       this.requireLease(leaseId);
       return this.driver.execute(parsed, {
         signal: controller.signal,
+        collectionTimeoutMs: this.jobTimeoutMs,
         onProgress: message => { if (job.status === 'running') job.message = message; },
       });
     }).then(result => {

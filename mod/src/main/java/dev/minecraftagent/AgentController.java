@@ -53,7 +53,7 @@ public final class AgentController {
     private JsonObject job;
     private JsonObject action;
     private long jobStarted;
-    private long jobDeadline;
+    private final ActionTiming timing = new ActionTiming();
     private int targetCount;
     private BlockPos destination;
     private BlockPos collectStart;
@@ -157,7 +157,7 @@ public final class AgentController {
         job.addProperty("status", "running");
         job.addProperty("message", "Started " + type);
         jobStarted = System.nanoTime();
-        jobDeadline = jobStarted + (type.equals("wait") ? (long) (wait * 1e9) + 5_000_000_000L : 180_000_000_000L);
+        timing.start(jobStarted, type.equals("wait") ? (long) (wait * 1e9) + 5_000_000_000L : 180_000_000_000L);
         destination = goal;
         returning = false;
         collectionFailure = null;
@@ -202,6 +202,18 @@ public final class AgentController {
             release("A game menu was opened (" + screen + "). Control returned to the player."); return;
         }
         long now = System.nanoTime();
+        // Deadlines are checked before eating, including when consumption never succeeds.
+        if (recovering && timing.retreatExpired(now)) {
+            stopMotion(); endEating(); recovering = false; survivalMessage = "Retreat timed out";
+            if (running()) finish("failed", "Survival retreat timed out. Check your health and shelter.");
+            return;
+        }
+        if (running() && !recovering && timing.expired(now)) {
+            if (returning) finishCollectionReturn(false, "Could not return to the starting point in time.");
+            else if (collecting()) beginReturn(now, "Collection timed out before reaching the requested quota.");
+            else finish("failed", "Action timed out.");
+            return;
+        }
         if (eating) {
             // Keep food selected; Baritone is stopped while eating.
             client.player.getInventory().selectedSlot = foodSlot;
@@ -212,6 +224,7 @@ public final class AgentController {
                 else if (resumeAfterEating) resumeMotion();
             } else if (now - eatStarted > 5_000_000_000L) {
                 endEating();
+                timing.eatingFailed(now);
                 if (running() && string(action, "type").equals("eat")) finish("failed", "Eating timed out.");
                 else if (resumeAfterEating) resumeMotion();
                 survivalMessage = "Could not eat.";
@@ -219,7 +232,7 @@ public final class AgentController {
             return;
         }
         // Reflexes run locally every tick, independent of model latency.
-        if (client.player.getHungerManager().getFoodLevel() <= 16 && beginEating()) {
+        if (client.player.getHungerManager().getFoodLevel() <= 16 && timing.canAutoEat(now) && beginEating()) {
             resumeAfterEating = running() || recovering;
             if (running()) job.addProperty("message", "Paused to eat.");
             survivalMessage = "Eating";
@@ -234,6 +247,7 @@ public final class AgentController {
                 // Mining can leave the player in a pit; a collection session already permits breaking to get out.
                 BaritoneAPI.getSettings().allowBreak.value = collecting();
                 baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(destination, 1));
+                timing.startRetreat(now);
                 recovering = true;
                 survivalMessage = "Low health: retreating home";
                 if (running()) job.addProperty("message", survivalMessage);
@@ -243,19 +257,13 @@ public final class AgentController {
             }
         }
         if (recovering) {
-            if (nearDestination() || now - lastRecovery > 60_000_000_000L) {
+            if (nearDestination()) {
                 stopMotion(); recovering = false; survivalMessage = "Retreat ended";
                 if (running()) finish("failed", "Action interrupted for survival. Check your health and shelter.");
             }
             return;
         }
         if (!running()) return;
-        if (now > jobDeadline) {
-            if (returning) finishCollectionReturn(false, "Could not return to the starting point in time.");
-            else if (collecting()) beginReturn(now, "Collection timed out before reaching the requested quota.");
-            else finish("failed", "Action timed out.");
-            return;
-        }
         String type = string(action, "type");
         switch (type) {
             case "goto": case "home":
@@ -323,9 +331,9 @@ public final class AgentController {
 
     /** Mining often digs downward; walk back to the start, breaking blocks if needed, so later navigation is not trapped. */
     private void beginReturn(long now, String failure) {
-        stopMotion();
+        stopMotion(); endEating(); resumeAfterEating = false;
         collectionFailure = failure;
-        returning = true; returnStarted = now; jobDeadline = now + 60_000_000_000L;
+        returning = true; returnStarted = now; timing.start(now, 60_000_000_000L);
         destination = collectStart;
         if (nearDestination()) { finishCollectionReturn(true, "At the starting point."); return; }
         job.addProperty("message", (failure == null ? "Collected requested items" : "Collection failed") + "; returning to where collection started.");

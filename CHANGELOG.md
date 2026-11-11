@@ -20,6 +20,10 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Fixed
 
+- Check Fabric action/retreat deadlines before eating and back off failed consumption, with isolated timing-policy regression tests.
+- Reserve bot collection recovery time after a mining timeout while preserving immediate handoff cancellation.
+- Verify gather-and-store against net inventory/storage gains, refresh container baselines and final contents, and reject stale success when storage cannot be inspected.
+
 - Prevent delayed actions/model replies/inventory operations from resuming after handoff or cancellation.
 - Recover from collection pits and unmet quotas; report unsuccessful returns as failures.
 - Require cobblestone harvesting tools and recover when the last pickaxe breaks.

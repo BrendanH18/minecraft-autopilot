@@ -257,7 +257,7 @@ test('agent verifies a deposit through the real simulated bridge', async t => {
   const result = await runAgent(adapter, 'Store eight logs in the chest', { model: 'test', log() {},
     criteria: { deposit: { item: 'oak_log', count: 8 } }, fetchImpl: async () => reply(decisions.shift()) });
   assert.equal(result.status, 'criteria_met');
-  assert.deepEqual(result.verification.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, met: true });
+  assert.deepEqual(result.verification.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, evidence: 'refreshed', met: true });
   assert.deepEqual(driver.chest.items, [{ name: 'minecraft:oak_log', count: 12 }]);
 });
 
@@ -279,4 +279,72 @@ test('cancellation during inference cannot return a late model success', async (
   } }), /Stopped by user/);
   assert.equal(adapter.releases, 1);
   assert.deepEqual(adapter.actions, []);
+});
+
+test('gather-and-store succeeds without retaining a duplicate quota in inventory', async t => {
+  const directory = await testDirectory(t, 'gather-store-');
+  const driver = new DemoDriver();
+  const bridge = await startBridge(new Harness(driver), { discoveryPath: join(directory, 'bridge.json') });
+  const adapter = await FabricAdapter.connect(join(directory, 'bridge.json'));
+  t.after(async () => { await adapter.close(); await bridge.close(); });
+  const decisions = [{ type: 'collect', block: 'oak_log', count: 8 }, { type: 'deposit', item: 'oak_log', count: 8 }, { type: 'done', reason: 'Stored eight new logs.' }];
+  const result = await runAgent(adapter, 'Collect and store eight additional logs', { model: 'test', log() {},
+    criteria: { collect: { block: 'oak_log', count: 8 }, deposit: { item: 'oak_log', count: 8 } }, fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_met');
+  assert.equal(result.verification.checks.inventory.currentCount, 0);
+  assert.equal(result.verification.checks.inventory.storedAdditional, 8);
+  assert.equal(result.verification.checks.deposit.evidence, 'refreshed');
+});
+
+test('final storage inspection rejects stale success after another player removes items', async () => {
+  const adapter = verifiableAdapter();
+  adapter.state.containers = [{ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 30 }] }];
+  let inspections = 0;
+  adapter.execute = async function (action) {
+    this.actions.push(action);
+    if (action.type === 'inspect_storage') {
+      inspections++;
+      this.state.containers[0].items[0].count = 30;
+    } else if (action.type === 'deposit') this.state.containers[0].items[0].count = 38;
+    return { status: 'completed' };
+  };
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, ...Array.from({ length: 3 }, () => ({ type: 'done', reason: 'Stored.' }))];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.equal(result.verification.checks.deposit.storedAdditional, 0);
+  assert.equal(inspections, 4, 'refresh baseline once and each final claim');
+});
+
+test('unreachable final storage cannot report success from its cached contents', async () => {
+  const adapter = verifiableAdapter();
+  adapter.state.containers = [{ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 30 }] }];
+  let inspections = 0;
+  adapter.execute = async function (action) {
+    if (action.type === 'inspect_storage' && ++inspections > 1) throw new Error('Could not open storage.');
+    if (action.type === 'deposit') this.state.containers[0].items[0].count = 38;
+    return { status: 'completed' };
+  };
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, ...Array.from({ length: 3 }, () => ({ type: 'done', reason: 'Stored.' }))];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.equal(result.verification.checks.deposit.evidence, 'last_observed');
+  assert.match(result.verification.checks.deposit.error, /Could not open/);
+});
+
+test('deposit baseline is refreshed before the task rather than using pre-task cached contents', async () => {
+  const adapter = verifiableAdapter();
+  adapter.state.containers = [{ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 30 }] }];
+  let actualStored = 22;
+  adapter.execute = async function (action) {
+    if (action.type === 'inspect_storage') this.state.containers[0].items[0].count = actualStored;
+    if (action.type === 'deposit') { actualStored += 8; this.state.containers[0].items[0].count = actualStored; }
+    return { status: 'completed' };
+  };
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, { type: 'done', reason: 'Stored.' }];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_met');
+  assert.equal(result.verification.checks.deposit.storedAdditional, 8);
 });
