@@ -318,6 +318,7 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
   const halves = { '2,64,0': 'left', '2,64,-1': 'right' };
   const inventory = { [item]: held };
   const contents = { [item]: stored };
+  const contentsByPosition = {};
   const trips = [];
   const windows = [];
   const batches = [];
@@ -333,18 +334,19 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
     findBlocks: ({ matching }) => (Array.isArray(matching) && matching.includes(chest.id) ? Object.keys(halves).map(key => new Vec3(...key.split(',').map(Number))) : []),
     blockAt: position => {
       const type = halves[`${position.x},${position.y},${position.z}`];
-      return type ? { name: 'chest', type: chest.id, position, getProperties: () => ({ facing: 'west', type, waterlogged: false }) } : null;
+      return type ? { name: type === 'barrel' ? 'barrel' : 'chest', type: type === 'barrel' ? registry.blocksByName.barrel.id : chest.id, position, getProperties: () => ({ facing: 'west', type, waterlogged: false }) } : null;
     },
-    openContainer: async () => {
+    openContainer: async block => {
+      const windowContents = contentsByPosition[`${block.position.x},${block.position.y},${block.position.z}`] || contents;
       const window = {
         closed: false,
-        containerItems: () => Object.entries(contents).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id })),
+        containerItems: () => Object.entries(windowContents).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id })),
         deposit: async (type, _metadata, count) => {
           assert.equal(type, registry.itemsByName[item].id);
           batches.push(count);
-          const moved = Math.min(count, capacity - contents[item]);
+          const moved = Math.min(count, capacity - windowContents[item]);
           // Like a real window, a failed transfer leaves the rest of the stack on the cursor, outside the inventory.
-          inventory[item] -= count; contents[item] += moved;
+          inventory[item] -= count; windowContents[item] += moved;
           if (moved < count) window.closeReturns = count - moved;
           onDeposit();
           if (moved < count) throw new Error('destination full');
@@ -360,21 +362,21 @@ function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDepos
   });
   const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
   t.after(() => driver.close());
-  return { driver, trips, windows, inventory, contents, batches, halves };
+  return { driver, trips, windows, inventory, contents, batches, halves, contentsByPosition };
 }
 
 test('deposit stores every held item in a double chest recorded once, with its prior contents as the baseline', async t => {
   const { driver, trips, windows, inventory } = depositFixture(t);
-  assert.deepEqual(driver.observe().containers.map(({ observedAt, ...record }) => record), [{ name: 'minecraft:chest', x: 2, y: 64, z: -1, items: null }]);
+  assert.deepEqual(driver.observe().containers.map(({ observedAt, sources, members, ...record }) => record), [{ name: 'minecraft:chest', x: 2, y: 64, z: -1, items: null }]);
   const result = await driver.execute({ type: 'deposit', item: 'minecraft:oak_log' }, { signal: new AbortController().signal, onProgress() {} });
   assert.equal(result.message, 'Deposited 20 oak_log into the chest at 2 64 -1.');
   assert.deepEqual(trips, [{ x: 2, y: 64, z: -1 }]);
   assert.equal(inventory.oak_log, 0);
   assert.equal(windows.length, 1); assert.equal(windows[0].closed, true);
-  assert.deepEqual(driver.observe().containers.map(({ observedAt, ...record }) => record), [{ name: 'minecraft:chest', x: 2, y: 64, z: -1,
+  assert.deepEqual(driver.observe().containers.map(({ observedAt, sources, members, ...record }) => record), [{ name: 'minecraft:chest', x: 2, y: 64, z: -1,
     items: [{ name: 'minecraft:oak_log', count: 25 }], firstSeen: [{ name: 'minecraft:oak_log', count: 5 }] }]);
   Object.assign(driver.bot, { blockAt: position => ({ name: 'air', position }), findBlocks: () => [] });
-  assert.deepEqual(driver.observe().containers.map(({ observedAt, ...record }) => record), [], 'a broken chest is forgotten');
+  assert.deepEqual(driver.observe().containers.map(({ observedAt, sources, members, ...record }) => record), [], 'a broken chest is forgotten');
 });
 
 test('a full chest fails the deposit with partial progress and the contents it observed', async t => {
@@ -604,4 +606,55 @@ test('merging two previously opened single chests preserves both starting baseli
   assert.deepEqual(current.containers[0].firstSeen, [{ name: 'minecraft:oak_log', count: 12 }]);
   assert.equal(objective(8).check(current).met, true);
   assert.equal(objective(16).check(current).met, false);
+});
+
+test('a chest first opened during the task keeps its old-stock baseline when merged with starting storage', async t => {
+  const { driver, halves, inventory, contents } = depositFixture(t);
+  halves['2,64,0'] = 'single';
+  halves['2,64,-1'] = 'single';
+  driver.recordContainer(new Vec3(2, 64, 0), 'chest', { containerItems: () => [{ name: 'oak_log', count: 5 }] });
+  const initial = driver.observe();
+  const objective = count => createObjective({ collect: { block: 'oak_log', count }, deposit: { item: 'oak_log', count } }, initial);
+  // The second chest's eight old logs are discovered only after the task baseline was established.
+  driver.recordContainer(new Vec3(2, 64, -1), 'chest', { containerItems: () => [{ name: 'oak_log', count: 8 }] });
+  contents.oak_log = 8;
+  inventory.oak_log += 8;
+  driver.bot.entity.position = new Vec3(2, 64, -2);
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  halves['2,64,0'] = 'left';
+  halves['2,64,-1'] = 'right';
+  contents.oak_log = 21; // Five old logs + eight old logs + eight new logs.
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  const current = driver.observe();
+  assert.equal(current.containers.length, 1);
+  assert.equal(objective(8).check(current).met, true);
+  const tooMany = objective(16).check(current);
+  assert.equal(tooMany.checks.deposit.storedAdditional, 8);
+  assert.equal(tooMany.met, false);
+});
+
+test('a barrel at a former chest-half coordinate is inspected and counted as separate storage', async t => {
+  const { driver, halves, inventory, contentsByPosition } = depositFixture(t);
+  halves['2,64,0'] = 'single';
+  delete halves['2,64,-1'];
+  driver.recordContainer(new Vec3(2, 64, 0), 'chest', { containerItems: () => [{ name: 'oak_log', count: 5 }] });
+  halves['2,64,0'] = 'left';
+  halves['2,64,-1'] = 'right';
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  const objective = createObjective({ collect: { block: 'oak_log', count: 8 }, deposit: { item: 'oak_log', count: 8 } }, driver.observe());
+  halves['2,64,0'] = 'barrel';
+  halves['2,64,-1'] = 'single';
+  contentsByPosition['2,64,0'] = { oak_log: 0 };
+  contentsByPosition['2,64,-1'] = { oak_log: 5 };
+  inventory.oak_log += 8;
+  driver.bot.entity.position = new Vec3(3, 64, 0);
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  await driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} });
+  const current = driver.observe();
+  assert.equal(current.containers.length, 2);
+  assert.deepEqual(current.containers.map(container => container.members.length), [1, 1]);
+  assert.equal(objective.check(current).checks.deposit.storedAdditional, 8);
+  assert.equal(objective.check(current).met, true);
 });

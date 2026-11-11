@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import mineflayer from 'mineflayer';
 import pathfinderPackage from 'mineflayer-pathfinder';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -173,25 +174,43 @@ export class MineflayerDriver {
     return [...found.values()].sort((a, b) => a.position.distanceTo(this.bot.entity.position) - b.position.distanceTo(this.bot.entity.position));
   }
 
+  containerMembers(position) {
+    const canonical = this.containerPosition(position);
+    const { facing, type } = this.bot.blockAt(canonical)?.getProperties?.() || {};
+    const members = [canonical];
+    if (CLOCKWISE[facing] && ['left', 'right'].includes(type)) {
+      const direction = type === 'left' ? CLOCKWISE[facing] : Object.keys(CLOCKWISE).find(key => CLOCKWISE[key] === facing);
+      const partner = canonical.offset(...OFFSETS[direction]);
+      if (this.bot.blockAt(partner)?.name === this.bot.blockAt(canonical)?.name) members.push(partner);
+    }
+    return members.map(({ x, y, z }) => ({ x, y, z }));
+  }
+
   normalizeContainers() {
     const identity = this.identity();
     const normalized = {};
     for (const [oldKey, record] of Object.entries(this.containers[identity] || {})) {
-      const position = this.containerPosition(new Vec3(record.x, record.y, record.z));
-      const key = position.toString();
-      const previous = normalized[key];
-      const original = `${record.x},${record.y},${record.z}`;
-      const canonical = `${position.x},${position.y},${position.z}`;
-      const aliases = [...new Set([original, ...(record.aliases || []), ...(previous?.aliases || [])])].filter(alias => alias !== canonical);
-      let firstSeen = record.firstSeen ?? record.items ?? [];
-      if (previous) {
-        const totals = new Map();
-        for (const item of [...(previous.firstSeen || []), ...firstSeen]) totals.set(item.name, (totals.get(item.name) || 0) + item.count);
-        firstSeen = [...totals].map(([name, count]) => ({ name, count }));
+      const candidates = new Map();
+      for (const member of record.members || [record]) {
+        const at = new Vec3(member.x, member.y, member.z);
+        const block = this.bot.blockAt(at);
+        // Preserve unloaded members until the world can confirm whether the container survived.
+        if (block && `minecraft:${block.name}` !== record.name) continue;
+        const position = this.containerPosition(at);
+        candidates.set(position.toString(), position);
       }
-      // A topology change invalidates the last read: two formerly separate inventories now share one window.
-      normalized[key] = { ...record, x: position.x, y: position.y, z: position.z, firstSeen,
-        ...(aliases.length && { aliases }), items: previous || key !== oldKey ? null : record.items };
+      for (const [key, position] of candidates) {
+        const previous = normalized[key];
+        const sources = [...new Map([...(previous?.sources || []), ...(record.sources || [])].map(source => [source.id, source])).values()];
+        const totals = new Map();
+        for (const source of sources) for (const item of source.items) totals.set(item.name, (totals.get(item.name) || 0) + item.count);
+        const firstSeen = [...totals].map(([name, count]) => ({ name, count }));
+        const members = this.containerMembers(position);
+        const changed = previous || key !== oldKey || JSON.stringify(members) !== JSON.stringify(record.members);
+        // Sources track historical baseline stock; members describe only the inventories shared right now.
+        normalized[key] = { ...record, x: position.x, y: position.y, z: position.z, sources, members, firstSeen,
+          items: changed ? null : record.items };
+      }
     }
     this.containers[identity] = normalized;
     return normalized;
@@ -217,7 +236,8 @@ export class MineflayerDriver {
     position = this.containerPosition(position);
     const previous = known[position.toString()];
     // firstSeen is the contents before this session's first deposit, a baseline for independent verification.
-    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents, observedAt: Date.now(), ...(previous?.aliases && { aliases: previous.aliases }) };
+    known[position.toString()] = { name: `minecraft:${name}`, x: position.x, y: position.y, z: position.z, items: contents, firstSeen: previous?.firstSeen ?? contents, observedAt: Date.now(),
+      sources: previous?.sources ?? [{ id: randomUUID(), items: contents }], members: this.containerMembers(position) };
   }
 
   // Mineflayer cannot cancel an opening, and a blocked lid never answers, so stop waiting rather than hold the operation gate.

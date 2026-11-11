@@ -5,7 +5,7 @@ const collectible = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log',
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
 const inventory = z.array(z.object({ name: z.string(), count: z.number().int().nonnegative() }));
 const containers = z.array(z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int(),
-  items: inventory.nullable(), firstSeen: inventory.optional(), aliases: z.array(z.string().regex(/^-?\d+,-?\d+,-?\d+$/)).optional() }));
+  items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).optional() }));
 const criteriaSchema = z.object({
   collect: z.object({ block: z.string(), count: z.number().int().min(1).max(64) }).strict().optional(),
   deposit: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
@@ -36,11 +36,15 @@ export function createObjective(criteria, initialState) {
   const initialCount = collect ? count(initialState) : null;
   const deposit = parsed.deposit ? parseDepositCriterion(`${parsed.deposit.item}:${parsed.deposit.count}`) : null;
   let initialStored;
+  const initialSources = new Set();
+  const discoveredSources = new Map();
+  const key = container => `${container.x},${container.y},${container.z}`;
+  const sources = container => container.sources ?? [{ id: key(container), items: container.firstSeen ?? container.items }];
   if (deposit) {
     if (!Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs the server bot or demo.');
     // Contents known before the task are the baseline; a container first opened during the task uses what it held then.
-    initialStored = new Map(containers.parse(initialState.containers).filter(container => container.items)
-      .map(container => [`${container.x},${container.y},${container.z}`, container.items]));
+    initialStored = containers.parse(initialState.containers).filter(container => container.items);
+    for (const container of initialStored) for (const source of sources(container)) initialSources.add(source.id);
   }
   const held = (items, name) => items.filter(item => item.name === name).reduce((total, item) => total + item.count, 0);
   let home;
@@ -57,20 +61,16 @@ export function createObjective(criteria, initialState) {
       if (deposit) {
         const current = samePlayer ? containers.parse(state.containers || []).filter(container => container.items) : null;
         const seen = new Set();
-        const countedBaselines = new Set();
-        stored = current && current.reduce((total, container) => {
-          const keys = [`${container.x},${container.y},${container.z}`, ...(container.aliases || [])];
-          if (keys.some(key => seen.has(key))) return total;
-          for (const key of keys) seen.add(key);
-          const baselines = keys.filter(key => initialStored.has(key) && !countedBaselines.has(key));
-          for (const key of baselines) countedBaselines.add(key);
-          const baseline = baselines.length ? baselines.reduce((sum, key) => sum + held(initialStored.get(key), deposit.item), 0)
-            : held(container.firstSeen ?? container.items, deposit.item);
-          return total + held(container.items, deposit.item) - baseline;
+        const contents = current && current.reduce((total, container) => {
+          // Only current coordinates deduplicate inventory; historical sources never hide a separate container.
+          if (seen.has(key(container))) return total;
+          seen.add(key(container));
+          for (const source of sources(container)) if (!initialSources.has(source.id)) discoveredSources.set(source.id, source.items);
+          return total + held(container.items, deposit.item);
         }, 0);
-        if (current) {
-          for (const [key, baseline] of initialStored) if (!countedBaselines.has(key)) stored -= held(baseline, deposit.item);
-        }
+        const baseline = initialStored.reduce((total, container) => total + held(container.items, deposit.item), 0)
+          + [...discoveredSources.values()].reduce((total, items) => total + held(items, deposit.item), 0);
+        stored = contents === null ? null : contents - baseline;
         checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count,
           evidence: storageRefreshed ? 'refreshed' : 'last_observed', met: stored !== null && stored >= deposit.count };
       }
