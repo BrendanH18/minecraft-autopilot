@@ -188,3 +188,19 @@ provide [expedition budgets](docs/EXPEDITION.md),
 Expedition reads one observation; the other three groups run offline.
 Construction and production plans are estimates; gameplay building and crafting
 remain future work. Generated routines print validated JSON for review before execution.
+
+The [200 batch 8 additions](docs/IMPROVEMENTS.md#batch-8-200-offline-planning-and-evidence-analysis-additions)
+add eight groups of 25 offline commands:
+
+- [`itinerary`](docs/ITINERARY.md): multi-stop schedules, return reserves, and route alternatives.
+- [`workarea`](docs/WORKAREA.md): inclusive block-cell accounting and disjoint work partitions.
+- [`ledger`](docs/LEDGER.md): inventory composition, quota progress, and packing changes between snapshots.
+- [`depot`](docs/DEPOT.md): storage evidence, container changes, and recorded stock redistribution.
+- [`journal`](docs/JOURNAL.md): transcript runs, event filters, and source-line inspection.
+- [`diagnose`](docs/DIAGNOSE.md): recorded planner outcomes, costs, timing gaps, and request analysis.
+- [`compare-routines`](docs/ROUTINE-COMPARE.md): routine differences, subsequences, and budget changes.
+- [`select-routine`](docs/ROUTINE-SELECT.md): validated extraction of routine sections for review.
+
+These commands never connect to Minecraft or execute actions. Unknown evidence
+stays unknown; recorded changes do not prove their cause. Use
+`mc-agent GROUP --help` for arguments and the linked guides for examples.
