@@ -1,3 +1,4 @@
+import { wholeFloor, wholeCeil } from './resource-rounding.js';
 // Pure offline calculations. All quantities and rates are supplied by the caller.
 const MAX = 1_000_000;
 function scalar(value, kind) {
@@ -88,26 +89,26 @@ export function rationCalculation(command, args = []) {
   switch (command) {
     case "trip": { const [a, b, c] = values; result={consumed:a*b,total:a*b+c}; break; }
     case "phases": { const [a, b, c] = values; same(a,b);const phases=a.map((v,i)=>v*b[i]);result={phases,consumed:sum(phases),total:sum(phases)+c}; break; }
-    case "portions": { const [a, b] = values; const items=Math.ceil(a/b);result={items,supplied:items*b,surplus:items*b-a}; break; }
+    case "portions": { const [a, b] = values; const items=wholeCeil(a/b);result={items,supplied:items*b,surplus:Math.max(0,items*b-a)}; break; }
     case "endurance": { const [a, b, c] = values; const usable=Math.max(0,a-c);result={usable,minutes:usable/b,reserveShortfall:Math.max(0,c-a)}; break; }
     case "return-budget": { const [a, b, c, d] = values; result={outbound:a*c,returning:b*c,total:(a+b)*c+d}; break; }
     case "turnaround": { const [a, b, c, d] = values; result={outboundMinutes:Math.max(0,a-d)/(b+c)}; break; }
     case "party": { const [a, b, c] = values; const individual=b.map(v=>a*v+c);result={individual,total:sum(individual)}; break; }
     case "share-stock": { const [a, b, c] = values; result={unitsEach:a/b,minutes:a/(b*c)}; break; }
-    case "refill": { const [a, b, c] = values; const items=Math.ceil(Math.max(0,b-a)/c);result={items,after:a+items*c,surplus:Math.max(0,a+items*c-b)}; break; }
+    case "refill": { const [a, b, c] = values; const items=wholeCeil(Math.max(0,b-a)/c);result={items,after:a+items*c,surplus:Math.max(0,a+items*c-b)}; break; }
     case "checkpoint": { const [a, b, c, d] = values; const remaining=a-b*c;result={remaining,reserveMargin:remaining-d,exhausted:remaining<0}; break; }
     case "checkpoints": { const [a, b, c, d] = values; result={checkpoints:b.map(t=>({minutes:t,remaining:a-t*c,reserveMargin:a-t*c-d}))}; break; }
     case "activity": { const [a, b, c, d] = values; const rate=b*c;result={rate,consumed:a*rate,total:a*rate+d}; break; }
     case "uncertainty": { const [a, b, c, d] = values; demand(c>=b,'High rate must not be lower.');result={minimum:a*b+d,maximum:a*c+d}; break; }
     case "delay": { const [a, b, c] = values; result={delayUnits:b*c,total:a+b*c}; break; }
-    case "loss": { const [a, b, c] = values; demand(b<1,'Loss fraction must be below one.');const items=Math.ceil(a/((1-b)*c));result={items,grossUnits:items*c,expectedUsable:items*c*(1-b)}; break; }
+    case "loss": { const [a, b, c] = values; demand(b<1,'Loss fraction must be below one.');const items=wholeCeil(a/((1-b)*c));result={items,grossUnits:items*c,expectedUsable:items*c*(1-b)}; break; }
     case "cache-leg": { const [a, b, c] = values; same(a,b);const loads=a.map((v,i)=>v*b[i]+c);result={loads,maximumLoad:Math.max(...loads),totalIssued:sum(loads)}; break; }
     case "refill-interval": { const [a, b, c] = values; demand(c<=a,'Reserve exceeds capacity.');result={minutes:(a-c)/b}; break; }
-    case "refill-count": { const [a, b, c, d] = values; demand(d<b,'Reserve must leave positive capacity.');const interval=(b-d)/c;result={intervalMinutes:interval,refills:Math.max(0,Math.ceil(a/interval)-1)}; break; }
-    case "loadout": { const [a, b, c] = values; same(a,b);same(a,c);demand(c.every(v=>v>0),'Stack sizes must be positive.');result={units:sum(a.map((v,i)=>v*b[i])),slots:sum(a.map((v,i)=>Math.ceil(v/c[i])))}; break; }
+    case "refill-count": { const [a, b, c, d] = values; demand(d<b,'Reserve must leave positive capacity.');const interval=(b-d)/c;result={intervalMinutes:interval,refills:Math.max(0,wholeCeil(a/interval)-1)}; break; }
+    case "loadout": { const [a, b, c] = values; same(a,b);same(a,c);demand(c.every(v=>v>0),'Stack sizes must be positive.');result={units:sum(a.map((v,i)=>v*b[i])),slots:sum(a.map((v,i)=>wholeCeil(v/c[i])))}; break; }
     case "density": { const [a, b] = values; same(a,b);demand(b.every(v=>v>0),'Stack sizes must be positive.');result={ranked:a.map((v,i)=>({item:i+1,unitsPerSlot:v*b[i]})).sort((x,y)=>y.unitsPerSlot-x.unitsPerSlot||x.item-y.item)}; break; }
     case "portion-plan": { const [a, b, c] = values; result={unitsPerServing:Math.max(0,a-c)/b,reserveShortfall:Math.max(0,c-a)}; break; }
-    case "meal-clock": { const [a, b, c] = values; const meals=Math.floor(a/b);demand(meals<=1000,'Too many meals.');result={meals,totalUnits:meals*c,times:Array.from({length:meals},(_,i)=>(i+1)*b)}; break; }
+    case "meal-clock": { const [a, b, c] = values; const meals=wholeFloor(a/b);demand(meals<=1000,'Too many meals.');result={meals,totalUnits:meals*c,times:Array.from({length:meals},(_,i)=>(i+1)*b)}; break; }
     case "resupply-gap": { const [a, b, c] = values; const wait=Math.max(0,b-a);result={waitMinutes:wait,waitingUnits:wait*c}; break; }
     case "escape-reserve": { const [a, b, c, d] = values; const minutes=a/b;result={minutes,reserve:minutes*c+d}; break; }
     case "actual-rate": { const [a, b, c] = values; const consumed=a-b;result={netConsumed:consumed,netRate:consumed/c}; break; }

@@ -1,3 +1,4 @@
+import { wholeFloor, wholeCeil } from './resource-rounding.js';
 // Pure offline calculations. All quantities and rates are supplied by the caller.
 const MAX = 1_000_000;
 function scalar(value, kind) {
@@ -86,30 +87,30 @@ export function farmplanCalculation(command, args = []) {
   const values = spec.map((kind, i) => read(args[i], kind));
   let result;
   switch (command) {
-    case "rows": { const [a, b, c] = values; const rows=Math.ceil(a/(c+1));result={rows,plants:rows*b,unusedCells:a*b-rows*b}; break; }
-    case "beds": { const [a, b, c, d] = values; const full=Math.floor(a/(c+d)),rem=a%(c+d),planted=full*c+Math.min(c,rem);result={plantingColumns:planted,plants:planted*b,pathCells:(a-planted)*b}; break; }
-    case "grid-spacing": { const [a, b, c, d] = values; result={columns:Math.ceil(a/c),rows:Math.ceil(b/d),plants:Math.ceil(a/c)*Math.ceil(b/d)}; break; }
+    case "rows": { const [a, b, c] = values; const rows=wholeCeil(a/(c+1));result={rows,plants:rows*b,unusedCells:a*b-rows*b}; break; }
+    case "beds": { const [a, b, c, d] = values; const full=wholeFloor(a/(c+d)),rem=a%(c+d),planted=full*c+Math.min(c,rem);result={plantingColumns:planted,plants:planted*b,pathCells:(a-planted)*b}; break; }
+    case "grid-spacing": { const [a, b, c, d] = values; result={columns:wholeCeil(a/c),rows:wholeCeil(b/d),plants:wholeCeil(a/c)*wholeCeil(b/d)}; break; }
     case "edge-margin": { const [a, b, c] = values; const width=Math.max(0,a-2*c),length=Math.max(0,b-2*c);result={plantingWidth:width,plantingLength:length,plants:width*length,borderCells:a*b-width*length}; break; }
     case "seed-budget": { const [a, b, c] = values; result={plantingSeeds:a*b,totalSeeds:a*b+c}; break; }
     case "harvest": { const [a, b, c] = values; result={gross:a*b,expectedUsable:a*b*c}; break; }
     case "replant": { const [a, b, c] = values; const required=b*c;result={required,missing:Math.max(0,required-a),surplus:Math.max(0,a-required)}; break; }
-    case "cycles": { const [a, b, c] = values; const perCycle=b*c,cycles=Math.ceil(a/perCycle);result={perCycle,cycles,expectedSurplus:cycles*perCycle-a}; break; }
+    case "cycles": { const [a, b, c] = values; const perCycle=b*c,cycles=wholeCeil(a/perCycle);result={perCycle,cycles,expectedSurplus:Math.max(0,cycles*perCycle-a)}; break; }
     case "growth-schedule": { const [a, b, c] = values; demand(a<=1000,'Too many cycles.');result={minutes:a*(b+c),completions:Array.from({length:a},(_,i)=>(i+1)*(b+c))}; break; }
     case "stagger": { const [a, b] = values; demand(a<=1000,'Too many beds.');result={intervalMinutes:b/a,offsets:Array.from({length:a},(_,i)=>i*b/a)}; break; }
     case "steady-yield": { const [a, b, c] = values; result={perMinute:a*b/c,perHour:a*b*60/c}; break; }
-    case "target-area": { const [a, b, c] = values; result={cells:Math.ceil(a*c/(60*b))}; break; }
-    case "water-lattice": { const [a, b, c, d] = values; result={columns:Math.ceil(a/c),rows:Math.ceil(b/d),sources:Math.ceil(a/c)*Math.ceil(b/d)}; break; }
-    case "path-share": { const [a, b, c] = values; const pathRows=Math.floor(b/c);result={pathRows,pathCells:a*pathRows,plantingCells:a*(b-pathRows)}; break; }
+    case "target-area": { const [a, b, c] = values; result={cells:wholeCeil(a*c/(60*b))}; break; }
+    case "water-lattice": { const [a, b, c, d] = values; result={columns:wholeCeil(a/c),rows:wholeCeil(b/d),sources:wholeCeil(a/c)*wholeCeil(b/d)}; break; }
+    case "path-share": { const [a, b, c] = values; const pathRows=wholeFloor(b/c);result={pathRows,pathCells:a*pathRows,plantingCells:a*(b-pathRows)}; break; }
     case "fertilizer": { const [a, b, c] = values; result={applications:a*b,units:a*b*c}; break; }
     case "compost": { const [a, b, c] = values; result={expectedLevels:a*b,expectedOutputs:a*b/c}; break; }
     case "seed-multiply": { const [a, b, c] = values; demand(c<=1000,'Too many cycles.');result={expectedSeeds:a*b**c}; break; }
-    case "loss-buffer": { const [a, b, c] = values; demand(b<1,'Total loss cannot meet a positive target.');result={plants:Math.ceil(a/((1-b)*c))}; break; }
+    case "loss-buffer": { const [a, b, c] = values; demand(b<1,'Total loss cannot meet a positive target.');result={plants:wholeCeil(a/((1-b)*c))}; break; }
     case "rotation": { const [a, b] = values; same(a,b);const harvest=a.map((v,i)=>v*b[i]);result={harvest,total:sum(harvest)}; break; }
-    case "harvest-work": { const [a, b, c] = values; result={waves:Math.ceil(a/c),seconds:Math.ceil(a/c)*b}; break; }
-    case "storage": { const [a, b, c, d] = values; const items=a*b*c;result={expectedItems:items,slots:Math.ceil(items/d)}; break; }
+    case "harvest-work": { const [a, b, c] = values; result={waves:wholeCeil(a/c),seconds:wholeCeil(a/c)*b}; break; }
+    case "storage": { const [a, b, c, d] = values; const items=a*b*c;result={expectedItems:items,slots:wholeCeil(items/d)}; break; }
     case "consumption-balance": { const [a, b, c] = values; result={consumed:b*c,net:a-b*c,sustainable:a>=b*c}; break; }
     case "expansion": { const [a, b, c] = values; const added=Math.max(0,b-a);result={additionalPlants:added,seeds:added*c}; break; }
-    case "season": { const [a, b, c, d] = values; const cycles=Math.floor(a/b);result={cycles,expectedItems:cycles*c*d,unusedMinutes:a-cycles*b}; break; }
+    case "season": { const [a, b, c, d] = values; const cycles=wholeFloor(a/b);result={cycles,expectedItems:cycles*c*d,unusedMinutes:Math.max(0,a-cycles*b)}; break; }
     case "bed-allocation": { const [a, b] = values; const total=sum(b),ideal=b.map(v=>a*v/total),counts=ideal.map(Math.floor),order=ideal.map((v,i)=>({i,r:v-counts[i]})).sort((x,y)=>y.r-x.r||x.i-y.i);for(let n=a-sum(counts),i=0;i<n;i++)counts[order[i].i]++;result={plants:counts}; break; }
   }
   return checked({ ...result, note: NOTE });

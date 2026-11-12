@@ -1,3 +1,4 @@
+import { wholeFloor, budgetFits } from './resource-rounding.js';
 // Pure offline calculations. All quantities and rates are supplied by the caller.
 const MAX = 1_000_000;
 function scalar(value, kind) {
@@ -89,28 +90,28 @@ export function allocationCalculation(command, args = []) {
     case "priority": { const [a, b] = values; let left=b;const granted=a.map(v=>{const n=Math.min(v,left);left-=n;return n;});result={granted,unspent:left,unfilled:a.map((v,i)=>v-granted[i])}; break; }
     case "proportional": { const [a, b] = values; const total=sum(a); result={granted:a.map(v=>v*(total?Math.min(1,b/total):0)),unspent:Math.max(0,b-total)}; break; }
     case "weighted": { const [a, b] = values; const total=sum(a);result={granted:a.map(v=>b*v/total)}; break; }
-    case "equal-cap": { const [a, b] = values; const total=sum(a),target=Math.min(b,total),sorted=[...a].sort((x,y)=>x-y);let remaining=target,level=0;for(let i=0;i<sorted.length;i++){const fair=remaining/(sorted.length-i);if(fair<=sorted[i]){level=fair;break;}remaining-=sorted[i];}const granted=b>=total?[...a]:a.map(v=>Math.min(v,level));result={granted,unspent:Math.max(0,b-total)}; break; }
-    case "minimum-first": { const [a, b, c] = values; same(a,b);demand(a.every((v,i)=>v<=b[i]),'Minimum exceeds demand.');const minima=sum(a);demand(minima<=c,'Budget cannot cover minimums.');const residual=b.map((v,i)=>v-a[i]),total=sum(residual),fraction=total?Math.min(1,(c-minima)/total):0;result={granted:a.map((v,i)=>v+residual[i]*fraction),unspent:Math.max(0,c-sum(b))}; break; }
-    case "whole-jobs": { const [a, b] = values; let left=b;const accepted=[];a.forEach((v,i)=>{if(v<=left){accepted.push(i+1);left-=v;}});result={accepted,unspent:left}; break; }
-    case "cheapest-jobs": { const [a, b] = values; let left=b;const accepted=[];for(const v of a.map((cost,i)=>({cost,index:i+1})).sort((x,y)=>x.cost-y.cost||x.index-y.index)){if(v.cost<=left){accepted.push(v.index);left-=v.cost;}}result={accepted,unspent:left}; break; }
+    case "equal-cap": { const [a, b] = values; const total=sum(a),target=Math.min(b,total),sorted=[...a].sort((x,y)=>x-y);let remaining=target,level=0;for(let i=0;i<sorted.length;i++){const fair=remaining/(sorted.length-i);if(fair<=sorted[i]){level=fair;break;}remaining-=sorted[i];}const granted=budgetFits(total,b)?[...a]:a.map(v=>Math.min(v,level));result={granted,unspent:Math.max(0,b-total)}; break; }
+    case "minimum-first": { const [a, b, c] = values; same(a,b);demand(a.every((v,i)=>v<=b[i]),'Minimum exceeds demand.');const minima=sum(a);demand(budgetFits(minima,c),'Budget cannot cover minimums.');const residual=b.map((v,i)=>v-a[i]),total=sum(residual),fraction=total?Math.max(0,Math.min(1,(c-minima)/total)):0;result={granted:a.map((v,i)=>v+residual[i]*fraction),unspent:Math.max(0,c-sum(b))}; break; }
+    case "whole-jobs": { const [a, b] = values; let left=b;const accepted=[];a.forEach((v,i)=>{if(budgetFits(v,left)){accepted.push(i+1);left=Math.max(0,left-v);}});result={accepted,unspent:left}; break; }
+    case "cheapest-jobs": { const [a, b] = values; let left=b;const accepted=[];for(const v of a.map((cost,i)=>({cost,index:i+1})).sort((x,y)=>x.cost-y.cost||x.index-y.index)){if(budgetFits(v.cost,left)){accepted.push(v.index);left=Math.max(0,left-v.cost);}}result={accepted,unspent:left}; break; }
     case "value-order": { const [a, b] = values; same(a,b);result={ranked:a.map((cost,i)=>({job:i+1,ratio:b[i]/cost})).sort((x,y)=>y.ratio-x.ratio||x.job-y.job)}; break; }
     case "coverage": { const [a, b] = values; same(a,b);result={coverage:a.map((v,i)=>b[i]?v/b[i]:null),fullyCovered:a.flatMap((v,i)=>v>=b[i]?[i+1]:[])}; break; }
     case "shortages": { const [a, b] = values; same(a,b);result={shortages:a.map((v,i)=>Math.max(0,b[i]-v)),surpluses:a.map((v,i)=>Math.max(0,v-b[i]))}; break; }
     case "reserve-items": { const [a, b] = values; same(a,b);result={available:a.map((v,i)=>Math.max(0,v-b[i])),reserveShortfalls:a.map((v,i)=>Math.max(0,b[i]-v))}; break; }
     case "cap-grants": { const [a, b] = values; same(a,b);result={granted:a.map((v,i)=>Math.min(v,b[i])),cut:a.map((v,i)=>Math.max(0,v-b[i]))}; break; }
-    case "kit-limit": { const [a, b, c] = values; same(a,b);demand(b.every(v=>v>0),'Kit costs must be positive.');const kits=Math.min(c,...a.map((v,i)=>Math.floor(v/b[i])));result={kits,remaining:a.map((v,i)=>v-kits*b[i])}; break; }
+    case "kit-limit": { const [a, b, c] = values; same(a,b);demand(b.every(v=>v>0),'Kit costs must be positive.');const kits=Math.min(c,...a.map((v,i)=>wholeFloor(v/b[i])));result={kits,remaining:a.map((v,i)=>v-kits*b[i])}; break; }
     case "weighted-rounds": { const [a, b] = values; result={granted:a.map(v=>v*b),total:sum(a)*b}; break; }
-    case "round-limit": { const [a, b] = values; const cost=sum(b),rounds=Math.floor(a/cost);result={rounds,costPerRound:cost,remaining:a-rounds*cost}; break; }
+    case "round-limit": { const [a, b] = values; const cost=sum(b),rounds=wholeFloor(a/cost);result={rounds,costPerRound:cost,remaining:a-rounds*cost}; break; }
     case "reconcile": { const [a, b] = values; same(a,b);result={changes:a.map((v,i)=>b[i]-v),totalChange:sum(b)-sum(a)}; break; }
     case "rebalance": { const [a, b] = values; same(a,b);result={donors:a.flatMap((v,i)=>v>b[i]?[{item:i+1,amount:v-b[i]}]:[]),receivers:a.flatMap((v,i)=>v<b[i]?[{item:i+1,amount:b[i]-v}]:[])}; break; }
     case "shared-capacity": { const [a, b, c] = values; same(a,b);const size=sum(a.map((v,i)=>v*b[i])),fraction=size?Math.min(1,c/size):1;result={fraction,granted:a.map(v=>v*fraction),usedCapacity:size*fraction}; break; }
-    case "priority-capacity": { const [a, b, c] = values; same(a,b);let left=c;const granted=a.map((v,i)=>{const n=Math.min(v,Math.floor(left/b[i]));left-=n*b[i];return n;});result={granted,unusedCapacity:left}; break; }
+    case "priority-capacity": { const [a, b, c] = values; same(a,b);let left=c;const granted=a.map((v,i)=>{const n=Math.min(v,wholeFloor(left/b[i]));left=Math.max(0,left-n*b[i]);return n;});result={granted,unusedCapacity:left}; break; }
     case "workers": { const [a, b] = values; demand(b<=1000,'Too many workers.');const total=sum(a);demand(total>0,'At least one workload must be positive.');const ideal=a.map(v=>b*v/total),counts=ideal.map(Math.floor),order=ideal.map((v,i)=>({i,r:v-counts[i]})).sort((x,y)=>y.r-x.r||x.i-y.i);for(let n=b-sum(counts),i=0;i<n;i++)counts[order[i].i]++;result={workers:counts}; break; }
     case "capacity-gap": { const [a, b] = values; same(a,b);result={overloaded:a.flatMap((v,i)=>v>b[i]?[i+1]:[]),spare:b.map((v,i)=>Math.max(0,v-a[i]))}; break; }
     case "priority-floor": { const [a, b, c] = values; let left=b;const granted=a.map(v=>{const amount=Math.min(v,left);if(amount<c)return 0;left-=amount;return amount;});result={granted,unspent:left}; break; }
     case "budget-sensitivity": { const [a, b, c] = values; const total=sum(a),before=total?Math.min(1,b/total):1,after=total?Math.min(1,(b+c)/total):1;result={beforeFraction:before,afterFraction:after,additionalGrants:a.map(v=>v*(after-before))}; break; }
     case "minimum-budget": { const [a, b] = values; result={budget:sum(a)*b,minimumGrants:a.map(v=>v*b)}; break; }
-    case "funding-order": { const [a, b] = values; let cumulative=0;const milestones=a.map((v,i)=>({item:i+1,cumulative:cumulative+=v}));result={milestones,firstUnfunded:milestones.find(v=>v.cumulative>b)?.item??null}; break; }
+    case "funding-order": { const [a, b] = values; let cumulative=0;const milestones=a.map((v,i)=>({item:i+1,cumulative:cumulative+=v}));result={milestones,firstUnfunded:milestones.find(v=>!budgetFits(v.cumulative,b))?.item??null}; break; }
   }
   return checked({ ...result, note: NOTE });
 }

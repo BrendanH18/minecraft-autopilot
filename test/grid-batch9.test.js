@@ -294,3 +294,11 @@ for(const [command,args,expected] of cases) {
 }
 test('grid: unknown command rejected',()=>assert.throws(()=>gridCalculation('unknown',[])));
 test('grid rejects fractional blocks and invalid local indices',()=>{assert.throws(()=>gridCalculation('block-address',['0.5','0']));assert.throws(()=>gridCalculation('chunk-reconstruct',['0','16']));assert.throws(()=>gridCalculation('next-boundary',['0','0']));});
+test('negative edge region round-trips supported block and chunk addresses', () => {
+  const block = gridCalculation('block-address', ['-1000000','-1000000']).result;
+  assert.equal(block.chunkX,-62500);
+  for (const x of [block.chunkX, -1000000, 1000000]) {
+    const address = gridCalculation('chunk-address', [String(x),'0']).result;
+    assert.equal(gridCalculation('region-reconstruct', [String(address.regionX),String(address.localX)]).result,x);
+  }
+});

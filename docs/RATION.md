@@ -41,3 +41,5 @@ mc-agent ration portions 70 8
 ```
 
 These calculations do not read inventory, acquire control, or execute a routine. They do not infer recipes, prices, fuel properties, stack sizes, or world conditions. Review assumptions before acting.
+
+Whole-count rounding normalizes small floating-point roundoff near nonzero integer boundaries. Genuine fractional shortages remain unmet; positive tiny demands still require a whole unit.

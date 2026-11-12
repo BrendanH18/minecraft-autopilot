@@ -1,3 +1,4 @@
+import { wholeFloor, wholeCeil } from './resource-rounding.js';
 // Pure offline calculations. All quantities and rates are supplied by the caller.
 const MAX = 1_000_000;
 function scalar(value, kind) {
@@ -86,31 +87,31 @@ export function productionCalculation(command, args = []) {
   const values = spec.map((kind, i) => read(args[i], kind));
   let result;
   switch (command) {
-    case "recipe": { const [a, b, c] = values; const batches=Math.ceil(a/b);result={batches,input:batches*c,output:batches*b,surplus:batches*b-a}; break; }
-    case "stock-batches": { const [a, b, c] = values; const batches=Math.floor(a/b);result={batches,output:batches*c,leftover:a-batches*b}; break; }
-    case "bottleneck": { const [a, b] = values; same(a,b);demand(b.every(v=>v>0),'Inputs per batch must be positive.');const batches=Math.min(...a.map((v,i)=>Math.floor(v/b[i])));result={batches,remaining:a.map((v,i)=>v-batches*b[i]),limitingItems:a.flatMap((v,i)=>Math.floor(v/b[i])===batches?[i+1]:[])}; break; }
-    case "shortfall": { const [a, b, c, d] = values; same(c,d);demand(d.every(v=>v>0),'Inputs per batch must be positive.');const batches=Math.ceil(a/b);result={batches,missing:c.map((v,i)=>Math.max(0,batches*d[i]-v))}; break; }
-    case "chain": { const [a, b, c, d] = values; const secondBatches=Math.ceil(a/d),intermediate=secondBatches*c,firstBatches=Math.ceil(intermediate/b);result={firstBatches,secondBatches,intermediateSurplus:firstBatches*b-intermediate,finalSurplus:secondBatches*d-a}; break; }
+    case "recipe": { const [a, b, c] = values; const batches=wholeCeil(a/b);result={batches,input:batches*c,output:batches*b,surplus:batches*b-a}; break; }
+    case "stock-batches": { const [a, b, c] = values; const batches=wholeFloor(a/b);result={batches,output:batches*c,leftover:a-batches*b}; break; }
+    case "bottleneck": { const [a, b] = values; same(a,b);demand(b.every(v=>v>0),'Inputs per batch must be positive.');const batches=Math.min(...a.map((v,i)=>wholeFloor(v/b[i])));result={batches,remaining:a.map((v,i)=>v-batches*b[i]),limitingItems:a.flatMap((v,i)=>wholeFloor(v/b[i])===batches?[i+1]:[])}; break; }
+    case "shortfall": { const [a, b, c, d] = values; same(c,d);demand(d.every(v=>v>0),'Inputs per batch must be positive.');const batches=wholeCeil(a/b);result={batches,missing:c.map((v,i)=>Math.max(0,batches*d[i]-v))}; break; }
+    case "chain": { const [a, b, c, d] = values; const secondBatches=wholeCeil(a/d),intermediate=secondBatches*c,firstBatches=wholeCeil(intermediate/b);result={firstBatches,secondBatches,intermediateSurplus:firstBatches*b-intermediate,finalSurplus:secondBatches*d-a}; break; }
     case "byproduct": { const [a, b, c] = values; result={main:a*b,byproduct:a*c}; break; }
     case "recycle": { const [a, b, c] = values; demand(c<=1000,'Too many passes.');result={recovered:a*(1-(1-b)**c),remaining:a*(1-b)**c}; break; }
-    case "cycle-time": { const [a, b, c] = values; const waves=Math.ceil(a/c);result={waves,seconds:waves*b,unusedBatchSlots:waves*c-a}; break; }
+    case "cycle-time": { const [a, b, c] = values; const waves=wholeCeil(a/c);result={waves,seconds:waves*b,unusedBatchSlots:waves*c-a}; break; }
     case "rate": { const [a, b, c] = values; result={perSecond:a*c/b,perMinute:a*c*60/b}; break; }
-    case "deadline": { const [a, b, c] = values; const waves=Math.floor(c/b);demand(waves>0||a===0,'No complete batch fits the deadline.');result={batchesPerMachine:waves,machines:a?Math.ceil(a/waves):0}; break; }
-    case "batch-cap": { const [a, b, c] = values; const batches=Math.min(Math.ceil(a/b),c);result={batches,output:batches*b,missing:Math.max(0,a-batches*b)}; break; }
+    case "deadline": { const [a, b, c] = values; const waves=wholeFloor(c/b);demand(waves>0||a===0,'No complete batch fits the deadline.');result={batchesPerMachine:waves,machines:a?wholeCeil(a/waves):0}; break; }
+    case "batch-cap": { const [a, b, c] = values; const batches=Math.min(wholeCeil(a/b),c);result={batches,output:batches*b,missing:Math.max(0,a-batches*b)}; break; }
     case "startup": { const [a, b, c] = values; result={seconds:a?b+a*c:0}; break; }
-    case "setup-runs": { const [a, b, c, d] = values; const runs=Math.ceil(a/b);result={runs,seconds:runs*c+a*d}; break; }
+    case "setup-runs": { const [a, b, c, d] = values; const runs=wholeCeil(a/b);result={runs,seconds:runs*c+a*d}; break; }
     case "input-rate": { const [a, b, c] = values; result={inputPerMinute:a*b/c}; break; }
     case "utilization": { const [a, b, c, d] = values; const capacity=b*d*60/c;result={capacityPerMinute:capacity,utilization:a/capacity,overloaded:a>capacity}; break; }
-    case "parallel-lines": { const [a, b] = values; demand(b<=1000,'Too many lines.');result={batches:Array.from({length:b},(_,i)=>Math.floor(a/b)+(i<a%b?1:0))}; break; }
+    case "parallel-lines": { const [a, b] = values; demand(b<=1000,'Too many lines.');result={batches:Array.from({length:b},(_,i)=>wholeFloor(a/b)+(i<a%b?1:0))}; break; }
     case "output-stock": { const [a, b, c, d] = values; const available=a*b+c;result={available,missing:Math.max(0,d-available),surplus:Math.max(0,available-d)}; break; }
-    case "loss-allowance": { const [a, b, c] = values; demand(c>0,'Survival fraction must be positive.');const batches=Math.ceil(a/(b*c));result={batches,grossOutput:batches*b,expectedUsable:batches*b*c}; break; }
-    case "change-yield": { const [a, b, c] = values; result={oldBatches:Math.ceil(a/b),newBatches:Math.ceil(a/c),savedBatches:Math.ceil(a/b)-Math.ceil(a/c)}; break; }
-    case "shared-input": { const [a, b, c, d] = values; demand(b*c<=a,'First product exceeds shared stock.');const left=a-b*c;result={secondBatches:Math.floor(left/d),leftover:left% d}; break; }
-    case "quota-order": { const [a, b, c] = values; same(a,b);same(a,c);demand(b.every(v=>v>0)&&c.every(v=>v>0),'Yields and costs must be positive.');const batches=a.map((v,i)=>Math.ceil(v/b[i]));result={batches,sharedInput:sum(batches.map((v,i)=>v*c[i]))}; break; }
+    case "loss-allowance": { const [a, b, c] = values; demand(c>0,'Survival fraction must be positive.');const batches=wholeCeil(a/(b*c));result={batches,grossOutput:batches*b,expectedUsable:batches*b*c}; break; }
+    case "change-yield": { const [a, b, c] = values; result={oldBatches:wholeCeil(a/b),newBatches:wholeCeil(a/c),savedBatches:wholeCeil(a/b)-wholeCeil(a/c)}; break; }
+    case "shared-input": { const [a, b, c, d] = values; demand(b*c<=a,'First product exceeds shared stock.');const left=a-b*c;result={secondBatches:wholeFloor(left/d),leftover:left% d}; break; }
+    case "quota-order": { const [a, b, c] = values; same(a,b);same(a,c);demand(b.every(v=>v>0)&&c.every(v=>v>0),'Yields and costs must be positive.');const batches=a.map((v,i)=>wholeCeil(v/b[i]));result={batches,sharedInput:sum(batches.map((v,i)=>v*c[i]))}; break; }
     case "work-in-progress": { const [a, b, c, d] = values; demand(b<=a,'Completed batches exceed started batches.');result={unfinished:a-b,tiedInput:(a-b)*c,finishedOutput:b*d}; break; }
-    case "reorder-point": { const [a, b, c] = values; result={reorderAt:Math.ceil(a*b)+c}; break; }
-    case "campaign": { const [a, b, c] = values; same(a,b);same(a,c);demand(b.every(v=>v>0),'Yields must be positive.');const batches=a.map((v,i)=>Math.ceil(v/b[i]));result={batches,seconds:sum(batches.map((v,i)=>v*c[i]))}; break; }
-    case "completion-window": { const [a, b, c, d] = values; demand(c>=b,'Slow duration must not be shorter.');const waves=Math.ceil(a/d);result={earliestSeconds:waves*b,latestSeconds:waves*c}; break; }
+    case "reorder-point": { const [a, b, c] = values; result={reorderAt:wholeCeil(a*b)+c}; break; }
+    case "campaign": { const [a, b, c] = values; same(a,b);same(a,c);demand(b.every(v=>v>0),'Yields must be positive.');const batches=a.map((v,i)=>wholeCeil(v/b[i]));result={batches,seconds:sum(batches.map((v,i)=>v*c[i]))}; break; }
+    case "completion-window": { const [a, b, c, d] = values; demand(c>=b,'Slow duration must not be shorter.');const waves=wholeCeil(a/d);result={earliestSeconds:waves*b,latestSeconds:waves*c}; break; }
   }
   return checked({ ...result, note: NOTE });
 }

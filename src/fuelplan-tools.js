@@ -1,3 +1,4 @@
+import { wholeFloor, wholeCeil } from './resource-rounding.js';
 // Pure offline calculations. All quantities and rates are supplied by the caller.
 const MAX = 1_000_000;
 function scalar(value, kind) {
@@ -86,30 +87,30 @@ export function fuelplanCalculation(command, args = []) {
   const values = spec.map((kind, i) => read(args[i], kind));
   let result;
   switch (command) {
-    case "fuel-count": { const [a, b, c] = values; const required=a*b,fuel=Math.ceil(required/c);result={fuel,requiredSeconds:required,wastedSeconds:fuel*c-required}; break; }
-    case "capacity": { const [a, b, c] = values; result={items:Math.floor(a*b/c),leftoverSeconds:a*b-Math.floor(a*b/c)*c}; break; }
-    case "furnace-split": { const [a, b, c, d] = values; demand(b<=1000,'Too many furnaces.');const loads=Array.from({length:b},(_,i)=>Math.floor(a/b)+(i<a%b?1:0));const fuel=loads.map(v=>Math.ceil(v*c/d));result={loads,fuel,totalFuel:sum(fuel),seconds:Math.ceil(a/b)*c}; break; }
-    case "continuous-vs-split": { const [a, b, c, d] = values; demand(b<=1000,'Too many runs.');const separate=sum(Array.from({length:b},(_,i)=>Math.ceil((Math.floor(a/b)+(i<a%b?1:0))*c/d)));result={continuousFuel:Math.ceil(a*c/d),separateFuel:separate,extraFuel:separate-Math.ceil(a*c/d)}; break; }
-    case "burn-credit": { const [a, b, c, d] = values; const needed=Math.max(0,a*b-c);result={newFuel:Math.ceil(needed/d),creditedSeconds:Math.min(c,a*b),uncoveredSeconds:needed}; break; }
-    case "fuel-cost": { const [a, b, c, d] = values; const fuel=Math.ceil(a*b/c);result={fuel,cost:fuel*d,costPerOutput:a?fuel*d/a:null}; break; }
-    case "compare": { const [a, b, c, d] = values; same(c,d);result={options:c.map((v,i)=>({option:i+1,fuel:Math.ceil(a*b/v),cost:Math.ceil(a*b/v)*d[i]}))}; break; }
+    case "fuel-count": { const [a, b, c] = values; const required=a*b,fuel=wholeCeil(required/c);result={fuel,requiredSeconds:required,wastedSeconds:Math.max(0,fuel*c-required)}; break; }
+    case "capacity": { const [a, b, c] = values; result={items:wholeFloor(a*b/c),leftoverSeconds:Math.max(0,a*b-wholeFloor(a*b/c)*c)}; break; }
+    case "furnace-split": { const [a, b, c, d] = values; demand(b<=1000,'Too many furnaces.');const loads=Array.from({length:b},(_,i)=>wholeFloor(a/b)+(i<a%b?1:0));const fuel=loads.map(v=>wholeCeil(v*c/d));result={loads,fuel,totalFuel:sum(fuel),seconds:wholeCeil(a/b)*c}; break; }
+    case "continuous-vs-split": { const [a, b, c, d] = values; demand(b<=1000,'Too many runs.');const separate=sum(Array.from({length:b},(_,i)=>wholeCeil((wholeFloor(a/b)+(i<a%b?1:0))*c/d)));result={continuousFuel:wholeCeil(a*c/d),separateFuel:separate,extraFuel:separate-wholeCeil(a*c/d)}; break; }
+    case "burn-credit": { const [a, b, c, d] = values; const needed=Math.max(0,a*b-c);result={newFuel:wholeCeil(needed/d),creditedSeconds:Math.min(c,a*b),uncoveredSeconds:needed}; break; }
+    case "fuel-cost": { const [a, b, c, d] = values; const fuel=wholeCeil(a*b/c);result={fuel,cost:fuel*d,costPerOutput:a?fuel*d/a:null}; break; }
+    case "compare": { const [a, b, c, d] = values; same(c,d);result={options:c.map((v,i)=>({option:i+1,fuel:wholeCeil(a*b/v),cost:wholeCeil(a*b/v)*d[i]}))}; break; }
     case "efficiency": { const [a, b] = values; demand(a<=b,'Used burn exceeds supplied burn.');result={utilization:a/b,wasteSeconds:b-a}; break; }
-    case "finish-time": { const [a, b, c, d] = values; result={seconds:a?Math.ceil(a/b)*c+d:0}; break; }
-    case "deadline-furnaces": { const [a, b, c] = values; const per=Math.floor(c/b);demand(per>0||a===0,'No item fits the deadline.');result={itemsPerFurnace:per,furnaces:a?Math.ceil(a/per):0}; break; }
+    case "finish-time": { const [a, b, c, d] = values; result={seconds:a?wholeCeil(a/b)*c+d:0}; break; }
+    case "deadline-furnaces": { const [a, b, c] = values; const per=wholeFloor(c/b);demand(per>0||a===0,'No item fits the deadline.');result={itemsPerFurnace:per,furnaces:a?wholeCeil(a/per):0}; break; }
     case "feed-rate": { const [a, b] = values; result={itemsPerSecond:a/b,itemsPerMinute:a*60/b}; break; }
     case "fuel-rate": { const [a, b] = values; result={fuelPerMinute:a*60/b}; break; }
     case "stock-duration": { const [a, b, c] = values; result={seconds:a*b/c,minutes:a*b/c/60}; break; }
-    case "reserve": { const [a, b, c, d] = values; const operating=Math.ceil(a*b/c);result={operating,reserve:d,total:operating+d}; break; }
-    case "refill": { const [a, b, c, d] = values; const required=Math.ceil(b*c/d);result={required,missing:Math.max(0,required-a),surplus:Math.max(0,a-required)}; break; }
-    case "mixed-burn": { const [a, b, c] = values; same(a,b);const burnSeconds=sum(a.map((v,i)=>v*b[i]));result={burnSeconds,items:Math.floor(burnSeconds/c)}; break; }
-    case "substitute": { const [a, b, c] = values; const count=Math.ceil(a*b/c);result={count,excessSeconds:count*c-a*b}; break; }
-    case "restart-loss": { const [a, b, c] = values; result={lostSeconds:a*b,replacementFuel:Math.ceil(a*b/c)}; break; }
-    case "preheat": { const [a, b, c] = values; result={burnSeconds:a*c,fuelPerFurnace:Math.ceil(a/b),totalFuel:Math.ceil(a/b)*c}; break; }
+    case "reserve": { const [a, b, c, d] = values; const operating=wholeCeil(a*b/c);result={operating,reserve:d,total:operating+d}; break; }
+    case "refill": { const [a, b, c, d] = values; const required=wholeCeil(b*c/d);result={required,missing:Math.max(0,required-a),surplus:Math.max(0,a-required)}; break; }
+    case "mixed-burn": { const [a, b, c] = values; same(a,b);const burnSeconds=sum(a.map((v,i)=>v*b[i]));result={burnSeconds,items:wholeFloor(burnSeconds/c)}; break; }
+    case "substitute": { const [a, b, c] = values; const count=wholeCeil(a*b/c);result={count,excessSeconds:Math.max(0,count*c-a*b)}; break; }
+    case "restart-loss": { const [a, b, c] = values; result={lostSeconds:a*b,replacementFuel:wholeCeil(a*b/c)}; break; }
+    case "preheat": { const [a, b, c] = values; result={burnSeconds:a*c,fuelPerFurnace:wholeCeil(a/b),totalFuel:wholeCeil(a/b)*c}; break; }
     case "loading-window": { const [a, b, c] = values; result={seconds:a*c/b}; break; }
     case "output-buffer": { const [a, b, c, d] = values; result={capacity:a*b,seconds:a*b*d/c}; break; }
     case "collect-interval": { const [a, b, c] = values; demand(b<=a,'Existing output exceeds capacity.');result={remainingCapacity:a-b,minutes:(a-b)/c}; break; }
     case "throughput-cap": { const [a, b, c, d] = values; const furnaceRate=c*60/d;result={itemsPerMinute:Math.min(a,b,furnaceRate),furnaceRate}; break; }
-    case "batch-checkpoints": { const [a, b, c] = values; const n=Math.ceil(a/b);demand(n<=1000,'Too many checkpoints.');result={checkpoints:Array.from({length:n},(_,i)=>({items:Math.min(a,(i+1)*b),seconds:Math.min(a,(i+1)*b)*c}))}; break; }
+    case "batch-checkpoints": { const [a, b, c] = values; const n=wholeCeil(a/b);demand(n<=1000,'Too many checkpoints.');result={checkpoints:Array.from({length:n},(_,i)=>({items:Math.min(a,(i+1)*b),seconds:Math.min(a,(i+1)*b)*c}))}; break; }
     case "net-fuel": { const [a, b, c] = values; result={netItems:a-b,netBurnSeconds:(a-b)*c}; break; }
   }
   return checked({ ...result, note: NOTE });

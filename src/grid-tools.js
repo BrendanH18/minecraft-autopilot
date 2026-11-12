@@ -117,7 +117,7 @@ export function gridCalculation(command, args = []) {
     case "chunk-window": { const x=numeric(a[0],-62500,62500,true),z=numeric(a[1],-62500,62500,true),r=numeric(a[2],0,1000,true); result = ({minX:(x-r)*16,minZ:(z-r)*16,maxX:(x+r)*16+15,maxZ:(z+r)*16+15}); break; }
     case "region-seam": { const x=numeric(a[0],-62500,62500,true),z=numeric(a[1],-62500,62500,true),dx=numeric(a[2],-1,1,true),dz=numeric(a[3],-1,1,true);if(Math.abs(dx)+Math.abs(dz)!==1)throw new Error("Use one cardinal unit step."); result = Math.floor(x/32)!==Math.floor((x+dx)/32)||Math.floor(z/32)!==Math.floor((z+dz)/32); break; }
     case "chunk-reconstruct": {  result = numeric(a[0],-62500,62500,true)*16+numeric(a[1],0,15,true); break; }
-    case "region-reconstruct": {  result = numeric(a[0],-1953,1953,true)*32+numeric(a[1],0,31,true); break; }
+    case "region-reconstruct": {  result = numeric(a[0],-31250,31250,true)*32+numeric(a[1],0,31,true); break; }
     case "section-address": { const y=numeric(a[0],-64,319,true); result = ({section:Math.floor(y/16),local:((y%16)+16)%16}); break; }
     case "section-reconstruct": {  result = numeric(a[0],-4,19,true)*16+numeric(a[1],0,15,true); break; }
     case "region-slot": {  result = numeric(a[0],0,31,true)+32*numeric(a[1],0,31,true); break; }
