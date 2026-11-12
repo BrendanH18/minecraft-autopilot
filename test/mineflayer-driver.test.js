@@ -658,3 +658,30 @@ test('a barrel at a former chest-half coordinate is inspected and counted as sep
   assert.equal(objective.check(current).checks.deposit.storedAdditional, 8);
   assert.equal(objective.check(current).met, true);
 });
+
+test('real bot observation includes threat coordinates usable by spatial scene queries', async t => {
+  const { sceneReport } = await import('../src/scene-tools.js');
+  const bot = new EventEmitter();
+  Object.assign(bot, {
+    registry: minecraftData('1.21.1'), entity: { position: new Vec3(0, 64, 0) },
+    entities: { zombie: { name: 'zombie', position: new Vec3(3, 64, 4) },
+      skeleton: { name: 'skeleton', position: new Vec3(6, 64, 8) },
+      distant: { name: 'creeper', position: new Vec3(100, 64, 0) },
+      passive: { name: 'cow', position: new Vec3(1, 64, 0) } },
+    username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
+    health: 20, food: 20, inventory: { items: () => [] },
+    pathfinder: { setMovements() {}, setGoal() {} }, findBlocks: () => [],
+    clearControlStates() {}, deactivateItem() {}, stopDigging() {}, quit: () => bot.emit('end', 'Closed'),
+  });
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  t.after(() => driver.close());
+  const state = driver.observe();
+  assert.deepEqual(state.threats, [
+    { type: 'minecraft:zombie', distance: 5, x: 3, y: 64, z: 4 },
+    { type: 'minecraft:skeleton', distance: 10, x: 6, y: 64, z: 8 },
+  ]);
+  assert.equal(sceneReport(state, 'threats-around', ['0,64,0', '5']).entries.length, 1);
+  assert.equal(sceneReport(state, 'threat-separation').pair.distance, 5);
+  state.blocks = [{ name: 'minecraft:oak_log', x: 3, y: 64, z: 3 }];
+  assert.equal(sceneReport(state, 'block-clearance', ['oak_log']).entries[0].nearestObservedThreat, 1);
+});

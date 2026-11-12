@@ -147,7 +147,8 @@ export class MineflayerDriver {
       inventory: bot.inventory.items().map(item => ({ slot: item.slot, name: `minecraft:${item.name}`, count: item.count })),
       home: this.homes[this.identity()] || null,
       threats: Object.values(bot.entities).filter(entity => entity.position && HOSTILES.has(entity.name) && entity.position.distanceTo(bot.entity.position) <= 16)
-        .slice(0, 16).map(entity => ({ type: `minecraft:${entity.name}`, distance: entity.position.distanceTo(bot.entity.position) })),
+        .slice(0, 16).map(entity => ({ type: `minecraft:${entity.name}`, distance: entity.position.distanceTo(bot.entity.position),
+          x: entity.position.x, y: entity.position.y, z: entity.position.z })),
       blocks: positions.map(position => ({ name: `minecraft:${bot.blockAt(position).name}`, x: position.x, y: position.y, z: position.z })),
       containers: this.observeContainers(),
     };
