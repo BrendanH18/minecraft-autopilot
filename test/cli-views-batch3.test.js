@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -201,6 +201,10 @@ test('waypoint helpers validate names, bounds, limits, duplicates, and dimension
   await corrupt(JSON.stringify({ version: 1, waypoints: [first.waypoint, first.waypoint] }), /duplicate waypoint names/);
   await corrupt(JSON.stringify({ version: 1, waypoints: [{ ...first.waypoint, extra: 1 }] }), /is invalid \(waypoints\.0/);
   await corrupt(JSON.stringify({ version: 1, waypoints: [{ ...first.waypoint, name: 'Bad' }] }), /waypoints\.0\.name/);
+  await corrupt(' '.repeat(1024 * 1024 + 1), /larger than 1 MiB/);
+  await assert.rejects(readWaypoints(directory), /not a regular file/);
+  const fifo = join(directory, 'fifo.json');
+  if (spawnSync('mkfifo', [fifo]).status === 0) await assert.rejects(readWaypoints(fifo), /not a regular file/, 'a FIFO is refused without blocking');
 });
 
 test('watch, risk, census, slots, route, and home measurements run against the demo bridge without control', { timeout: 20_000 }, async t => {
@@ -310,6 +314,16 @@ test('waypoints persist privately, list offline, refuse corrupt files, and goto 
   assert.deepEqual(driver.player.position, { x: 6, y: 64, z: 0 });
   assert.equal(acquires(), 1);
   assert.equal(harness.observe().mode, 'manual');
+  // A portal crossed between the first check and acquisition is caught under control, before any goto is sent.
+  const jobs = harness.start.bind(harness);
+  let started = 0;
+  harness.start = (...args) => { started++; return jobs(...args); };
+  const acquireOnce = harness.acquire;
+  harness.acquire = leaseId => { const result = acquireOnce(leaseId); driver.player.dimension = 'minecraft:the_nether'; return result; };
+  await assert.rejects(exec('waypoint', 'goto', 'start'), /Waypoint start is in minecraft:overworld but the player is in minecraft:the_nether/);
+  assert.deepEqual([started, harness.observe().mode, driver.player.position], [0, 'manual', { x: 6, y: 64, z: 0 }]);
+  harness.acquire = acquireOnce;
+  driver.player.dimension = 'minecraft:overworld';
   assert.deepEqual(JSON.parse((await offline('waypoint', 'remove', 'portal')).stdout), { removed: 'portal', remaining: 2, file });
   const saved = await readFile(file, 'utf8');
   assert.deepEqual(JSON.parse(saved).waypoints.map(entry => entry.name), ['mine', 'start']);

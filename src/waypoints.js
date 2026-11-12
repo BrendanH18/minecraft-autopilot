@@ -1,11 +1,13 @@
 import { z } from 'zod';
-import { readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirectory, writePrivateJson } from './config.js';
 import { positionSchema } from './protocol.js';
 
 export const waypointFile = join(dataDirectory, 'waypoints.json');
 export const MAX_WAYPOINTS = 100;
+const MAX_WAYPOINT_BYTES = 1024 * 1024;
 const NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const DIMENSION = /^[a-z0-9_.-]+:[a-z0-9_./-]+$/;
 
@@ -24,12 +26,21 @@ const fileSchema = z.object({ version: z.literal(1), waypoints: z.array(waypoint
 
 /** Returns saved waypoints, or [] when the file does not exist; a corrupt file is an error and is never overwritten. */
 export async function readWaypoints(path = waypointFile) {
-  let text;
-  try { text = await readFile(path, 'utf8'); }
+  let file;
+  try { file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK); }
   catch (error) {
     if (error.code === 'ENOENT') return [];
     throw new Error(`Cannot read waypoints at ${path}: ${error.code || error.message}.`);
   }
+  let text;
+  try {
+    // Never block on a FIFO or read an unbounded file; 100 waypoints fit easily in 1 MiB.
+    if (!(await file.stat()).isFile()) throw new Error(`Waypoint file ${path} is not a regular file; fix or remove it.`);
+    const buffer = Buffer.alloc(MAX_WAYPOINT_BYTES + 1);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > MAX_WAYPOINT_BYTES) throw new Error(`Waypoint file ${path} is larger than 1 MiB; fix or remove it.`);
+    text = buffer.subarray(0, bytesRead).toString('utf8');
+  } finally { await file.close(); }
   let parsed;
   try { parsed = JSON.parse(text); } catch { throw new Error(`Waypoint file ${path} is not valid JSON; fix or remove it.`); }
   const result = fileSchema.safeParse(parsed);

@@ -482,8 +482,10 @@ longer. Put `--` before the first point when it starts with a minus sign.
   player and adds `distance`, which is `null` for waypoints in another dimension.
 - `remove` fails for unknown names.
 - `goto` refuses a waypoint whose dimension differs from the observed dimension before taking
-  control. Otherwise it navigates like `goto`.
-- An unreadable or invalid file is reported with its path and is never overwritten. Concurrent
+  control, and checks again after taking control and before walking. Otherwise it navigates like
+  `goto`.
+- An unreadable, invalid, non-regular, or over-1 MiB file is reported with its path and is never
+  overwritten. Concurrent
   `add` or `remove` runs are not locked; the last write wins.
 
 `diff-snapshots` compares two `snapshot` files without contacting the bridge. It reports `from`
@@ -545,7 +547,8 @@ Ollama reports them, and the `start` event records `temperature`, `seed`, `retry
 `stopBelowHealth`.
 
 `transcript-summary FILE` reads a regular transcript file of at most 10 MiB without connecting to
-Minecraft or Ollama. Each `start` event begins a run; the last run is summarized unless
+Minecraft or Ollama. Each `start` event begins a run, and an event after a run's `finish` (an
+attempt that failed before writing `start`) begins a separate one; the last run is summarized unless
 `--run <n>` picks another. It prints `runs`, `run`, `events`, `decisions`, `decisionsByType`,
 `rejections`, `errors`, `results`, `invalidLines` (lines that are not JSON event objects), `goal`,
 `model`, `started`, `finished`, `status` (or `error` for a failed run), and `durationMs` (from the

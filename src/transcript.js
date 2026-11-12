@@ -34,8 +34,9 @@ export function summarizeTranscript(content, { run } = {}) {
     let event;
     try { event = JSON.parse(line); } catch { event = null; }
     const valid = event && typeof event === 'object' && !Array.isArray(event) && typeof event.event === 'string';
-    if (!current || valid && event.event === 'start') runs.push(current = { events: [], invalidLines: 0 });
-    if (valid) current.events.push(event);
+    // A run ends at its finish; a later finish without its own start (an attempt that failed early) is a separate run.
+    if (!current || valid && (event.event === 'start' || current.finished)) runs.push(current = { events: [], invalidLines: 0, finished: false });
+    if (valid) { current.events.push(event); if (event.event === 'finish') current.finished = true; }
     else current.invalidLines++;
   }
   if (run !== undefined && !(Number.isInteger(run) && run >= 1 && run <= runs.length)) throw new Error(`Choose a run from 1 to ${runs.length}.`);

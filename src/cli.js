@@ -329,9 +329,14 @@ waypoint.command('goto').description('Walk to a saved waypoint like goto; refuse
   .action(async name => {
     const target = findWaypoint(await readWaypoints(), name);
     const adapter = await connect();
-    try { assertSameDimension(target, await adapter.observe()); } finally { await adapter.close(); }
-    log(`Walking to waypoint ${target.name} at ${target.x} ${target.y} ${target.z} in ${target.dimension}.`);
-    return perform({ type: 'goto', x: target.x, y: target.y, z: target.z });
+    try {
+      assertSameDimension(target, await adapter.observe());
+      await adapter.acquire();
+      // Recheck under control: a portal between the first check and acquisition must not redirect the walk.
+      assertSameDimension(target, await adapter.observe());
+      log(`Walking to waypoint ${target.name} at ${target.x} ${target.y} ${target.z} in ${target.dimension}.`);
+      print(await adapter.execute({ type: 'goto', x: target.x, y: target.y, z: target.z }, { signal: abortController.signal, onProgress: job => log(job.message) }));
+    } finally { await adapter.close(); }
   });
 program.command('inspect-storage').description('Open known storage to refresh observed contents (server bot and demo); takes control.')
   .action(() => perform({ type: 'inspect_storage' }));

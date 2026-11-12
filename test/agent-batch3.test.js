@@ -244,6 +244,12 @@ test('transcript summaries count events per run and tolerate malformed lines', a
   const first = summarizeTranscript(text, { run: 1 });
   assert.deepEqual([first.goal, first.error, first.durationMs, 'status' in first], ['First', 'Stopped by user.', 2000, false]);
   assert.throws(() => summarizeTranscript(text, { run: 3 }), /run from 1 to 2/);
+  // An attempt that failed before writing start keeps its finish out of the completed run before it.
+  const orphan = [line('start', { goal: 'Done', model: 'm' }), line('finish', { result: { status: 'criteria_met', durationMs: 5 }, second: 1 }),
+    line('finish', { error: 'Cannot reach the Minecraft bridge.', second: 4 })].join('\n');
+  assert.deepEqual([summarizeTranscript(orphan, { run: 1 }).status, summarizeTranscript(orphan, { run: 1 }).goal], ['criteria_met', 'Done']);
+  const late = summarizeTranscript(orphan);
+  assert.deepEqual([late.runs, late.goal, late.error, 'status' in late], [2, null, 'Cannot reach the Minecraft bridge.', false]);
   const unfinished = summarizeTranscript(`garbage\n${line('start', { goal: 'G', model: 'm' })}\n`);
   assert.deepEqual([unfinished.runs, unfinished.invalidLines, unfinished.status, unfinished.finished, unfinished.durationMs], [2, 0, null, null, null]);
   assert.deepEqual(summarizeTranscript(''), { runs: 0, run: null, events: 0, decisions: 0, decisionsByType: {}, rejections: 0, errors: 0, results: 0, invalidLines: 0,
