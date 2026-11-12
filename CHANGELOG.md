@@ -6,6 +6,12 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 1,000 offline planning and analysis commands in 40 groups of 25, covering
+  spatial layouts, resource budgets, measurement statistics, dependency
+  graphs, routes, schedules, and patrol estimates; see
+  [batch 10](docs/IMPROVEMENTS.md#batch-10-1000-offline-planning-and-analysis-improvements).
+  These supplied-data calculations do not extend gameplay acceptance claims.
+
 - 500 offline planning and evidence commands across 20 groups: spatial
   calculations, caller-supplied resource budgets, snapshot trends, routine
   metrics, and transcript queries; see [batch 9](docs/IMPROVEMENTS.md#batch-9-500-offline-planning-and-evidence-improvements).

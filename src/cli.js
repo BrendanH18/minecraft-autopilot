@@ -63,6 +63,7 @@ import { registerVitalsSeriesTools } from './vitals-series-tools.js';
 import { registerRoutineMetricsTools } from './routine-metrics-tools.js';
 import { registerEventQueryTools } from './event-query-tools.js';
 import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
+import { registerPlanningTools } from './planning-tools.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -625,6 +626,7 @@ registerVitalsSeriesTools(program, { print });
 registerRoutineMetricsTools(program, { print });
 registerEventQueryTools(program, { print });
 registerSnapshotQueryTools(program, { print });
+registerPlanningTools(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {

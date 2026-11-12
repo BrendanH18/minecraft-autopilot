@@ -210,3 +210,12 @@ add 20 offline groups for spatial calculations, explicit resource budgets,
 and recorded evidence queries. Each group has 25 commands; run
 `mc-agent GROUP --help` and consult its linked guide for arguments and limits.
 These reports neither execute gameplay nor establish safety or successful actions.
+
+The [1,000 batch 10 improvements](docs/IMPROVEMENTS.md#batch-10-1000-offline-planning-and-analysis-improvements)
+add 40 groups of 25 offline tools for
+[spatial plans](docs/PLANNING-SPATIAL.md),
+[resource budgets](docs/PLANNING-RESOURCES.md),
+[measurement analysis](docs/PLANNING-ANALYSIS.md), and
+[route and schedule coordination](docs/PLANNING-COORDINATION.md).
+They calculate from supplied data and print JSON; they never execute gameplay.
+Use `mc-agent GROUP --help` for arguments and each guide for assumptions.
