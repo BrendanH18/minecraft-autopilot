@@ -43,6 +43,26 @@ import { registerJournalTools } from './journal-tools.js';
 import { registerDiagnoseTools } from './diagnose-tools.js';
 import { registerRoutineCompare } from './routine-compare.js';
 import { registerRoutineSelect } from './routine-select.js';
+import { registerBearingTools } from './bearing-tools.js';
+import { registerGridTools } from './grid-tools.js';
+import { registerShapeTools } from './shape-tools.js';
+import { registerEarthworksTools } from './earthworks-tools.js';
+import { registerRailplanTools } from './railplan-tools.js';
+import { registerLightplanTools } from './lightplan-tools.js';
+import { registerPerimeterTools } from './perimeter-tools.js';
+import { registerPackingTools } from './packing-tools.js';
+import { registerProductionTools } from './production-tools.js';
+import { registerFuelplanTools } from './fuelplan-tools.js';
+import { registerTradeplanTools } from './tradeplan-tools.js';
+import { registerFarmplanTools } from './farmplan-tools.js';
+import { registerRationTools } from './ration-tools.js';
+import { registerAllocationTools } from './allocation-tools.js';
+import { registerInventorySeriesTools } from './inventory-series-tools.js';
+import { registerStorageSeriesTools } from './storage-series-tools.js';
+import { registerVitalsSeriesTools } from './vitals-series-tools.js';
+import { registerRoutineMetricsTools } from './routine-metrics-tools.js';
+import { registerEventQueryTools } from './event-query-tools.js';
+import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -585,6 +605,26 @@ registerJournalTools(program, { print });
 registerDiagnoseTools(program, { print });
 registerRoutineCompare(program, { print });
 registerRoutineSelect(program, { print });
+registerBearingTools(program, { print });
+registerGridTools(program, { print });
+registerShapeTools(program, { print });
+registerEarthworksTools(program, { print });
+registerRailplanTools(program, { print });
+registerLightplanTools(program, { print });
+registerPerimeterTools(program, { print });
+registerPackingTools(program, { print });
+registerProductionTools(program, { print });
+registerFuelplanTools(program, { print });
+registerTradeplanTools(program, { print });
+registerFarmplanTools(program, { print });
+registerRationTools(program, { print });
+registerAllocationTools(program, { print });
+registerInventorySeriesTools(program, { print });
+registerStorageSeriesTools(program, { print });
+registerVitalsSeriesTools(program, { print });
+registerRoutineMetricsTools(program, { print });
+registerEventQueryTools(program, { print });
+registerSnapshotQueryTools(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {

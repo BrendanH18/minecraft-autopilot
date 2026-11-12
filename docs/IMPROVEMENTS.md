@@ -304,3 +304,46 @@ a nonexistent bridge, check expected results and unchanged files, and validate
 generated routines. The complete Node suite, syntax checks, and demo smoke
 cover integration. These offline and simulated checks do not close packaged
 Fabric or authenticated-handoff acceptance gates.
+
+## Batch 9: 500 offline planning and evidence improvements
+
+Twenty independently callable groups each add 25 commands (500 total).
+The linked guides enumerate the commands, their arguments, examples, and limits.
+
+| Numbers | Group | Guide |
+| --- | --- | --- |
+| 1–25 | `bearing` | [Orientation and angle calculations](BEARING.md) |
+| 26–50 | `grid` | [Chunk and region coordinates](GRID.md) |
+| 51–75 | `shape` | [Planar polygon calculations](SHAPE.md) |
+| 76–100 | `earthworks` | [Excavation and fill estimates](EARTHWORKS.md) |
+| 101–125 | `railplan` | [Rail material and grade estimates](RAILPLAN.md) |
+| 126–150 | `lightplan` | [Abstract lighting geometry](LIGHTPLAN.md) |
+| 151–175 | `perimeter` | [Boundary and fence estimates](PERIMETER.md) |
+| 176–200 | `packing` | [Stack and slot logistics](PACKING.md) |
+| 201–225 | `production` | [User-supplied production ratios](PRODUCTION.md) |
+| 226–250 | `fuelplan` | [User-supplied fuel budgets](FUELPLAN.md) |
+| 251–275 | `tradeplan` | [User-supplied exchange budgets](TRADEPLAN.md) |
+| 276–300 | `farmplan` | [Abstract plot and yield estimates](FARMPLAN.md) |
+| 301–325 | `ration` | [Consumption and reserve budgets](RATION.md) |
+| 326–350 | `allocation` | [Resource allocation calculations](ALLOCATION.md) |
+| 351–375 | `inventory-series` | [Recorded inventory trends](INVENTORY-SERIES.md) |
+| 376–400 | `storage-series` | [Recorded storage evidence trends](STORAGE-SERIES.md) |
+| 401–425 | `vitals-series` | [Recorded vitals and movement trends](VITALS-SERIES.md) |
+| 426–450 | `routine-metrics` | [Static routine metrics](ROUTINE-METRICS.md) |
+| 451–475 | `event-query` | [Transcript event queries](EVENT-QUERY.md) |
+| 476–500 | `snapshot-query` | [Saved snapshot queries](SNAPSHOT-QUERY.md) |
+
+All groups run offline, print JSON reports, and leave input files untouched.
+No group acquires control, calls a model, or executes Minecraft actions.
+Resource budgets use explicit caller-supplied rates and ratios; estimates do
+not establish in-game recipes, prices, growth, fuel behavior, or successful
+execution. Geometric coverage ignores obstructions, terrain, and game mechanics.
+Recorded evidence is partial; changes and event requests do not prove causes
+or action completion. Missing fields remain unknown where a report requires
+them. Existing packaged Fabric and authenticated-handoff acceptance gates
+remain open.
+
+Each group has focused behavioral tests and command registration coverage.
+The batch inventory test requires exactly 25 unique command names per group
+and exactly 500 new registered commands overall. The complete Node suite,
+syntax checks, and demo smoke provide regression coverage.
