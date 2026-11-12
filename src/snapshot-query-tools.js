@@ -2,7 +2,7 @@ import { parseSnapshot } from './cli-views.js';
 import { readLedgerSnapshot, ledgerNumber } from './ledger-tools.js';
 // Paths are JSON Pointers (RFC 6901), so keys containing dots remain addressable.
 export function pointerParts(pointer){if(typeof pointer!=='string'||pointer.length>1000||pointer!==''&&!pointer.startsWith('/')||/~(?![01])/u.test(pointer))throw new Error('Use a JSON Pointer, with empty string for root.');return pointer===''?[]:pointer.slice(1).split('/').map(k=>k.replace(/~1/g,'/').replace(/~0/g,'~'));}
-export function pointerGet(value,pointer){let node=value;for(const part of pointerParts(pointer)){if(node===null||typeof node!=='object'||!Object.hasOwn(node,part))return {present:false,value:null};node=node[part];}return {present:true,value:node};}
+export function pointerGet(value,pointer){let node=value;for(const part of pointerParts(pointer)){if(node===null||typeof node!=='object'||Array.isArray(node)&&!/^(0|[1-9][0-9]*)$/.test(part)||!Object.hasOwn(node,part))return {present:false,value:null};node=node[part];}return {present:true,value:node};}
 const escape=s=>s.replace(/~/g,'~0').replace(/\//g,'~1');
 export function walkEvidence(input){const nodes=[];const visit=(value,path,depth)=>{if(typeof value==='number'&&!Number.isFinite(value))throw new Error('Evidence numbers must be finite.');if(depth>40||nodes.length>=20000)throw new Error('Evidence traversal limited to depth40 and20000 nodes.');nodes.push({path,value,depth});if(value!==null&&typeof value==='object')for(const [key,v]of Object.entries(value))visit(v,`${path}/${escape(key)}`,depth+1);};visit(input,'',0);return nodes;}
 const kind=v=>v===null?'null':Array.isArray(v)?'array':typeof v;
