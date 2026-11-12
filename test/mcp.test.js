@@ -19,7 +19,7 @@ test('MCP client discovers tools, requires takeover, executes actions, and relea
   t.after(async () => { await client.close(); await bridge.close(); await rm(directory, { recursive: true, force: true }); });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 5);
+  assert.equal(tools.tools.length, 8);
   const refused = await client.callTool({ name: 'minecraft_action', arguments: { action: { type: 'eat' } } });
   assert.equal(refused.isError, true);
   const takeover = await client.callTool({ name: 'minecraft_take_control', arguments: {} });

@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { actionSchema } from './protocol.js';
+import { inventoryView, nearbyView, storageView } from './cli-views.js';
 
 export async function serveMcp(adapter) {
   const server = new McpServer({ name: 'minecraft-agent', version: '0.1.0' });
@@ -14,6 +15,21 @@ export async function serveMcp(adapter) {
     description: 'Read player health, hunger, inventory, loaded nearby blocks, threats, current action, and saved home without taking control.',
     annotations: { readOnlyHint: true }, inputSchema: {},
   }, wrap(() => adapter.observe()));
+  server.registerTool('minecraft_inventory', {
+    description: 'Read combined item counts and occupied inventory slots without taking control. Optionally filter by item name such as oak_log.',
+    annotations: { readOnlyHint: true }, inputSchema: { item: z.string().max(100).optional() },
+  }, wrap(async ({ item }) => inventoryView(await adapter.observe(), { item })));
+  server.registerTool('minecraft_nearby', {
+    description: 'List observed loaded blocks, hostile threats, or containers nearest first without taking control. These are partial observations, not a world scan; absent threats do not prove safety. Container contents are last observed, not refreshed.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { kind: z.enum(['blocks', 'threats', 'containers']), name: z.string().max(100).optional().describe('block or container name, for example oak_log or chest'),
+      radius: z.number().positive().finite().optional(), limit: z.number().int().positive().optional() },
+  }, wrap(async ({ kind, name, radius, limit = 20 }) => {
+    if (kind === 'threats' && name !== undefined) throw new Error('Name filters apply to blocks and containers only.');
+    const state = await adapter.observe();
+    const options = { name, radius, limit };
+    return kind === 'containers' ? storageView(state, options) : nearbyView(state, kind, options);
+  }));
   server.registerTool('minecraft_take_control', {
     description: 'Take exclusive control of the currently logged-in player. F8 or minecraft_stop returns control. Do this only when the user asks you to play.', inputSchema: {},
   }, wrap(async () => {
@@ -31,6 +47,9 @@ export async function serveMcp(adapter) {
   server.registerTool('minecraft_cancel', {
     description: 'Cancel the running action while retaining agent control.', inputSchema: {},
   }, wrap(async () => { await adapter.cancel(); return { stopped: true }; }));
+  server.registerTool('minecraft_release', {
+    description: 'Gracefully end this session: cancel its running action and return control to the player. Does not affect sessions started by another process; harmless when not in control.', inputSchema: {},
+  }, wrap(async () => { const released = Boolean(adapter.leaseId); await adapter.release(); return { controlled: false, released }; }));
   server.registerTool('minecraft_stop', {
     description: 'Emergency stop: cancel gameplay and immediately return control to the player, including sessions started by another process.', inputSchema: {},
   }, wrap(async () => { await adapter.emergencyStop(); await adapter.release(); return { controlled: false }; }));

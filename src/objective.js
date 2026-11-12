@@ -16,6 +16,8 @@ const criteriaSchema = z.object({
   destination: positionSchema.extend({ radius: z.number().finite().min(0).max(64).default(2) }).optional(),
   inventory: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
   maxThreats: z.number().int().min(0).optional(),
+  maxInventory: z.object({ item: z.string(), count: z.number().int().min(0).max(2304) }).strict().optional(),
+  maxDistance: z.number().finite().min(0).max(10_000).optional(),
 }).strict();
 
 export function parseCollectionCriterion(value) {
@@ -36,6 +38,13 @@ export function parseInventoryCriterion(value) {
   return parseDepositCriterion(value);
 }
 
+/** An upper bound on held items; zero proves none remain, for example after storing everything. */
+export function parseMaxInventoryCriterion(value) {
+  const match = /^(?:minecraft:)?([a-z0-9_]+):([0-9]+)$/.exec(value);
+  if (!match || Number(match[2]) > 2304) throw new Error('Use an item and a maximum count from 0 to 2304, for example oak_log:0.');
+  return { item: normalizeAction({ type: 'deposit', item: match[1] }).item, count: Number(match[2]) };
+}
+
 export function parseDestinationCriterion(value) {
   const parts = value.split(',');
   if (parts.length < 3 || parts.length > 4 || parts.some(part => !part.trim())) throw new Error('Use x,y,z or x,y,z,radius for a destination.');
@@ -47,9 +56,17 @@ export function parseDestinationCriterion(value) {
 export function createObjective(criteria, initialState) {
   const parsed = criteriaSchema.parse(criteria);
   if (parsed.homeRadius !== undefined && !parsed.returnHome) throw new Error('homeRadius requires returnHome.');
-  if (!parsed.collect && !parsed.deposit && !parsed.returnHome && parsed.minHealth === undefined && parsed.minHunger === undefined && !parsed.destination && !parsed.inventory && parsed.maxThreats === undefined) return null;
+  if (!parsed.collect && !parsed.deposit && !parsed.returnHome && parsed.minHealth === undefined && parsed.minHunger === undefined && !parsed.destination && !parsed.inventory && parsed.maxThreats === undefined
+    && !parsed.maxInventory && parsed.maxDistance === undefined) return null;
   const requiredInventory = parsed.inventory ? parseInventoryCriterion(`${parsed.inventory.item}:${parsed.inventory.count}`) : null;
+  const maxInventory = parsed.maxInventory ? parseMaxInventoryCriterion(`${parsed.maxInventory.item}:${parsed.maxInventory.count}`) : null;
   const player = z.object({ uuid: z.string().min(1), dimension: z.string().min(1) }).parse(initialState.player);
+  let start = null;
+  if (parsed.maxDistance !== undefined) {
+    const position = point.safeParse(initialState.player.position);
+    if (!position.success) throw new Error('The starting position is unavailable, so --verify-max-distance cannot be checked.');
+    start = position.data;
+  }
   const collect = parsed.collect ? parseCollectionCriterion(`${parsed.collect.block}:${parsed.collect.count}`) : null;
   const count = state => inventory.parse(state.inventory).filter(item => item.name === collect.block).reduce((total, item) => total + item.count, 0);
   const initialCount = collect ? count(initialState) : null;
@@ -83,7 +100,9 @@ export function createObjective(criteria, initialState) {
       ...(parsed.minHunger !== undefined && { minHunger: parsed.minHunger }),
       ...(parsed.destination && { destination: parsed.destination }),
       ...(requiredInventory && { inventory: requiredInventory }),
-      ...(parsed.maxThreats !== undefined && { maxThreats: parsed.maxThreats }) },
+      ...(parsed.maxThreats !== undefined && { maxThreats: parsed.maxThreats }),
+      ...(maxInventory && { maxInventory }),
+      ...(start && { maxDistance: { start, radius: parsed.maxDistance } }) },
     check(state, { storageRefreshed = false } = {}) {
       const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && Number.isFinite(state.player.health) && state.player.health > 0;
       const checks = {};
@@ -138,6 +157,16 @@ export function createObjective(criteria, initialState) {
       if (parsed.maxThreats !== undefined) {
         const current = samePlayer && Array.isArray(state.threats) ? state.threats.length : null;
         checks.threats = { observed: current, maximum: parsed.maxThreats, met: current !== null && current <= parsed.maxThreats };
+      }
+      if (maxInventory) {
+        // A missing inventory is unavailable data, not an empty one.
+        const current = samePlayer && Array.isArray(state.inventory) ? held(inventory.parse(state.inventory), maxInventory.item) : null;
+        checks.maxInventory = { item: maxInventory.item, current, maximum: maxInventory.count, met: current !== null && current <= maxInventory.count };
+      }
+      if (start) {
+        const position = samePlayer ? point.safeParse(state.player.position) : null;
+        const distance = position?.success ? Math.hypot(position.data.x - start.x, position.data.y - start.y, position.data.z - start.z) : null;
+        checks.maxDistance = { start, distance, maximum: parsed.maxDistance, met: distance !== null && distance <= parsed.maxDistance };
       }
       return { met: samePlayer && Object.values(checks).every(check => check.met), samePlayer, checks };
     },

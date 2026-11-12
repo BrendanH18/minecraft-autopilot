@@ -19,7 +19,7 @@ Minecraft Autopilot combines a Fabric client mod, a standalone server bot, a CLI
 | Eat and guard | Eat supported food and attempt a low-health retreat to a saved shelter |
 | Store | Deposit items into the nearest chest or barrel (Fabric, server bot, and demo) |
 | Local planning | One validated Ollama action at a time, with time and step limits |
-| Agent integration | Five MCP tools for observation, takeover, actions, cancellation, and stop |
+| Agent integration | Eight MCP tools for observation, inventory, nearby lookups, takeover, actions, cancellation, release, and stop |
 | Handoff | F8/menu takeover in Fabric, emergency stop, and heartbeat expiry |
 | Verify tasks | Check additional inventory, items stored in containers, and return to the original home independently of the model |
 

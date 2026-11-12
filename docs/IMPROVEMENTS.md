@@ -1,9 +1,69 @@
-# Thirty CLI, verification, and planner improvements
+# Improvement batches
+
+Each batch below is a numbered inventory of thirty small changes and how they were validated.
+
+## Batch 2: overview commands, planner controls, routines, and MCP tools
+
+This batch adds CLI commands, planner options, criteria, MCP tools, and demo scenarios without
+changing the bridge wire protocol or the Fabric mod. See [usage](USAGE.md#overview-search-and-snapshot-commands)
+for commands, ranges, and limits.
+
+### Read-only overview and search commands
+
+1. `summary`: position, dimension, vitals, control mode, current job, home distance, threat count, and inventory totals.
+2. `job`: control mode, stopping flag, and the current job.
+3. `find-item`: an item's inventory total and last-observed counts per container; unopened containers are counted separately, never as empty.
+4. `storage-totals`: last-observed item totals across known containers, each coordinate counted once.
+5. `nearest`: the nearest observed block of a type, with distance and bearing.
+6. `direction`: 8-point compass bearing, Minecraft yaw and pitch, and distances to a coordinate.
+7. `food`: inventory food and the hunger it can restore, against current missing hunger.
+8. `free-slots`: used/free main slots and, with `--item`, room for more of an item.
+9. `snapshot`: save an owner-only observation file without job or credential-like fields; no overwrite without `--force`.
+10. `compare`: inventory, position, vitals, home, and dimension changes since a snapshot.
+
+### Planner controls and criteria
+
+11. `agent --dry-run`: validate settings and criteria against one observation without control or model calls.
+12. `--transcript`: append-only, owner-only JSON Lines of planner events; symlinks refused.
+13. `--max-failures`: configurable consecutive-failure stop (1–10, default 3).
+14. `--context-tokens`: configurable Ollama context window (2048–131072, default 8192).
+15. `--history`: configurable number of recent decisions sent to the model (1–50, default 12).
+16. `--fence`: refuse `goto` targets beyond a horizontal radius from the starting position.
+17. `--allow-actions`: restrict the planner's action set in both the output schema and dispatch.
+18. Results report `durationMs`, per-action `actionCounts`, and the `final` position/health/hunger.
+19. `--verify-max-inventory`: an upper bound on held items, such as `oak_log:0` after storing everything.
+20. `--verify-max-distance`: the final position must be within a radius of the starting position.
+21. `MC_AGENT_MODEL` and `MC_AGENT_OLLAMA` supply planner defaults; explicit flags win.
+22. `models`: list locally installed Ollama models through the shared localhost-only URL check.
+
+### Routines, MCP, simulation, and diagnostics
+
+23. MCP `minecraft_inventory`: read-only combined item counts with an optional filter.
+24. MCP `minecraft_nearby`: read-only blocks, threats, or containers nearest first.
+25. MCP `minecraft_release`: gracefully end this session's control without an emergency stop.
+26. `run FILE`: validate every action of a 1–100 step JSON routine before taking control, then run it under one lease and stop at the first failure.
+27. `goto --relative`: offsets from the observed position, bounds-checked before control is taken.
+28. `eat --until`: eat up to ten meals until hunger reaches a target, stopping when food runs out or hunger does not rise.
+29. `demo --scenario`: `hungry`, `hostile`, and `stocked` starting states for the simulation.
+30. `doctor`: check the full `>=22.12` Node requirement and optionally a local Ollama with `--ollama`.
+
+### Validation
+
+`test/cli-observation.test.js` runs all ten overview commands as CLI processes against the demo
+bridge while another controller holds the lease. `test/agent-options.test.js` covers each planner
+option and criterion through the API with fake model replies and through the CLI with a fake local
+Ollama server. `test/routine-mcp.test.js` covers routines, relative goto, repeated eating, demo
+scenarios, the three MCP tools over stdio, and the doctor Ollama check. The full Node suite, syntax
+check, and demo smoke exercise the integrated change. These checks use the simulation and fake local
+servers; they do not extend the recorded real-game or real-model acceptance in
+[development](DEVELOPMENT.md#validation).
+
+## Batch 1: CLI, verification, and planner improvements
 
 This batch extends the existing bridge without changing its wire protocol or Fabric mod.
 See [usage](USAGE.md#focused-observations-and-final-state-checks) for commands and limits.
 
-## CLI tools
+### CLI tools
 
 1. `inventory`: aggregate stacks, filter by item, report item and occupied-slot totals.
 2. `blocks`: sort loaded block observations by distance; filter by name/radius and limit results.
@@ -16,7 +76,7 @@ See [usage](USAGE.md#focused-observations-and-final-state-checks) for commands a
 9. `inspect-storage`: explicitly refresh known storage using the bounded action path.
 10. `wait`: perform a cancellable controlled wait of 1–3600 seconds.
 
-## Independent task verification
+### Independent task verification
 
 11. `--verify-health`: require a minimum final health.
 12. `--verify-hunger`: require a minimum final hunger; unavailable data stays unmet.
@@ -29,7 +89,7 @@ See [usage](USAGE.md#focused-observations-and-final-state-checks) for commands a
 19. Reject empty explicit storage provenance instead of treating old stock as new deposits.
 20. Reject nonnumeric or nonfinite health as proof of a living player.
 
-## Planner reliability
+### Planner reliability
 
 21. Validate goal/model text before acquiring control.
 22. Validate public API runtime, decision, inference timeout, and thinking options.
@@ -42,7 +102,7 @@ See [usage](USAGE.md#focused-observations-and-final-state-checks) for commands a
 29. Treat returned failed/cancelled action statuses as failures for the three-failure stop.
 30. Detect ineffective repeated actions even when the model alternates short and namespaced item names.
 
-## Validation
+### Validation
 
 `test/cli-tools.test.js` runs all ten tools as real CLI processes against the demo bridge,
 including read-only queries while another controller owns the lease. `test/agent-cli.test.js`

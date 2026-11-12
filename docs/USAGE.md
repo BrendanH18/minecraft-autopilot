@@ -15,17 +15,19 @@ npm start -- server --help
 | `observe` / `status` | Read state without taking control |
 | `attach FILE` | Remember a game profile's discovery file |
 | `set-home` | Save the current location for this world/server, player, and dimension |
-| `goto X Y Z` | Navigate without placing or breaking blocks |
+| `goto X Y Z [--relative]` | Navigate without placing or breaking blocks; `--relative` offsets from the current position |
 | `collect BLOCK COUNT` | Collect 1–64 additional items and attempt to return |
 | `deposit ITEM [COUNT]` | Store an item (all of it when COUNT is omitted) in the nearest chest or barrel |
-| `eat` / `home` | Eat supported food / navigate to the saved home |
+| `eat [--until HUNGER]` / `home` | Eat supported food, optionally repeating up to a hunger level / navigate to the saved home |
 | `guard --seconds N` | Maintain a session with eating/retreat reflexes for 1–3600 seconds |
 | `agent GOAL --model MODEL` | Run a bounded local Ollama planner |
+| `models` | List locally installed Ollama models |
 | `mcp` | Start the MCP stdio server |
+| `run FILE [--dry-run]` | Validate and run a JSON routine of 1–100 actions under one control session |
 | `stop` | Emergency stop, including another controller's session |
-| `doctor` | Inspect prerequisites and discovery files offline |
+| `doctor [--ollama URL]` | Inspect prerequisites and discovery files offline; optionally check a local Ollama |
 | `clean --dry-run` | Preview selective cleanup |
-| `demo [--smoke]` | Run a simulation, optionally perform a smoke check and exit |
+| `demo [--smoke] [--scenario NAME]` | Run a simulation, optionally from a preset state or as a smoke check that exits |
 | `server --host HOST --account ACCOUNT` | Connect the standalone bot |
 
 Global options go before the command. `--bridge FILE` selects a discovery file; `--json` suppresses normal CLI progress and prints errors as JSON. Results are JSON even without it. `--cli-version` or `-V` prints the CLI version; `server --version` selects the Minecraft protocol version.
@@ -128,12 +130,15 @@ For a specific profile, put `"--bridge", "/absolute/path/to/bridge.json"` before
 | Tool | Behavior |
 | --- | --- |
 | `minecraft_observe` | Read without taking control |
+| `minecraft_inventory` | Read combined item counts, optionally for one item, without taking control |
+| `minecraft_nearby` | List observed blocks, threats, or containers nearest first without taking control |
 | `minecraft_take_control` | Explicitly acquire exclusive control and start heartbeats |
 | `minecraft_action` | Execute and wait; requires prior takeover |
 | `minecraft_cancel` | Cancel the action while retaining control |
+| `minecraft_release` | End this session gracefully; other sessions are unaffected |
 | `minecraft_stop` | Release control and cancel activity, including another session |
 
-Use observe → take control → action → observe → stop. Action arguments:
+Use observe → take control → action → observe → release. Keep `minecraft_stop` for emergencies. Action arguments:
 
 ```json
 { "action": { "type": "collect", "block": "oak_log", "count": 8 } }
@@ -234,4 +239,171 @@ Empty model replies suggest recovery options; actions above 65,536 characters ar
 Credential-bearing Ollama URLs are refused. The planner can choose `inspect_storage` when the
 backend supplies containers; returned failed/cancelled actions count toward its existing
 three-failure stop. Ineffective repeat detection treats namespaced and short item names alike.
-See [the 30-change inventory](IMPROVEMENTS.md) for this batch and its validation coverage.
+See [the 30-change inventory](IMPROVEMENTS.md#batch-1-cli-verification-and-planner-improvements) for this batch and its validation coverage.
+
+## Overview, search, and snapshot commands
+
+These commands also read current observations without taking control and preserve any existing lease
+(batch 2 in [the improvement inventory](IMPROVEMENTS.md#batch-2-overview-commands-planner-controls-routines-and-mcp-tools)):
+
+```sh
+npm start -- summary
+npm start -- job
+npm start -- find-item oak_log
+npm start -- storage-totals --item oak_log
+npm start -- nearest oak_log
+npm start -- direction 10 64 -20
+npm start -- food
+npm start -- free-slots --item cobblestone
+npm start -- snapshot before.json
+npm start -- compare before.json
+```
+
+`summary` combines position, dimension, health, hunger, control mode, current job type and status,
+home distance, observed threat count, and inventory totals; unavailable values are `null`. `job`
+shows the control mode, stopping flag, and current job id, type, status, and message.
+
+`find-item` reports the inventory total plus per-container counts with coordinates and distance.
+`storage-totals` aggregates every known container, sorted by count, with `containersObserved` and
+`unopened` counts. Both use `last_observed` contents and count each coordinate once. Unopened
+containers are counted separately and never treated as empty; run `inspect-storage` to refresh them.
+Unsupported backends return `supported: false`.
+
+`nearest` searches only the loaded blocks the backend reports and returns `found: false` when none
+match. `nearest` and `direction` add an 8-point compass bearing (north is −Z, east is +X), the
+Minecraft yaw (0 south, 90 west, ±180 north, −90 east) and pitch (negative looks up) to the
+`distance` fields. Bearing and yaw are `null` straight up or down. `direction` accepts the same
+coordinate bounds as `goto`.
+
+`food` lists common vanilla foods in the inventory with hunger restored per item and in total, plus
+`missingHunger` (20 minus hunger). Saturation is not included, and harmful or risky foods (including raw chicken) and unlisted foods are
+omitted. `free-slots` counts used and free slots of the 36 main slots. With `--item`, it also
+reports `room`: free slots times the stack size plus space in partial stacks. Stack sizes come from a
+short built-in list. Other items assume 64 and report `stackSizeAssumed: true`.
+
+`snapshot` saves the observation as JSON with a `savedAt` time and owner-only (0600) permissions.
+It never stores the job, stopping flag, or token-like fields, and it refuses to replace an existing
+file unless you pass `--force`. `compare` reports the elapsed seconds, position change and distance
+moved, health and hunger deltas, dimension and home change flags, and only the inventory items whose
+totals changed. Unreadable or invalid snapshot files are rejected with the reason.
+
+## Planner options and additional criteria
+
+List the models installed in local Ollama, then preview a task without taking control:
+
+```sh
+npm start -- models
+export MC_AGENT_MODEL=YOUR_LOCAL_MODEL
+npm start -- agent "Store every oak log in the nearby chest" --dry-run \
+  --verify-max-inventory oak_log:0 --verify-max-distance 16
+npm start -- agent "Store every oak log in the nearby chest" \
+  --allow-actions deposit,inspect_storage,goto --fence 32 \
+  --verify-max-inventory oak_log:0 --verify-max-distance 16 \
+  --transcript .runtime/store-logs.jsonl
+```
+
+`models` reads `GET /api/tags` from the same localhost-only, credential-free Ollama URL rules as
+the planner and prints each name, size, and modified date; it waits at most 10 seconds and never
+pulls models. `MC_AGENT_MODEL` and `MC_AGENT_OLLAMA` supply `--model` and `--ollama` when those
+flags are omitted; explicit flags win, and a model is still required.
+
+`--dry-run` validates the goal, model name, limits, URL, and criteria against one observation and
+returns `status: "dry_run"` with the configured criteria and their current progress. It neither
+takes control nor contacts the model, and it skips the storage baseline inspection that a real
+`--verify-deposit` run performs.
+
+| Option | Range (default) | Effect |
+| --- | --- | --- |
+| `--max-failures <n>` | 1–10 (3) | Consecutive failed actions before the planner stops |
+| `--context-tokens <n>` | 2048–131072 (8192) | Ollama `num_ctx` for each decision |
+| `--history <n>` | 1–50 (12) | Recent decisions, results, and refusals sent to the model |
+| `--fence <blocks>` | 1–10000 | Refuse `goto` targets farther horizontally from the starting position |
+| `--allow-actions <list>` | planner actions | Restrict choices; `done` is always allowed |
+| `--transcript <file>` | path | Append one JSON line per planner event |
+
+The fence is shown to the model; a refused `goto` is recorded as a failed action and counts toward
+`--max-failures`. It bounds only `goto` targets: `home`, `collect`, and `deposit` may still move
+the player beyond it. `--allow-actions` takes a comma list of `goto`, `home`, `set_home`,
+`collect`, `eat`, `inspect_storage`, `deposit`, and `wait`; unknown names are rejected before
+connecting. The model's output schema lists only the allowed actions, and any other decision is
+refused without running. Storage inspections required by `--verify-deposit` still run.
+
+Transcripts are append-only JSON Lines with `start`, `decision`, `result`, `error`, `rejection`,
+and `finish` events, each with an ISO timestamp. New files are created owner-only (mode 600);
+existing files keep their permissions, and symlinks or non-files are refused before takeover. They
+record the goal, model name, limits, criteria, decisions, and outcomes, but not the Ollama URL,
+observations, or bridge details.
+
+Every returned result adds `durationMs`, `actionCounts` (planner actions dispatched to the game,
+including ones that then failed; refusals and verification inspections are excluded), and `final`
+(`position`, `health`, and `hunger` from the last observation, or `null` when the player was
+unavailable).
+
+`--verify-max-inventory item:count` requires at most 0–2304 of an item held at completion, for
+example `oak_log:0` after storing everything. `--verify-max-distance <n>` requires the final
+position within 0–10000 blocks (straight-line) of the position observed when the task started.
+Missing inventory or position data cannot satisfy either check, and a decision limit with either
+criterion exits 2 like the other criteria.
+
+## Routines, MCP tools, and simulation scenarios
+
+`run FILE` performs a fixed list of protocol actions in order under one control session, with no
+model involved. The file holds `{ "actions": [ ... ] }` or a bare array, using the same action
+objects as `minecraft_action`:
+
+```json
+{
+  "actions": [
+    { "type": "set_home" },
+    { "type": "collect", "block": "oak_log", "count": 8 },
+    { "type": "deposit", "item": "oak_log", "count": 8 },
+    { "type": "home" }
+  ]
+}
+```
+
+```sh
+npm start -- run routine.json --dry-run
+npm start -- run routine.json
+```
+
+Routines accept 1–100 actions and files up to 1 MiB. Every action is validated before control is
+taken; an invalid one is reported by step and index, and nothing runs. `--dry-run` prints the
+validated plan without contacting the bridge. Progress goes to stderr as `Step i/n`. The result
+reports `status`, `completed`, `total`, and each finished step's job in `results`. The first failure,
+cancellation, or return of control to the player stops the routine; the result adds `failedStep`
+and `error`, and the command exits 1. Later steps are not attempted. Control is released when the
+routine ends. Relative paths resolve from the checkout when run through `npm start`.
+
+`goto X Y Z --relative` treats the coordinates as offsets from the currently observed position;
+`goto 0 0 -10 --relative` walks ten blocks north. The resulting target must satisfy the normal `goto`
+bounds, checked before control is taken.
+
+`eat --until HUNGER` eats repeatedly until observed hunger reaches 1–20, with at most 10 meals. When
+hunger already meets the target it returns `already_satisfied` without taking control. It stops with
+an error, releasing control, when eating fails (for example, no supported food remains), when hunger
+does not rise after a meal, or after 10 meals.
+
+MCP clients also get three tools. `minecraft_inventory` takes an optional `item` and returns the
+same result as the `inventory` command. `minecraft_nearby` takes `kind` (`blocks`, `threats`, or
+`containers`) and optional `radius` (positive) and `limit` (positive integer, default 20); `name`
+filters blocks and containers. Both read without taking or disturbing control. `minecraft_release`
+cancels this session's running action and returns control to the player; it does not stop sessions
+owned by another process and is harmless when this session holds no control.
+
+`demo --scenario NAME` starts the simulation from a preset state, with or without `--smoke`:
+
+| Scenario | Starting state |
+| --- | --- |
+| `default` | Health 20, hunger 14, eight bread, unopened chest |
+| `hungry` | Health 10, hunger 4 |
+| `hostile` | One zombie observed five blocks away |
+| `stocked` | Chest already observed holding 12 oak logs and 5 cobblestone |
+
+Scenarios only change starting data; the demo still does not simulate combat or damage.
+
+`doctor` checks Node.js against the `engines` range in `package.json` (currently 22.12 or newer) and
+reports it as `nodeRequired`. `doctor --ollama http://127.0.0.1:11434` also sends one
+`GET /api/version` to a local Ollama, waiting up to three seconds, and reports
+`ollama: { reachable, version }` or `{ reachable: false, error }`. Like `agent`, it accepts only
+localhost HTTP(S) URLs without credentials. Without `--ollama`, doctor makes no network requests.
