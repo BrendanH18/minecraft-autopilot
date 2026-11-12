@@ -23,6 +23,10 @@ import { registerSupplies } from './supplies.js';
 import { registerSurvey } from './survey.js';
 import { registerNavigation } from './navigation.js';
 import { registerRoutineTools } from './routine-tools.js';
+import { registerStockTools } from './stock-tools.js';
+import { registerSceneTools } from './scene-tools.js';
+import { registerGeometryTools } from './geometry-tools.js';
+import { registerRoutineWorkbench } from './routine-workbench.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -545,6 +549,10 @@ registerSupplies(program, { view, print });
 registerSurvey(program, { view, print });
 registerNavigation(program, { print });
 registerRoutineTools(program, { print });
+registerStockTools(program, { view });
+registerSceneTools(program, { view });
+registerGeometryTools(program, { print });
+registerRoutineWorkbench(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {

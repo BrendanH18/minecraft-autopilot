@@ -39,6 +39,16 @@ and `routine` work without Minecraft or a model. Reports describe partial observ
 geometry and generated routines do not guarantee safe or successful execution.
 Use `mc-agent <group> --help` to browse the commands.
 
+A further [100 additions](docs/IMPROVEMENTS.md#batch-5-100-stock-spatial-geometry-and-workbench-additions) support more detailed planning:
+
+- [`stock`](docs/STOCK.md): multi-item kits, shared capacity, food budgets, and storage sourcing.
+- [`scene`](docs/SCENE.md): spatial filters, home neighbors, and observed threat clearances.
+- [`geometry`](docs/GEOMETRY.md): route progress, projections, turns, volumes, and travel estimates.
+- [`workbench`](docs/WORKBENCH.md): routine dependencies, quota balance, and validated transformations.
+
+Each group has 25 commands. Stock and scene read observations without taking control;
+geometry and workbench run offline. Plans do not execute actions or guarantee safety.
+
 ## Try it in two minutes
 
 Install [Node.js](https://nodejs.org/) **22 or newer**, then:
