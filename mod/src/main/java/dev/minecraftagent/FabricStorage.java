@@ -144,20 +144,17 @@ final class FabricStorage {
 
     private void transferStack(List<ItemStack> stacks, int size) {
         if (!owned.getCursorStack().isEmpty()) throw new IllegalStateException("Storage cursor is occupied; take control to clear it.");
-        int source = -1;
-        for (int i = size; i < stacks.size(); i++) if (stacks.get(i).isOf(item)) { source = i; break; }
-        if (source < 0) throw new IllegalStateException("No matching item remains in inventory.");
+        StorageTransfer.Slots slots = StorageTransfer.select(size, stacks.size(),
+                index -> stacks.get(index).isOf(item), index -> stacks.get(index).isEmpty(),
+                (source, destination) -> {
+                    ItemStack from = stacks.get(source), to = stacks.get(destination);
+                    if (!to.isEmpty() && !ItemStack.areItemsAndComponentsEqual(to, from)) return 0;
+                    return Math.min(from.getMaxCount(), owned.getSlot(destination).getMaxItemCount(from)) - to.getCount();
+                });
+        if (slots == null) throw new IllegalStateException("The container is full for the matching inventory items.");
+        int source = slots.source(), destination = slots.destination();
         ItemStack sourceStack = stacks.get(source);
-        int destination = -1;
-        int capacity = 0;
-        for (int i = 0; i < size; i++) {
-            ItemStack stack = stacks.get(i);
-            if (!stack.isEmpty() && !ItemStack.areItemsAndComponentsEqual(stack, sourceStack)) continue;
-            int room = Math.min(sourceStack.getMaxCount(), owned.getSlot(i).getMaxItemCount(sourceStack)) - stack.getCount();
-            if (room > 0) { destination = i; capacity = room; break; }
-        }
-        sent = StorageTransfer.quantity(transfer.remaining(), sourceStack.getCount(), capacity);
-        if (sent == 0) throw new IllegalStateException("The container is full.");
+        sent = StorageTransfer.quantity(transfer.remaining(), sourceStack.getCount(), slots.capacity());
         // A single client-thread batch leaves the cursor empty before any takeover can run.
         click(source, 0);
         if (sent == sourceStack.getCount()) click(destination, 0);

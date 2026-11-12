@@ -1,5 +1,8 @@
 package dev.minecraftagent;
 
+import java.util.function.IntBinaryOperator;
+import java.util.function.IntPredicate;
+
 /** Counts only transfers verified by reopening the server inventory, never client click prediction. */
 final class StorageTransfer {
     private final int requested;
@@ -23,6 +26,24 @@ final class StorageTransfer {
         boolean completeBatch = delta == confirmed + sent;
         confirmed = delta;
         return completeBatch;
+    }
+
+    record Slots(int source, int destination, int capacity) {}
+
+    /** Try compatible partial stacks across every source before consuming an empty slot. */
+    static Slots select(int storageSize, int totalSize, IntPredicate matches, IntPredicate empty,
+                        IntBinaryOperator capacity) {
+        for (boolean useEmpty : new boolean[] { false, true }) {
+            for (int source = storageSize; source < totalSize; source++) {
+                if (!matches.test(source)) continue;
+                for (int destination = 0; destination < storageSize; destination++) {
+                    if (empty.test(destination) != useEmpty) continue;
+                    int room = capacity.applyAsInt(source, destination);
+                    if (room > 0) return new Slots(source, destination, room);
+                }
+            }
+        }
+        return null;
     }
 
     static int quantity(int remaining, int stack, int capacity) {

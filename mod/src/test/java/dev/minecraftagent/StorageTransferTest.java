@@ -31,6 +31,24 @@ class StorageTransferTest {
         assertEquals(4, transfer.remaining(), "fresh matched counts retain honest partial progress even though the action fails");
     }
 
+    @Test void laterCompatibleSourceIsTriedBeforeDeclaringStorageFull() {
+        // Slot 0 has eight spaces in ordinary logs; source 1 is renamed and cannot merge, source 2 can.
+        StorageTransfer.Slots selected = StorageTransfer.select(1, 3, index -> true, index -> false,
+                (source, destination) -> source == 2 ? 8 : 0);
+        assertEquals(new StorageTransfer.Slots(2, 0, 8), selected);
+        assertNull(StorageTransfer.select(1, 3, index -> true, index -> false, (source, destination) -> 0));
+    }
+
+    @Test void partialStacksAcrossAllSourcesArePreferredToEmptySlots() {
+        // Empty slot 0 fits either source; partial slot 1 fits only the later ordinary source 3.
+        StorageTransfer.Slots selected = StorageTransfer.select(2, 4, index -> true, index -> index == 0,
+                (source, destination) -> destination == 0 ? 64 : source == 3 ? 8 : 0);
+        assertEquals(new StorageTransfer.Slots(3, 1, 8), selected);
+        assertEquals(new StorageTransfer.Slots(2, 0, 64),
+                StorageTransfer.select(2, 4, index -> true, index -> index == 0,
+                        (source, destination) -> destination == 0 ? 64 : 0));
+    }
+
     @Test void inventoryMustCoverTheRequestedAmountBeforeClicks() {
         assertThrows(IllegalArgumentException.class, () -> new StorageTransfer(8, 0, 7));
         assertThrows(IllegalArgumentException.class, () -> new StorageTransfer(0, 0, 0));
