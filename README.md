@@ -172,3 +172,10 @@ Issues and pull requests are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.
 Project source is [MIT licensed](LICENSE). [Fabric](https://fabricmc.net/), [Baritone](https://github.com/cabaletta/baritone/releases/tag/v1.11.3), [Mineflayer](https://github.com/PrismarineJS/mineflayer), [mineflayer-pathfinder](https://github.com/PrismarineJS/mineflayer-pathfinder), and the [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk) retain their respective licenses. Packaged Fabric API and Baritone jars are unmodified, checksum-pinned releases.
 
 Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
+
+### More planning and analysis tools
+
+The [100 batch 6 additions](docs/IMPROVEMENTS.md#batch-6-100-logistics-terrain-routine-audit-and-timeline-additions)
+provide [logistics](docs/LOGISTICS.md), [terrain observations](docs/TERRAIN.md),
+[offline routine auditing](docs/ROUTINE-AUDIT.md), and
+[snapshot timelines](docs/TIMELINE.md). Run `mc-agent GROUP --help` for commands.

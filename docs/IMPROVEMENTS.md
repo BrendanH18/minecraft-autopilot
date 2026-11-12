@@ -214,3 +214,26 @@ Focused tests check each command's results, registration, and invalid inputs.
 authenticated demo bridge while another controller owns the lease, checking that
 player state, inventory, storage, and ownership remain unchanged. The full Node
 suite, syntax check, and demo smoke cover integration.
+
+## Batch 6: 100 logistics, terrain, routine audit, and timeline additions
+
+Four independently callable CLI groups each add 25 commands (100 total):
+
+| Numbers | Group | Numbered command inventory |
+| --- | --- | --- |
+| 1–25 | `logistics` | [Stock logistics](LOGISTICS.md) |
+| 26–50 | `terrain` | [Observed terrain](TERRAIN.md) |
+| 51–75 | `audit` | [Routine audit](ROUTINE-AUDIT.md) |
+| 76–100 | `timeline` | [Snapshot timelines](TIMELINE.md) |
+
+Each linked inventory uses local numbering 1–25. Logistics and terrain read one
+observation without acquiring a lease. Audit and timeline run offline. None of
+these commands executes a routine, moves items, or writes input files. Storage
+is last observed; terrain reports do not establish safe paths. Timeline changes
+are sampled net differences, not evidence of their cause.
+
+Validation covers all 100 command results and Commander dispatch, invalid inputs,
+authenticated bridge reports during another controller's lease, offline CLI
+file reports, the full Node suite, syntax checks, and demo smoke. Remote CI also
+builds and verifies the unchanged Fabric package. Packaged Fabric and authenticated
+handoff acceptance gates remain open.
