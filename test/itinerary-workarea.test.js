@@ -113,6 +113,16 @@ test('bounded outputs and malformed inputs fail before allocating large plans', 
   const args = [...corners, ...second], before = structuredClone(args); area('subtract', args); assert.deepEqual(args, before);
 });
 
+test('large overlapping cell areas preserve exact safe union counts', () => {
+  const args = ['0,-64,0', '5000000,294,5000000', '0,-64,0', '4999999,294,5000000'];
+  const expected = Number(5000001n * 359n * 5000001n);
+  const union = area('union-count', args), ratio = area('overlap-ratio', args);
+  assert.equal(union.union, expected);
+  assert.equal(ratio.union, expected);
+  assert.equal(ratio.secondCovered, 1);
+  assert.equal(ratio.intersectionOverUnion, union.second / expected);
+});
+
 const exec = promisify(execFile);
 test('all 50 itinerary and workarea commands dispatch through real CLI processes offline', { timeout: 180000 }, async () => {
   for (const [group, commands, fixtures, fixed, expected] of [['itinerary', ITINERARY_COMMANDS, routeArgs, route, routeExpected], ['workarea', WORKAREA_COMMANDS, areaArgs, corners, areaExpected]]) {

@@ -52,3 +52,17 @@ test('diagnostics retain unknown outcomes and isolate timestamps and outcomes to
   assert.equal(diagnoseReport('', 'completion-rate').finishRate, null);
   assert.throws(() => diagnoseReport(text, 'missing-command'));
 });
+
+test('appended runs retain separate token totals, including missing and rejected responses', () => {
+  const text = [
+    { event: 'start' }, { event: 'decision', outputTokens: 10 }, { event: 'rejection', outputTokens: 6 },
+    { event: 'finish', result: { model: { requests: 2 } } },
+    { event: 'start' }, { event: 'decision' }, { event: 'finish', result: { model: { requests: 1 } } },
+    { event: 'start' }, { event: 'finish', result: { model: { requests: 0 } } },
+    { event: 'start' }, { event: 'decision', outputTokens: 18 }, { event: 'finish', result: { model: { requests: 1 } } },
+  ].map(JSON.stringify).join('\n');
+  const runs = diagnoseReport(text, 'token-efficiency').runs;
+  assert.deepEqual(runs.map(r => [r.recordedResponses, r.knownOutputTokens, r.complete, r.outputTokensPerRequest]), [
+    [2, 16, true, 8], [1, 0, false, null], [0, 0, true, null], [1, 18, true, 18],
+  ]);
+});

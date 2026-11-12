@@ -104,7 +104,7 @@ export function workareaCalculation(command, args = []) {
     }
     case 'translate': { const b = moved(a, Object.fromEntries(axes.map((k, i) => [k, integer(args[i + 2], -1e6)]))); result = { area: b, cells: cells(b) }; break; }
     case 'union-count': case 'overlap-ratio': {
-      const b = other(), first = cells(a), second = cells(b), overlap = cells(intersection(a, b)), union = safe(first + second - overlap);
+      const b = other(), first = cells(a), second = cells(b), overlap = cells(intersection(a, b)), union = safe(first - overlap + second);
       result = command === 'union-count' ? { first, second, overlap, union } : { intersection: overlap, union, intersectionOverUnion: overlap / union, firstCovered: overlap / first, secondCovered: overlap / second }; break;
     }
     case 'subtract': { const parts = subtract(a, other()).map(b => ({ ...b, cells: cells(b) })); result = { parts, cells: safe(parts.reduce((n, b) => n + b.cells, 0)) }; break; }
