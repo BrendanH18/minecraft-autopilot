@@ -7,6 +7,7 @@
   "license": "MIT",
   "environment": "client",
   "entrypoints": { "client": ["dev.minecraftagent.AgentClient"] },
+  "mixins": ["minecraft_agent.mixins.json"],
   "depends": {
     "fabricloader": ">=0.16.14",
     "minecraft": "1.21.1",

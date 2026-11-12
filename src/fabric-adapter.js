@@ -87,7 +87,6 @@ export class FabricAdapter {
 
   async execute(action, { signal, onProgress = () => {} } = {}) {
     const parsed = normalizeAction(action);
-    if (['deposit', 'inspect_storage'].includes(parsed.type) && this.config.backend === 'fabric') throw new Error('Deposits work with the server bot and demo; the Fabric mod does not support them yet.');
     signal?.throwIfAborted();
     if (this.actionInFlight) throw new Error('An action is already running on this adapter.');
     this.actionInFlight = true;

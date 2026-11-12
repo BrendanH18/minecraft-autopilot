@@ -1,6 +1,6 @@
 # v0.1 release checklist
 
-v0.1.0 is an **experimental preview** of the existing Minecraft 1.21.1 player harness. It includes Fabric control, the standalone bot, CLI, MCP, local Ollama planning, bounded collection/navigation/eating, chest deposits with the bot, and explicit handoff. It does not include combat, crafting, building, Fabric deposits, automatic reconnect transfer, or guaranteed survival.
+v0.1.0 is an **experimental preview** of the existing Minecraft 1.21.1 player harness. It includes Fabric control, the standalone bot, CLI, MCP, local Ollama planning, bounded collection/navigation/eating, chest deposits, and explicit handoff. It does not include combat, crafting, building, automatic reconnect transfer, or guaranteed survival.
 
 ## Automated release checks
 
@@ -22,6 +22,7 @@ The CI workflow is configured, but its remote execution on the final release com
 - [ ] Press F8 during inference/action; close the menu afterward and verify no command resumes. Check emergency stop and lease expiry with the packaged mod.
 - [ ] With the packaged Fabric mod, force failed food consumption while hungry and low on health. Verify eating backoff, retreat, and action/retreat deadlines; interrupt eating and recovery with F8 and stop.
 - [ ] Force a bot mining timeout in a real pit. Verify the bounded return attempt, failure status, preserved inventory progress, and immediate cancellation during recovery.
+- [ ] Validate Fabric chest/barrel deposits with exact and omitted counts, full/blocked containers, double chests, fresh inspection and return, and F8/menu/stop/expiry during transfers.
 - [ ] Run collect-and-store with both criteria. Remove stored items during inference and block inspection; stale contents must not produce success. Verify final inspection preserves return-home criteria or reports failure.
 - [ ] Run a real local model and an actual MCP agent against the packaged Fabric mod; historical bot acceptance does not close this gate.
 - [ ] Validate authenticated client → bot → client handoff. Check the UUID and inventory at each stage; never connect both as the same account simultaneously.

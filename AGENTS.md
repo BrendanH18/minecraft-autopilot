@@ -20,3 +20,9 @@
 - `CLAUDE.md` contains only `@AGENTS.md`. Shared hooks, scripts and settings
   belong in tracked files. Do not ignore instruction files or shared settings;
   ignore only machine-local settings and agent worktrees.
+
+## Current implementation scope
+
+- Fabric gather-and-store (chest/barrel deposits and fresh storage inspection) is
+  approved for the experimental preview. Keep the existing packaged Fabric and
+  authenticated-handoff acceptance gates open until observed passing.

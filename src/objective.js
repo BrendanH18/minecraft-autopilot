@@ -60,7 +60,7 @@ export function createObjective(criteria, initialState) {
   const key = container => `${container.x},${container.y},${container.z}`;
   const sources = container => container.sources ?? [{ id: key(container), items: container.firstSeen ?? container.items }];
   if (deposit) {
-    if (!Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs the server bot or demo.');
+    if (!Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs a bridge that reports storage.');
     // Contents known before the task are the baseline; a container first opened during the task uses what it held then.
     const seenInitial = new Set();
     initialStored = containers.parse(initialState.containers).filter(container => {

@@ -4,6 +4,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.pathing.goals.GoalNear;
+import baritone.api.utils.input.Input;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -49,6 +50,7 @@ public final class AgentController {
     private final ControlLease lease = new ControlLease();
     private final Map<String, Object> savedSettings = new HashMap<>();
     private final Path homesFile;
+    private final FabricStorage storage;
     private JsonObject homes = new JsonObject();
     private JsonObject job;
     private JsonObject action;
@@ -74,6 +76,7 @@ public final class AgentController {
 
     public AgentController(MinecraftClient client) {
         this.client = client;
+        storage = new FabricStorage(client);
         homesFile = RuntimePaths.directory(client.runDirectory.toPath(), System.getenv("MC_AGENT_HOME")).resolve("homes.json");
         try { homes = JsonParser.parseString(Files.readString(homesFile)).getAsJsonObject(); }
         catch (Exception ignored) {}
@@ -111,6 +114,7 @@ public final class AgentController {
             case "/v1/actions": {
                 lease.require(string(body, "leaseId"));
                 requirePlayable();
+                if (storage.pendingOpen()) throw new IllegalStateException("Previous storage opening is still awaiting the server.");
                 if (running()) throw new IllegalStateException("An action is already running. Cancel it first.");
                 if (recovering) throw new IllegalStateException("Survival retreat is in progress.");
                 return start(body.getAsJsonObject("action"));
@@ -127,6 +131,7 @@ public final class AgentController {
         int count = 0;
         String block = null;
         double wait = 0;
+        Item depositItem = null;
         switch (type) {
             case "goto": goal = new BlockPos((int) Math.floor(number(requested, "x", -29_999_984, 29_999_984)),
                     (int) Math.floor(number(requested, "y", -64, 320)), (int) Math.floor(number(requested, "z", -29_999_984, 29_999_984))); break;
@@ -146,6 +151,19 @@ public final class AgentController {
                 break;
             }
             case "wait": wait = number(requested, "seconds", 1, 3600); break;
+            case "deposit": {
+                String name = string(requested, "item");
+                if (!name.matches("(?:minecraft:)?[a-z0-9_]{1,100}")) throw new IllegalArgumentException("Invalid item identifier.");
+                Identifier id = Identifier.of(name.contains(":") ? name : "minecraft:" + name);
+                if (!Registries.ITEM.containsId(id)) throw new IllegalArgumentException("Unknown item " + name);
+                depositItem = Registries.ITEM.get(id);
+                int held = inventoryCount(id.getPath());
+                double quantity = requested.has("count") ? number(requested, "count", 1, 2304) : held;
+                if (quantity < 1 || quantity > held || quantity != Math.floor(quantity)) throw new IllegalArgumentException("Not enough matching items in inventory, or invalid count.");
+                count = (int) quantity;
+                break;
+            }
+            case "inspect_storage": break;
             case "eat": case "set_home": break;
             default: throw new IllegalArgumentException("Unsupported action: " + type);
         }
@@ -185,18 +203,22 @@ public final class AgentController {
                     } else finish("completed", "Hunger is already full.");
                     break;
                 case "wait": break;
+                case "deposit": storage.begin(identity(), depositItem, count); break;
+                case "inspect_storage": storage.begin(identity(), null, 0); break;
             }
         } catch (Exception exception) { finish("failed", exception.getMessage()); }
         return job.deepCopy();
     }
 
     public void tick() {
+        storage.maintain();
         if (!lease.active()) return;
         if (lease.expired()) { release("Control lease expired; agent stopped responding."); return; }
         // Servers can send the death screen before the health update.
         if (client.player == null || client.world == null || client.player.isDead() || client.currentScreen instanceof DeathScreen) { release("Disconnected or player died."); return; }
         if (!identity().equals(worldIdentity)) { release("World or dimension changed. Start a new session explicitly."); return; }
-        if (client.isPaused() || client.currentScreen != null) {
+        if (storage.screenClosedByPlayer()) { release("Storage screen was closed or replaced. Control returned to the player."); return; }
+        if (client.isPaused() || (client.currentScreen != null && !storage.ownsScreen())) {
             String screen = client.currentScreen == null ? "pause" : client.currentScreen.getClass().getSimpleName();
             AgentClient.LOGGER.info("Releasing control: screen {} opened (window focused: {})", screen, client.isWindowFocused());
             release("A game menu was opened (" + screen + "). Control returned to the player."); return;
@@ -240,6 +262,7 @@ public final class AgentController {
         }
         if (client.player.getHealth() <= 8 && !recovering && now - lastRecovery > 10_000_000_000L) {
             stopMotion(); endEating();
+            if (storage.active()) { storage.cancel(); finishWithoutStopping("failed", "Storage action interrupted for survival. Check inventory and storage before retrying."); }
             lastRecovery = now;
             JsonObject home = homes.getAsJsonObject(identity());
             if (home != null) {
@@ -286,6 +309,11 @@ public final class AgentController {
                 break;
             }
             case "wait": if (now - jobStarted >= action.get("seconds").getAsDouble() * 1e9) finish("completed", "Wait finished."); break;
+            case "deposit": case "inspect_storage": {
+                FabricStorage.Result result = storage.tick(now);
+                if (result != null) finish(result.success() ? "completed" : "failed", result.message());
+                break;
+            }
         }
     }
 
@@ -319,6 +347,7 @@ public final class AgentController {
 
     private void resumeMotion() {
         resumeAfterEating = false;
+        if (storage.active()) { storage.resume(); return; }
         if (recovering || (running() && Set.of("goto", "home").contains(string(action, "type")))) {
             BaritoneAPI.getSettings().allowBreak.value = recovering && collecting();
             baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(destination, 1));
@@ -358,9 +387,23 @@ public final class AgentController {
     }
 
     private void finishWithoutStopping(String status, String message) { job.addProperty("status", status); job.addProperty("message", message); }
-    private void finish(String status, String message) { stopMotion(); endEating(); finishWithoutStopping(status, message); }
+    private void finish(String status, String message) { stopMotion(); endEating(); storage.cancel(); finishWithoutStopping(status, message); }
     private boolean running() { return job != null && job.get("status").getAsString().equals("running"); }
-    private void cancel(String message) { stopMotion(); endEating(); resumeAfterEating = false; recovering = false; if (running()) finishWithoutStopping("cancelled", message); }
+    private void cancel(String message) { stopMotion(); endEating(); storage.cancel(); resumeAfterEating = false; recovering = false; if (running()) finishWithoutStopping("cancelled", message); }
+
+    boolean hasControl() { return lease.active(); }
+
+    boolean playerStorageInteraction() {
+        if (storage.agentOpening()) return true;
+        // Navigation opens doors/gates with Baritone's forced use input, not physical player input.
+        // Never exempt a click while an agent container opening is unresolved.
+        if (storage.navigating() && !storage.pendingOpen()
+                && baritone().getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT)) return true;
+        boolean pending = storage.pendingOpen();
+        if (storage.active() || pending) release("Player interacted with a block or entity. Control returned to the player.");
+        // The vanilla server's ordered acknowledgement disambiguates late opening replies.
+        return !pending;
+    }
 
     public void release(String message) {
         if (!lease.active()) return; // Do not interfere with manual play or a user's own Baritone session.
@@ -431,10 +474,11 @@ public final class AgentController {
         state.addProperty("protocol", 1); state.addProperty("backend", "fabric");
         state.addProperty("connected", client.player != null && client.world != null);
         state.addProperty("mode", lease.active() ? "agent" : "manual");
-        state.addProperty("paused", client.isPaused() || client.currentScreen != null);
+        state.addProperty("paused", client.isPaused() || (client.currentScreen != null && !storage.ownsScreen()));
         state.addProperty("focusPaused", focusPaused());
         state.addProperty("survival", survivalMessage);
         state.addProperty("recovering", recovering);
+        state.addProperty("stopping", storage.pendingOpen() && !storage.active());
         state.add("job", job == null ? null : job.deepCopy());
         if (client.player != null && client.world != null) {
             JsonObject player = new JsonObject();
@@ -452,6 +496,7 @@ public final class AgentController {
                 JsonObject item = new JsonObject(); item.addProperty("slot", i); item.addProperty("name", Registries.ITEM.getId(stack.getItem()).toString()); item.addProperty("count", stack.getCount()); inventory.add(item);
             }
             state.add("inventory", inventory);
+            state.add("containers", storage.observe(identity()));
             state.add("home", homes.get(identity()));
             JsonArray threats = new JsonArray();
             for (HostileEntity entity : client.world.getEntitiesByClass(HostileEntity.class, client.player.getBoundingBox().expand(16), entity -> entity.isAlive())) {
