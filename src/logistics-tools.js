@@ -2,6 +2,7 @@ import { inventoryView, playerPosition, uniqueContainers, maxStackSize, itemName
 import { parseStockKit } from './stock-tools.js';
 
 const NOTE = 'Read-only estimates. Storage is last observed and may be stale or incomplete. Item components, stack restrictions, container capacity, terrain, and reachability are not checked. No items are moved.';
+const STORAGE_ESTIMATE_NOTE = 'Physical storage stack occupancy and actual freed slots are unknown: backend item totals combine stacks. Minimum stack and consolidation estimates use item-name stack limits and ignore components and restrictions.';
 const total = items => items.reduce((n, item) => n + item.count, 0);
 const aggregate = stacks => inventoryView({ inventory: stacks }).items;
 const quantity = (value, min = 0, max = 1_000_000) => {
@@ -32,11 +33,11 @@ export const LOGISTICS_COMMANDS = [
   ['full-stacks', 'Select carried stacks at their estimated maximum.'],
   ['stack-remainders', 'Show the final partial stack after consolidation by item.'],
   ['stack-size-groups', 'Group carried quantity and occupancy by estimated stack limit.'],
-  ['container-loads', 'Rank opened containers by observed occupied stacks.'],
+  ['container-loads', 'Rank opened containers by minimum estimated stacks from item totals.'],
   ['storage-redundancy <copies>', 'Find stored item types held in fewer than a requested number of containers.'],
   ['exclusive-stock', 'Locate stored item types held in exactly one observed container.'],
   ['container-overlap', 'Compare shared item types between each pair of opened containers.'],
-  ['storage-fragmentation', 'Estimate stack savings from pooling observed storage stacks.'],
+  ['storage-fragmentation', 'Estimate minimum consolidation savings from aggregated storage totals.'],
   ['freshness-summary <seconds>', 'Classify known container observations by an explicit age threshold.'],
   ['untimed-storage', 'Locate opened containers without a finite observation timestamp.'],
   ['observation-window', 'Report the oldest and newest known storage observation times.'],
@@ -121,7 +122,7 @@ export function logisticsReport(state, command, args = [], { now = Date.now() } 
     case 'full-stacks': result = { stacks: stacks.filter(s => s.count === size(s.name)).map(s => ({ ...s, ...maxStackSize(s.name) })) }; break;
     case 'stack-remainders': result = { items: items.map(item => ({ ...item, fullStacks: Math.floor(item.count / size(item.name)), remainder: item.count % size(item.name), ...maxStackSize(item.name) })) }; break;
     case 'stack-size-groups': result = { groups: groups(items).map(g => ({ ...g, occupiedStacks: stacks.filter(s => size(s.name) === g.maxStack).length })) }; break;
-    case 'container-loads': result = stock({ containers: opened.map(c => ({ ...located(c), occupiedStacks: c.items.filter(s => s.count > 0).length, quantity: total(aggregate(c.items)) })).sort((a, b) => b.occupiedStacks - a.occupiedStacks || a.distance - b.distance) }); break;
+    case 'container-loads': result = stock({ estimateNote: STORAGE_ESTIMATE_NOTE, containers: opened.map(c => ({ ...located(c), occupiedStacks: null, minimumStacksEstimate: aggregate(c.items).reduce((n, i) => n + Math.ceil(i.count / size(i.name)), 0), quantity: total(aggregate(c.items)) })).sort((a, b) => b.minimumStacksEstimate - a.minimumStacksEstimate || a.distance - b.distance) }); break;
     case 'storage-redundancy': {
       const copies = quantity(args[0], 1, 100); result = stock({ copies, items: stored.map(item => ({ ...item, containers: sources(item.name).length })).filter(item => item.containers < copies) }); break;
     }
@@ -136,9 +137,9 @@ export function logisticsReport(state, command, args = [], { now = Date.now() } 
       result = stock({ pairs }); break;
     }
     case 'storage-fragmentation': {
-      const observed = opened.flatMap(c => c.items).filter(s => s.count > 0);
-      const estimates = stored.map(item => ({ ...item, occupiedStacks: observed.filter(s => s.name === item.name).length, pooledStacks: Math.ceil(item.count / size(item.name)) }));
-      result = stock({ items: estimates.map(item => ({ ...item, potentiallyFreed: Math.max(0, item.occupiedStacks - item.pooledStacks) })), potentiallyFreed: estimates.reduce((n, item) => n + Math.max(0, item.occupiedStacks - item.pooledStacks), 0) }); break;
+      const contents = opened.map(c => aggregate(c.items));
+      const estimates = stored.map(item => ({ ...item, occupiedStacks: null, minimumStacksEstimate: contents.reduce((n, list) => n + Math.ceil(count(list, item.name) / size(item.name)), 0), pooledStacksEstimate: Math.ceil(item.count / size(item.name)) }));
+      result = stock({ estimateNote: STORAGE_ESTIMATE_NOTE, items: estimates.map(item => ({ ...item, potentiallyFreed: null, minimumPotentiallyFreedEstimate: Math.max(0, item.minimumStacksEstimate - item.pooledStacksEstimate) })), potentiallyFreed: null, minimumPotentiallyFreedEstimate: estimates.reduce((n, item) => n + Math.max(0, item.minimumStacksEstimate - item.pooledStacksEstimate), 0) }); break;
     }
     case 'freshness-summary': {
       const seconds = quantity(args[0]); if (!Number.isFinite(now)) throw new Error('Current time must be finite.');

@@ -29,11 +29,11 @@ from 0 to 1,000,000 unless a command lists a narrower range.
 | 12 | `full-stacks` | Carried stacks exactly at their estimated stack limit. |
 | 13 | `stack-remainders` | Full-stack count and final remainder after consolidating each carried item by name. |
 | 14 | `stack-size-groups` | Carried items, quantities, and current occupied stack counts grouped by estimated limits of 1, 16, or 64. |
-| 15 | `container-loads` | Opened containers ranked by observed positive stack count, with quantity and distance. This is occupancy, not capacity or fullness. |
+| 15 | `container-loads` | Opened containers ranked by `minimumStacksEstimate` from per-item totals, with quantity and distance. Physical `occupiedStacks` is null: backends aggregate stacks by item name. |
 | 16 | `storage-redundancy <copies>` | Stored item types held in fewer than 1–100 observed source containers. Items absent everywhere cannot appear in this report. |
 | 17 | `exclusive-stock` | Stored item types held in exactly one observed source container, including its coordinates. |
 | 18 | `container-overlap` | Shared item names for every pair of opened containers, including pairs sharing nothing. Limited to 200 opened containers. |
-| 19 | `storage-fragmentation` | Estimated stack savings if all observed storage stacks were pooled and consolidated by item name. |
+| 19 | `storage-fragmentation` | Per-item and total `minimumPotentiallyFreedEstimate` comparing per-container minimum stack estimates with `pooledStacksEstimate`. Physical `occupiedStacks` and actual `potentiallyFreed` are null. Estimates ignore item components and restrictions; they are not guaranteed savings. |
 | 20 | `freshness-summary <seconds>` | Count fresh, stale, future-dated, and untimed opened observations at a 0–1,000,000 second threshold. Exactly at the threshold is stale. |
 | 21 | `untimed-storage` | Opened containers without a finite observation timestamp. |
 | 22 | `observation-window` | Oldest and newest finite opened-container timestamps and the elapsed seconds between them; null when none are known. |

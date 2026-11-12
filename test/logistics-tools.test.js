@@ -28,11 +28,11 @@ export const logisticsCases = [
   ['full-stacks', [], r => assert.deepEqual(r.stacks.map(s => s.name), ['minecraft:torch', 'minecraft:iron_pickaxe'])],
   ['stack-remainders', [], r => { assert.equal(r.items.find(i => i.name === 'minecraft:oak_log').remainder, 0); assert.equal(r.items.find(i => i.name === 'minecraft:bread').remainder, 3); }],
   ['stack-size-groups', [], r => { assert.deepEqual(r.groups.map(g => g.quantity), [1, 0, 131]); assert.deepEqual(r.groups.map(g => g.occupiedStacks), [1, 0, 4]); }],
-  ['container-loads', [], r => { assert.deepEqual(r.containers.map(c => c.occupiedStacks), [3, 2, 0]); assert.deepEqual(r.containers.map(c => c.x), [5, 2, 8]); }],
+  ['container-loads', [], r => { assert.deepEqual(r.containers.map(c => c.occupiedStacks), [null, null, null]); assert.deepEqual(r.containers.map(c => c.minimumStacksEstimate), [2, 2, 0]); assert.deepEqual(r.containers.map(c => c.x), [2, 5, 8]); }],
   ['storage-redundancy', ['2'], r => assert.deepEqual(r.items.map(i => i.name), ['minecraft:bread', 'minecraft:torch'])],
   ['exclusive-stock', [], r => assert.deepEqual(r.items.map(i => i.sources[0].x), [2, 5])],
   ['container-overlap', [], r => { assert.equal(r.pairs.length, 3); assert.deepEqual(r.pairs[0].shared, ['minecraft:oak_log']); assert.equal(r.pairs[1].sharedTypes, 0); }],
-  ['storage-fragmentation', [], r => { assert.equal(r.potentiallyFreed, 2); assert.equal(r.items.find(i => i.name === 'minecraft:oak_log').pooledStacks, 1); }],
+  ['storage-fragmentation', [], r => { assert.equal(r.potentiallyFreed, null); assert.equal(r.minimumPotentiallyFreedEstimate, 1); assert.equal(r.items.find(i => i.name === 'minecraft:oak_log').pooledStacksEstimate, 1); }],
   ['freshness-summary', ['5'], r => { assert.equal(r.fresh, 1); assert.equal(r.stale, 1); assert.equal(r.untimed, 1); assert.equal(r.unopened, 1); }],
   ['untimed-storage', [], r => assert.deepEqual(r.containers.map(c => c.x), [8])],
   ['observation-window', [], r => { assert.equal(r.oldest, 2000); assert.equal(r.newest, 6000); assert.equal(r.spanSeconds, 4); }],
@@ -104,4 +104,22 @@ test('slot-map translates Mineflayer window hotbar slots and excludes offhand', 
   assert.equal(r.slots[8].stacks[0].name, 'minecraft:dirt');
   assert.equal(r.slots[9].stacks[0].name, 'minecraft:stone');
   assert.deepEqual(r.unlocated, [{ name: 'minecraft:torch', count: 1, slot: 45 }]);
+});
+
+test('aggregated backend contents cannot establish physical stack occupancy or actual savings', () => {
+  const value = { ...state(), containers: [
+    { x: 1, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 20 }] },
+    { x: 2, y: 64, z: 0, items: [{ name: 'minecraft:oak_log', count: 130 }] },
+  ] };
+  // Twenty logs may be two stacks of ten; 130 must occupy at least three estimated stacks.
+  const loads = logisticsReport(value, 'container-loads');
+  assert.deepEqual(loads.containers.map(c => c.occupiedStacks), [null, null]);
+  assert.deepEqual(loads.containers.map(c => c.minimumStacksEstimate), [3, 1]);
+  const report = logisticsReport(value, 'storage-fragmentation');
+  assert.equal(report.potentiallyFreed, null);
+  assert.equal(report.items[0].occupiedStacks, null);
+  assert.equal(report.items[0].minimumStacksEstimate, 4);
+  assert.equal(report.items[0].pooledStacksEstimate, 3);
+  assert.equal(report.minimumPotentiallyFreedEstimate, 1);
+  assert.match(report.estimateNote, /unknown/);
 });
