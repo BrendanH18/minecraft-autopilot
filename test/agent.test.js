@@ -494,3 +494,28 @@ test('namespace aliases cannot bypass repeated ineffective action detection', as
   assert.equal(adapter.actions.length, 1);
   assert.match(inputs[2].history[1].rejected, /without changing/);
 });
+
+
+test('partially cached split storage cannot count old stock as a deposit after baseline inspection', async () => {
+  const adapter = verifiableAdapter();
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const source = { id: 'former-double-chest', items: logs(12) };
+  adapter.state.containers = [
+    { x: 1, y: 64, z: 0, items: logs(4), sources: [source] },
+    { x: 2, y: 64, z: 0, items: null, sources: [source] },
+  ];
+  let inspections = 0;
+  adapter.execute = async function (action) {
+    assert.equal(action.type, 'inspect_storage');
+    inspections++;
+    this.state.containers[1].items = logs(8);
+    return { status: 'completed' };
+  };
+  const result = await runAgent(adapter, 'Deposit eight logs', {
+    model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply({ type: 'done', reason: 'Claiming the previously unread stock.' }),
+  });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.equal(result.verification.checks.deposit.storedAdditional, 0);
+  assert.equal(inspections, 4, 'baseline and three final checks all refresh both known inventories');
+});

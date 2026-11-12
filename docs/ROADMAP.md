@@ -19,7 +19,7 @@ The November audit identified recovery and verification gaps. The following sour
 ## v0.1 critical path
 
 1. **Finish automated checks on the candidate.** Run Node regressions, demo smoke, Java tests, mod compilation, offline rebuild, bundle verification, and remote CI. Preserve cancellation coverage alongside the new recovery and storage cases.
-2. **Prove the original Fabric workflow with packaged jars.** Install in a normal launcher, enter an existing character in single-player and multiplayer, attach the CLI, save home, collect a small quota, verify inventory/position, and resume manual play. Repeat with an actual MCP agent and a real local model; the existing model/MCP results are bot-only.
+2. **Prove the original Fabric workflow with packaged jars.** Install in a normal launcher, enter an existing character in single-player and multiplayer, attach the CLI, save home, collect a small quota, verify inventory/position, and resume manual play. Repeat with an actual MCP agent and a real local model; the existing model/MCP results are bot-only. Validate packaged chest/barrel deposits and storage inspection, including exact/omitted counts, full/blocked containers, double chests, refreshed contents, return, and takeover during transfers.
 3. **Exercise Fabric failure and takeover paths.** Check partial collection, a real pit, tool loss, unreachable return, failed consumption while hungry and low on health, and deadlines while eating/retreating. Press F8 and open menus during inference, mining, eating, and return; closing menus must not resume the session. Check emergency stop, expiry, death, and dimension changes.
 4. **Recheck bot recovery and verification live.** Force a mining timeout in a pit and cancel during recovery. Run collect-and-store with both criteria. Remove stored items during model inference and block a chest lid before final inspection; neither may produce stale success. Inspecting storage must preserve a completed return-home result or report failure.
 5. **Validate authenticated client → bot → client continuity.** Check the UUID and inventory at each stage. Never connect both as the same account simultaneously. This requires the account owner.
@@ -31,10 +31,9 @@ Historical bot Ollama acceptance (20 October 2026) and MCP acceptance (27 Octobe
 
 Evaluate these in order of evidence from actual use:
 
-1. Accept the new Fabric chest/barrel deposits and storage inspection in packaged gameplay, so the primary player-control mode can reliably support gather-and-store.
-2. Shared behavioral scenarios for Fabric and bot lifecycle transitions, plus better terrain/tool/inventory recovery.
-3. Richer task criteria and storage inspection scoped to the task rather than every container opened in the bot session.
-4. Crafting/building and richer survival or combat, after current actions are reliable.
-5. Easier client/bot transfer and optional ordinary-input takeover.
+1. Shared behavioral scenarios for Fabric and bot lifecycle transitions, plus better terrain/tool/inventory recovery.
+2. Richer task criteria and storage inspection scoped to the task rather than every container opened in the bot session.
+3. Crafting/building and richer survival or combat, after current actions are reliable.
+4. Easier client/bot transfer and optional ordinary-input takeover.
 
 Each new action needs preconditions, observable completion, execution limits, and cancellation that respects player takeover. Do not expand the action set at the expense of the Fabric acceptance path.
