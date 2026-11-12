@@ -347,3 +347,73 @@ Each group has focused behavioral tests and command registration coverage.
 The batch inventory test requires exactly 25 unique command names per group
 and exactly 500 new registered commands overall. The complete Node suite,
 syntax checks, and demo smoke provide regression coverage.
+
+## Batch 10: 1,000 offline planning and analysis improvements
+
+Forty groups add exactly 25 independently callable commands each. The four
+linked guides enumerate all 1,000 signatures and describe their inputs,
+examples, assumptions, and limits. Run `mc-agent GROUP --help` for arguments.
+
+| Numbers | Group | Command guide |
+| --- | --- | --- |
+| 1–25 | `vector` | [Spatial planning](PLANNING-SPATIAL.md#vector) |
+| 26–50 | `voxel` | [Spatial planning](PLANNING-SPATIAL.md#voxel) |
+| 51–75 | `tunnel` | [Spatial planning](PLANNING-SPATIAL.md#tunnel) |
+| 76–100 | `bridgeplan` | [Spatial planning](PLANNING-SPATIAL.md#bridgeplan) |
+| 101–125 | `roofplan` | [Spatial planning](PLANNING-SPATIAL.md#roofplan) |
+| 126–150 | `facade` | [Spatial planning](PLANNING-SPATIAL.md#facade) |
+| 151–175 | `spiral` | [Spatial planning](PLANNING-SPATIAL.md#spiral) |
+| 176–200 | `symmetry` | [Spatial planning](PLANNING-SPATIAL.md#symmetry) |
+| 201–225 | `landmark` | [Spatial planning](PLANNING-SPATIAL.md#landmark) |
+| 226–250 | `district` | [Spatial planning](PLANNING-SPATIAL.md#district) |
+| 251–275 | `queueplan` | [Resources planning](PLANNING-RESOURCES.md#queueplan) |
+| 276–300 | `replenish` | [Resources planning](PLANNING-RESOURCES.md#replenish) |
+| 301–325 | `haul` | [Resources planning](PLANNING-RESOURCES.md#haul) |
+| 326–350 | `bufferplan` | [Resources planning](PLANNING-RESOURCES.md#bufferplan) |
+| 351–375 | `batchflow` | [Resources planning](PLANNING-RESOURCES.md#batchflow) |
+| 376–400 | `durability` | [Resources planning](PLANNING-RESOURCES.md#durability) |
+| 401–425 | `harvest` | [Resources planning](PLANNING-RESOURCES.md#harvest) |
+| 426–450 | `blending` | [Resources planning](PLANNING-RESOURCES.md#blending) |
+| 451–475 | `apportion` | [Resources planning](PLANNING-RESOURCES.md#apportion) |
+| 476–500 | `project-cost` | [Resources planning](PLANNING-RESOURCES.md#project-cost) |
+| 501–525 | `series` | [Analysis planning](PLANNING-ANALYSIS.md#series) |
+| 526–550 | `distribution` | [Analysis planning](PLANNING-ANALYSIS.md#distribution) |
+| 551–575 | `association` | [Analysis planning](PLANNING-ANALYSIS.md#association) |
+| 576–600 | `anomaly` | [Analysis planning](PLANNING-ANALYSIS.md#anomaly) |
+| 601–625 | `smooth` | [Analysis planning](PLANNING-ANALYSIS.md#smooth) |
+| 626–650 | `trend` | [Analysis planning](PLANNING-ANALYSIS.md#trend) |
+| 651–675 | `probability` | [Analysis planning](PLANNING-ANALYSIS.md#probability) |
+| 676–700 | `experiment` | [Analysis planning](PLANNING-ANALYSIS.md#experiment) |
+| 701–725 | `scorecard` | [Analysis planning](PLANNING-ANALYSIS.md#scorecard) |
+| 726–750 | `forecast` | [Analysis planning](PLANNING-ANALYSIS.md#forecast) |
+| 751–775 | `interval-set` | [Coordination planning](PLANNING-COORDINATION.md#interval-set) |
+| 776–800 | `shiftplan` | [Coordination planning](PLANNING-COORDINATION.md#shiftplan) |
+| 801–825 | `dependency` | [Coordination planning](PLANNING-COORDINATION.md#dependency) |
+| 826–850 | `pathplan` | [Coordination planning](PLANNING-COORDINATION.md#pathplan) |
+| 851–875 | `pointcloud` | [Coordination planning](PLANNING-COORDINATION.md#pointcloud) |
+| 876–900 | `index-set` | [Coordination planning](PLANNING-COORDINATION.md#index-set) |
+| 901–925 | `tiling` | [Coordination planning](PLANNING-COORDINATION.md#tiling) |
+| 926–950 | `elevation` | [Coordination planning](PLANNING-COORDINATION.md#elevation) |
+| 951–975 | `reach` | [Coordination planning](PLANNING-COORDINATION.md#reach) |
+| 976–1000 | `patrol` | [Coordination planning](PLANNING-COORDINATION.md#patrol) |
+
+All commands run offline and print JSON without contacting Minecraft, a model,
+or a bridge. They never acquire control or execute actions. CSV numeric lists
+and JSON coordinate arrays describe caller-supplied plans or measurements;
+they are not fresh world observations. Geometry ignores terrain and obstacles.
+Rates, yields, wear, prices, and probability models are supplied assumptions,
+not claims about Minecraft mechanics. Statistical summaries do not establish
+causation, predict guaranteed outcomes, or establish gameplay safety.
+
+Use consistent units within a calculation. Scalar inputs are bounded to
+±1,000,000; count arguments require whole numbers. Input and output lists
+are limited to 1,000 entries, and nonfinite or unsafe-range results fail
+without a success report. Negative CLI arguments may follow `--`.
+
+Every command has an independent expected-result case, exercised through both
+the pure calculation boundary and Commander argument parsing. The inventory
+test checks all 1,000 unique names, signatures, documentation, and examples;
+real CLI processes check every group's help and a representative result with
+a nonexistent bridge. Full Node regressions, syntax checks, demo smoke, and
+remote CI cover integration. These offline and simulated checks leave packaged
+Fabric and authenticated-handoff acceptance gates open.
