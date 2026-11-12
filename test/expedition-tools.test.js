@@ -95,3 +95,33 @@ test('bad numbers, invalid recipes, oversized tours and routes are rejected', ()
   assert.throws(() => expeditionReport({ ...state, connected: false }, 'time-home', [1]), /Enter a world/);
   assert.throws(() => report('does-not-exist'));
 });
+
+test('decimal food demand preserves exact whole-item and sufficiency boundaries', () => {
+  const packed = { ...state, inventory: [{ name: 'minecraft:bread', count: 11 }] };
+  const read = (command, args) => expeditionReport(packed, command, args);
+  assert.equal(read('food-load', ['bread', 25, 2.2]).required, 11);
+  const plan = read('food-plan', [25, 2.2]);
+  assert.equal(plan.demand, 55); assert.equal(plan.uncoveredHunger, 0);
+  assert.deepEqual(plan.allocation, [{ name: 'minecraft:bread', count: 11, hunger: 55 }]);
+  const margin = read('food-margin', [25, 2.2]);
+  assert.equal(margin.sufficientEstimate, true); assert.equal(margin.margin, 0);
+  assert.equal(read('ration-days', [25, 2.2]).sufficientEstimate, true);
+  assert.equal(read('food-load', ['bread', 25, 2.20000001]).required, 12);
+  assert.equal(read('food-margin', [25, 2.20000001]).sufficientEstimate, false);
+  assert.ok(read('food-plan', [25, 2.20000001]).uncoveredHunger > 0);
+  assert.equal(read('food-load', ['bread', 5e-324, 5e-324]).required, 1);
+  assert.equal(read('food-plan', [0, 2.2]).allocation.length, 0);
+  assert.equal(read('food-load', ['beetroot', 100, 0.14]).required, 14);
+});
+
+test('decimal collection and production budgets keep discrete counts consistent', () => {
+  const empty = { ...state, inventory: [] };
+  const read = (command, args) => expeditionReport(empty, command, args);
+  const deadline = read('collect-deadline', ['dirt', 58, 100, 0.58]);
+  assert.equal(deadline.feasibleEstimate, true); assert.equal(deadline.attainableCount, 58);
+  assert.equal(read('collect-deadline', ['dirt', 59, 100, 0.58]).feasibleEstimate, false);
+  const priority = read('kit-priority', [10, 0.3, 'dirt=1', 'sand=2']);
+  assert.equal(priority.selected.length, 2); assert.equal(priority.remainingMinutes, 0);
+  assert.equal(read('fuel', ['coal', 0.58, 58]).required, 100);
+  assert.equal(read('smelt', ['sand', 'glass', 58, 'coal', 0.58]).fuelRequired, 100);
+});

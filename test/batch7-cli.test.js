@@ -18,14 +18,14 @@ const exec = promisify(execFile);
 const expeditionArgs = {
   'time-to': ['3,64,4', '5'], 'time-home': ['5'], 'round-trip': ['3,64,4', '5', '7'],
   rendezvous: ['3,64,4', '5', '7'], 'route-budget': ['5', '1', '3,64,4', '6,64,8'],
-  'home-deadline': ['5', '7'], 'operating-radius': ['5', '10', '2'], 'food-load': ['bread', '10', '2'],
-  'food-plan': ['6', '2'], 'food-margin': ['10', '2'], 'collect-time': ['dirt', '100', '10'],
-  'collect-deadline': ['dirt', '100', '10', '3'], 'kit-time': ['10', 'dirt=100', 'coal=11'],
+  'home-deadline': ['5', '7'], 'operating-radius': ['5', '10', '2'], 'food-load': ['bread', '25', '2.2'],
+  'food-plan': ['25', '2.2'], 'food-margin': ['25', '2.2'], 'collect-time': ['dirt', '100', '10'],
+  'collect-deadline': ['beetroot', '58', '100', '0.58'], 'kit-time': ['10', 'dirt=100', 'coal=11'],
   'kit-priority': ['10', '3', 'dirt=100', 'coal=11'], 'source-trips': ['dirt', '30', '5'],
   'resource-trips': ['dirt', '5', '7'], 'refresh-budget': ['5', '2'], payload: ['dirt', '35'],
   'delivery-budget': ['dirt', '129', '35', '3,64,4', '5'], 'reserved-capacity': ['dirt', '32'],
-  recipe: ['torch', '9', '4', 'coal=1', 'stick=1'], fuel: ['coal', '8', '17'],
-  smelt: ['sand', 'glass', '17', 'coal', '8'], 'ration-days': ['3', '6'], 'cache-reach': ['5', '2', 'dirt=80', 'coal=2'],
+  recipe: ['torch', '9', '4', 'coal=1', 'stick=1'], fuel: ['coal', '0.58', '58'],
+  smelt: ['sand', 'glass', '58', 'coal', '0.58'], 'ration-days': ['25', '2.2'], 'cache-reach': ['5', '2', 'dirt=80', 'coal=2'],
 };
 const blueprintArgs = {
   floor: ['4', '5', '2'], 'floor-border': ['5', '4', '1'], checkerboard: ['5', '3'], stripes: ['7', '2', '2'],
@@ -59,7 +59,12 @@ test('25 expedition commands cross the authenticated bridge without disturbing a
     const name = signature.split(' ')[0], args = expeditionArgs[name];
     assert.ok(args, name);
     const { stdout, stderr } = await exec(process.execPath, ['src/cli.js', '--bridge', discoveryPath, '--json', 'expedition', name, '--', ...args]);
-    assert.deepEqual(JSON.parse(stdout), expeditionReport(before, name, args), name);
+    const output = JSON.parse(stdout);
+    assert.deepEqual(output, expeditionReport(before, name, args), name);
+    if (name === 'food-load') assert.equal(output.required, 11);
+    if (name === 'collect-deadline') { assert.equal(output.feasibleEstimate, true); assert.equal(output.attainableCount, 58); }
+    if (name === 'fuel') assert.equal(output.required, 100);
+    if (name === 'smelt') assert.equal(output.fuelRequired, 100);
     assert.equal(stderr, ''); assert.equal(harness.owner, owner); exercised++;
   }
   assert.equal(exercised, 25);
