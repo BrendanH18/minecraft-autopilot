@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { normalizeAction, positionSchema } from './protocol.js';
+import { freeSlotsView, MAIN_SLOTS } from './cli-views.js';
 
 const collectible = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'dirt', 'cobblestone', 'sand']);
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
@@ -18,6 +19,8 @@ const criteriaSchema = z.object({
   maxThreats: z.number().int().min(0).optional(),
   maxInventory: z.object({ item: z.string(), count: z.number().int().min(0).max(2304) }).strict().optional(),
   maxDistance: z.number().finite().min(0).max(10_000).optional(),
+  minFreeSlots: z.number().int().min(0).max(MAIN_SLOTS).optional(),
+  maxHealthLoss: z.number().finite().min(0).max(20).optional(),
 }).strict();
 
 export function parseCollectionCriterion(value) {
@@ -57,7 +60,7 @@ export function createObjective(criteria, initialState) {
   const parsed = criteriaSchema.parse(criteria);
   if (parsed.homeRadius !== undefined && !parsed.returnHome) throw new Error('homeRadius requires returnHome.');
   if (!parsed.collect && !parsed.deposit && !parsed.returnHome && parsed.minHealth === undefined && parsed.minHunger === undefined && !parsed.destination && !parsed.inventory && parsed.maxThreats === undefined
-    && !parsed.maxInventory && parsed.maxDistance === undefined) return null;
+    && !parsed.maxInventory && parsed.maxDistance === undefined && parsed.minFreeSlots === undefined && parsed.maxHealthLoss === undefined) return null;
   const requiredInventory = parsed.inventory ? parseInventoryCriterion(`${parsed.inventory.item}:${parsed.inventory.count}`) : null;
   const maxInventory = parsed.maxInventory ? parseMaxInventoryCriterion(`${parsed.maxInventory.item}:${parsed.maxInventory.count}`) : null;
   const player = z.object({ uuid: z.string().min(1), dimension: z.string().min(1) }).parse(initialState.player);
@@ -67,6 +70,8 @@ export function createObjective(criteria, initialState) {
     if (!position.success) throw new Error('The starting position is unavailable, so --verify-max-distance cannot be checked.');
     start = position.data;
   }
+  const initialHealth = parsed.maxHealthLoss === undefined ? null : initialState.player.health;
+  if (parsed.maxHealthLoss !== undefined && !Number.isFinite(initialHealth)) throw new Error('The starting health is unavailable, so --verify-max-health-loss cannot be checked.');
   const collect = parsed.collect ? parseCollectionCriterion(`${parsed.collect.block}:${parsed.collect.count}`) : null;
   const count = state => inventory.parse(state.inventory).filter(item => item.name === collect.block).reduce((total, item) => total + item.count, 0);
   const initialCount = collect ? count(initialState) : null;
@@ -102,7 +107,9 @@ export function createObjective(criteria, initialState) {
       ...(requiredInventory && { inventory: requiredInventory }),
       ...(parsed.maxThreats !== undefined && { maxThreats: parsed.maxThreats }),
       ...(maxInventory && { maxInventory }),
-      ...(start && { maxDistance: { start, radius: parsed.maxDistance } }) },
+      ...(start && { maxDistance: { start, radius: parsed.maxDistance } }),
+      ...(parsed.minFreeSlots !== undefined && { minFreeSlots: parsed.minFreeSlots }),
+      ...(parsed.maxHealthLoss !== undefined && { maxHealthLoss: { initial: initialHealth, maximum: parsed.maxHealthLoss } }) },
     check(state, { storageRefreshed = false } = {}) {
       const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && Number.isFinite(state.player.health) && state.player.health > 0;
       const checks = {};
@@ -167,6 +174,16 @@ export function createObjective(criteria, initialState) {
         const position = samePlayer ? point.safeParse(state.player.position) : null;
         const distance = position?.success ? Math.hypot(position.data.x - start.x, position.data.y - start.y, position.data.z - start.z) : null;
         checks.maxDistance = { start, distance, maximum: parsed.maxDistance, met: distance !== null && distance <= parsed.maxDistance };
+      }
+      if (parsed.minFreeSlots !== undefined) {
+        // Distinct occupied main slots, as the free-slots command counts them; a missing inventory is unavailable.
+        const free = samePlayer && Array.isArray(state.inventory) ? freeSlotsView(state).free : null;
+        checks.freeSlots = { free, required: parsed.minFreeSlots, met: free !== null && free >= parsed.minFreeSlots };
+      }
+      if (initialHealth !== null) {
+        const current = samePlayer ? state.player.health : null;
+        const loss = current === null ? null : Math.max(0, initialHealth - current);
+        checks.healthLoss = { initial: initialHealth, current, loss, maximum: parsed.maxHealthLoss, met: current !== null && current >= initialHealth - parsed.maxHealthLoss };
       }
       return { met: samePlayer && Object.values(checks).every(check => check.met), samePlayer, checks };
     },

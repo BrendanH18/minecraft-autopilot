@@ -20,12 +20,16 @@ npm start -- server --help
 | `deposit ITEM [COUNT]` | Store an item (all of it when COUNT is omitted) in the nearest chest or barrel |
 | `eat [--until HUNGER]` / `home` | Eat supported food, optionally repeating up to a hunger level / navigate to the saved home |
 | `guard --seconds N` | Maintain a session with eating/retreat reflexes for 1–3600 seconds |
-| `agent GOAL --model MODEL` | Run a bounded local Ollama planner |
+| `agent [GOAL] --model MODEL` | Run a bounded local Ollama planner; `--goal-file` reads the goal from a file |
 | `models` | List locally installed Ollama models |
 | `mcp` | Start the MCP stdio server |
-| `run FILE [--dry-run]` | Validate and run a JSON routine of 1–100 actions under one control session |
+| `run FILE [--dry-run]` | Validate and run a JSON routine of 1–100 actions under one control session; `--from-step`, `--repeat`, `--continue-on-error`, `--stop-below-health` |
+| `watch` / `wait-idle` | Stream compact observations / wait until no job is running, without taking control |
+| `waypoint add\|list\|remove\|goto` | Named waypoints in an owner-only local file; `goto` checks the dimension first |
+| `transcript-summary FILE` | Summarize a planner transcript offline |
+| `paths` | Show data and discovery file locations without contacting the bridge |
 | `stop` | Emergency stop, including another controller's session |
-| `doctor [--ollama URL]` | Inspect prerequisites and discovery files offline; optionally check a local Ollama |
+| `doctor [--ollama URL] [--strict]` | Inspect prerequisites and discovery files offline; optionally check a local Ollama; `--strict` exits 1 unless ready |
 | `clean --dry-run` | Preview selective cleanup |
 | `demo [--smoke] [--scenario NAME]` | Run a simulation, optionally from a preset state or as a smoke check that exits |
 | `server --host HOST --account ACCOUNT` | Connect the standalone bot |
@@ -399,6 +403,7 @@ owned by another process and is harmless when this session holds no control.
 | `hungry` | Health 10, hunger 4 |
 | `hostile` | One zombie observed five blocks away |
 | `stocked` | Chest already observed holding 12 oak logs and 5 cobblestone |
+| `full` | Bread plus 35 full stacks (cobblestone, dirt, sand) in all 36 slots; collecting a new item fails with "Inventory is full." until a stack is stored; `--smoke` stores the sand first |
 
 Scenarios only change starting data; the demo still does not simulate combat or damage.
 
@@ -407,3 +412,186 @@ reports it as `nodeRequired`. `doctor --ollama http://127.0.0.1:11434` also send
 `GET /api/version` to a local Ollama, waiting up to three seconds, and reports
 `ollama: { reachable, version }` or `{ reachable: false, error }`. Like `agent`, it accepts only
 localhost HTTP(S) URLs without credentials. Without `--ollama`, doctor makes no network requests.
+
+## Watching, risk, routes, and waypoints
+
+Except for `waypoint goto`, these commands never take control and preserve any existing lease
+(batch 3 in [the improvement inventory](IMPROVEMENTS.md#batch-3-watching-waypoints-planner-safety-and-routine-controls)):
+
+```sh
+npm start -- watch --interval 2 --count 30
+npm start -- wait-idle --timeout 120 --manual
+npm start -- risk
+npm start -- census --radius 16
+npm start -- slots
+npm start -- distance --home
+npm start -- direction --home
+npm start -- route 10,64,-20 40,70,-20
+npm start -- route -- -5,64,3 0,64,0
+npm start -- waypoint add mine
+npm start -- waypoint add portal 8 70 -8 --dimension minecraft:the_nether
+npm start -- waypoint list --distance
+npm start -- waypoint goto mine
+npm start -- waypoint remove mine
+npm start -- diff-snapshots before.json after.json
+```
+
+`watch` prints one compact JSON line per sample to stdout: `time` (ISO), `position`, `dimension`,
+`health`, `hunger`, `mode`, `job` (`{ type, status }` or `null`), and `threats` (observed count, or
+`null` when the backend does not report threats). `--interval` is 1–60 seconds (default 5).
+`--count` is 1–10000 samples; without it, `watch` runs until Ctrl+C and then exits 0. A bridge error
+on any sample ends the command with that error.
+
+`wait-idle` polls every 250 ms until no job is running (no job, or a completed, failed, or cancelled
+one) and the stopping flag is false. With `--manual`, it also waits for mode `manual`. It prints
+`{ status: "idle", waitedMs, mode, job }`. `--timeout` is 1–3600 seconds (default 60); on timeout it
+exits 1 and names what is still busy, for example `job wait is running` or `control mode is agent`.
+
+`risk` reports `level`, `reasons`, `inputs` (`health`, `hunger`, `nearestThreatDistance`,
+`threatsWithin16`, `foodHunger` from the `food` list), and a `caveat`. `high`: health ≤ 6, a threat
+within 5 blocks, or hunger ≤ 6 with no listed food. `medium`: health ≤ 12, hunger ≤ 10, a threat
+within 16 blocks, no listed food, or missing health, hunger, or threat data ("threat data
+unavailable; absence does not prove safety"). Otherwise `low`. It is a heuristic over partial
+observations: unloaded or unreported dangers such as falls, lava, players, and unseen mobs are not
+assessed.
+
+`census` counts observed loaded blocks by name and threats by type, sorted by count then name, with
+`observedBlocks` and `observedThreats` totals. `--radius` must be greater than zero. `threats` and
+`observedThreats` are `null` when the backend does not report threats. `slots` lists each occupied
+stack by slot (`null` when the backend gives none, listed last) with `count`, `maxStack`, `room`,
+and `stackSizeAssumed`, using the same stack-size list as `free-slots`.
+
+`distance` and `direction` take either all three X Y Z coordinates or `--home`, never both. `--home`
+measures to the saved home and fails when no home is saved or the home's dimension differs from the
+player's. Output fields match the coordinate form.
+
+`route` takes 1–50 points written as `x,y,z`, each within `goto` bounds. It starts from the observed
+position and reports each leg's `from`, `to`, `distance`, `horizontalDistance`, `verticalOffset`, and
+8-point `compass` (`null` straight up or down), plus `totals`. Legs are straight lines; real paths are
+longer. Put `--` before the first point when it starts with a minus sign.
+
+`waypoint` stores up to 100 waypoints in `waypoints.json` in the data directory (`.runtime/`, or
+`MC_AGENT_HOME`). The file is owner-only (0600) and written atomically, and `clean` keeps it.
+
+- Names are 1–32 lowercase letters, digits, `_`, or `-`, starting with a letter or digit.
+- `add NAME` saves the observed position and dimension. `add NAME X Y Z` uses `--dimension` if
+  given, otherwise the observed dimension; it contacts the bridge only when `--dimension` is
+  omitted.
+- Positions must be within `goto` bounds. `add` refuses an existing name unless you pass `--force`.
+- `list` prints waypoints sorted by name and works without a bridge. `--distance` observes the
+  player and adds `distance`, which is `null` for waypoints in another dimension.
+- `remove` fails for unknown names.
+- `goto` refuses a waypoint whose dimension differs from the observed dimension before taking
+  control. Otherwise it navigates like `goto`.
+- An unreadable or invalid file is reported with its path and is never overwritten. Concurrent
+  `add` or `remove` runs are not locked; the last write wins.
+
+`diff-snapshots` compares two `snapshot` files without contacting the bridge. It reports `from`
+and `to` (`savedAt` values), `elapsedSeconds` between them (negative when the first is newer), and
+the same position, dimension, health, hunger, home, and inventory changes as `compare`. Unreadable or
+invalid files are rejected with the file name and reason.
+
+## Planner safety, sampling, and transcripts
+
+```sh
+npm start -- agent --goal-file goals/store-logs.txt --dry-run --show-prompt
+npm start -- agent --goal-file goals/store-logs.txt --stop-below-health 8 \
+  --retry-invalid 2 --seed 42 --verify-min-free-slots 10 --verify-max-health-loss 4 \
+  --transcript .runtime/store-logs.jsonl
+npm start -- transcript-summary .runtime/store-logs.jsonl
+```
+
+| Option | Range (default) | Effect |
+| --- | --- | --- |
+| `--goal-file <file>` | path | Read the goal from a regular file instead of the argument |
+| `--stop-below-health <n>` | 1–19 | Stop between actions when observed health is below `n` |
+| `--retry-invalid <n>` | 0–5 (0) | Consecutive invalid model outputs refused and retried |
+| `--temperature <t>` | 0–2 (0) | Ollama `options.temperature` |
+| `--seed <n>` | 0–2147483647 | Ollama `options.seed`; omitted when not given |
+| `--show-prompt` | flag | With `--dry-run`, include `systemPrompt` and `firstMessage` |
+| `--verify-min-free-slots <n>` | 0–36 | At least `n` of 36 main inventory slots free at completion |
+| `--verify-max-health-loss <n>` | 0–20 | Final health at least starting health minus `n` |
+
+Give the goal either as the argument or with `--goal-file`, not both. The file must be a regular
+file (FIFOs and devices are refused without blocking); one trailing newline is dropped and the
+rest must contain 1 to 16000 characters.
+
+`--stop-below-health` is checked before the deposit baseline inspection, before each model decision
+(after any automatic recovery finishes), again before dispatching the decision the model returned,
+and after each action. It never interrupts a running action. When health is below
+the threshold, the planner releases control and returns `status: "health_stop"` with a reason
+naming the health, plus `verification` when criteria were given; the CLI exits 2. Unavailable
+health does not trigger the stop.
+
+With `--retry-invalid n`, output that is not JSON or not a valid action is not executed. It is
+recorded as `{ "rejected": "Invalid action: ..." }` in the model's history and as a `rejection`
+transcript event, and it counts as a decision toward `--steps`. A valid decision resets the
+count; more than `n` consecutive invalid outputs stop the task with the usual invalid-action
+error. Empty or oversized output still stops immediately.
+
+`--show-prompt` requires `--dry-run`. `firstMessage` is built by the same code as the first real
+request, from the current observation; the real request observes again after takeover, so its
+`state.mode` reads `agent`. With `--verify-deposit`, the real run also refreshes storage first.
+
+`--verify-min-free-slots` counts distinct occupied main inventory slots, as `free-slots` does.
+`--verify-max-health-loss` needs a finite starting health, otherwise the task is refused before
+takeover. Missing inventory or health data cannot satisfy either check, and a decision limit with
+either criterion exits 2.
+
+Every result adds `model` with `requests`, `promptTokens`, `outputTokens`, and `modelMs`, summed
+from Ollama's `prompt_eval_count`, `eval_count`, and `total_duration` (missing fields count as 0;
+a dry run reports zeros). Transcript `decision` events add `promptTokens` and `outputTokens` when
+Ollama reports them, and the `start` event records `temperature`, `seed`, `retryInvalid`, and
+`stopBelowHealth`.
+
+`transcript-summary FILE` reads a regular transcript file of at most 10 MiB without connecting to
+Minecraft or Ollama. Each `start` event begins a run; the last run is summarized unless
+`--run <n>` picks another. It prints `runs`, `run`, `events`, `decisions`, `decisionsByType`,
+`rejections`, `errors`, `results`, `invalidLines` (lines that are not JSON event objects), `goal`,
+`model`, `started`, `finished`, `status` (or `error` for a failed run), and `durationMs` (from the
+result, else the start-to-finish time; `null` when the run has no `finish` event).
+
+## Routine controls, MCP overview tools, and diagnostics
+
+`run FILE` accepts four controls. Each is validated, together with the whole routine, before control
+is taken.
+
+```sh
+npm start -- run routine.json --from-step 3
+npm start -- run routine.json --continue-on-error --repeat 5
+npm start -- run routine.json --stop-below-health 8
+```
+
+`--from-step N` starts at step N (1-based, at most the routine length). Step numbers in progress,
+`failedStep`, and `errors` stay absolute. The result adds `startStep`; `total` stays the routine
+length and `completed` counts steps finished in this run.
+
+`--continue-on-error` records a failed action in `errors: [{ step, error }]` and moves on. When any
+step failed the status is `completed_with_errors` and the command exits 1. Loss of control, lease
+errors, and Ctrl+C still stop immediately with `failed` or `cancelled`.
+
+`--repeat N` (1–20, default 1) runs the selected steps N times under one control session. When N is
+above 1 the result adds `iterations` and `stepsRun` (actions dispatched), each `results` and `errors`
+entry gains `iteration`, a failure adds `failedIteration`, and progress reads
+`Step i/n (iteration k/N)`. With N = 1 the output is unchanged.
+
+`--stop-below-health N` (1–19) checks observed health before every step. Below N, the routine stops
+with status `health_stop`, `stoppedBeforeStep`, and `health` (plus `iteration` when repeating),
+releases control, and exits 1. A backend without health readings fails the routine.
+
+`--dry-run` also checks these controls and reports `startStep` and `iterations` when set.
+
+MCP clients get three more read-only tools that never take control. `minecraft_summary` returns the
+`summary` result. `minecraft_find_item` takes `item` and returns the `find-item` result.
+`minecraft_direction` takes either `x`, `y`, and `z`, checked against world bounds, or `home: true`,
+and returns the `direction` result. Home must be saved; a home recorded in another dimension is
+refused, as with `direction --home`.
+
+`doctor` reports `ready`: Node.js supported, JDK ready, bundle verified, bridge valid, and, when
+`--ollama` is given, Ollama reachable. `doctor --strict` prints the same result and exits 1 when
+`ready` is false.
+
+`paths` prints `dataDirectory`, `defaultBridgeFile`, `profileFile` and `profileExists`, the
+resolved `bridgeFile` (honoring `--bridge` and an attached profile) and `bridgeExists`, and
+`waypointsFile` (`waypoints.json` in the data directory) and `waypointsExists`. It does not contact
+the bridge or read or print credentials. `MC_AGENT_HOME` moves the data directory.

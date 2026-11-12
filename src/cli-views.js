@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { positionSchema, terminalStatuses } from './protocol.js';
 
 export function itemName(value) {
   if (!/^(?:minecraft:)?[a-z0-9_]+$/.test(value) || value.length > 100) throw new Error('Use a Minecraft item or block name, for example oak_log.');
@@ -113,15 +114,18 @@ export function storageTotalsView(state, { item } = {}) {
 
 const COMPASS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
 /** Minecraft facing: north is -Z, east is +X; yaw 0 faces south (+Z), 90 west, ±180 north, -90 east; positive pitch looks down. */
+export function headingBetween(from, to) {
+  const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+  const horizontal = Math.hypot(dx, dz);
+  const level = horizontal === 0;
+  const bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+  return { compass: level ? null : COMPASS[Math.round(bearing / 45) % 8],
+    yaw: level ? null : round(Math.atan2(-dx || 0, dz) * 180 / Math.PI),
+    pitch: Math.hypot(dx, dy, dz) === 0 ? null : round(-Math.atan2(dy, horizontal) * 180 / Math.PI) || 0 };
+}
 export function directionView(state, target) {
   const measured = distanceTo(state, target);
-  const position = playerPosition(state);
-  const dx = measured.target.x - position.x, dz = measured.target.z - position.z;
-  const level = measured.horizontalDistance === 0;
-  const bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-  return { ...measured, compass: level ? null : COMPASS[Math.round(bearing / 45) % 8],
-    yaw: level ? null : round(Math.atan2(-dx || 0, dz) * 180 / Math.PI),
-    pitch: measured.distance === 0 ? null : round(-Math.atan2(measured.verticalOffset, measured.horizontalDistance) * 180 / Math.PI) || 0 };
+  return { ...measured, ...headingBetween(playerPosition(state), measured.target) };
 }
 
 export function nearestView(state, block) {
@@ -205,7 +209,11 @@ const sameHome = (a, b) => JSON.stringify(a && [a.x, a.y, a.z, a.dimension ?? nu
 
 export function compareView(snapshot, state, now = new Date()) {
   const before = validSnapshot(snapshot);
-  const position = playerPosition(state);
+  return { savedAt: before.savedAt, ...diffObservations(before, state, playerPosition(state), (now - Date.parse(before.savedAt)) / 1000) };
+}
+
+/** Shared by compare (snapshot vs. live observation) and diff-snapshots (snapshot vs. snapshot). */
+function diffObservations(before, state, position, elapsedSeconds) {
   const from = before.player.position;
   const counts = new Map();
   for (const [sign, stacks] of [[-1, before.inventory], [1, state.inventory || []]]) {
@@ -217,10 +225,130 @@ export function compareView(snapshot, state, now = new Date()) {
   }
   const inventory = [...counts].filter(([, entry]) => entry.from !== entry.to).sort(([a], [b]) => a.localeCompare(b))
     .map(([name, entry]) => ({ name, ...entry, delta: entry.to - entry.from }));
-  return { savedAt: before.savedAt, elapsedSeconds: round((now - Date.parse(before.savedAt)) / 1000),
+  return { elapsedSeconds: round(elapsedSeconds),
     position: { from, to: position, delta: { x: position.x - from.x, y: position.y - from.y, z: position.z - from.z },
       distanceMoved: Math.hypot(position.x - from.x, position.y - from.y, position.z - from.z) },
     dimensionChanged: (before.player.dimension ?? null) !== (state.player.dimension ?? null),
     health: delta(before.player.health, state.player.health), hunger: delta(before.player.hunger, state.player.hunger),
     homeChanged: !sameHome(before.home ?? null, state.home ?? null), inventory };
+}
+
+export function diffSnapshotsView(first, second) {
+  const before = validSnapshot(first), after = validSnapshot(second);
+  return { from: before.savedAt, to: after.savedAt,
+    ...diffObservations(before, after, after.player.position, (Date.parse(after.savedAt) - Date.parse(before.savedAt)) / 1000) };
+}
+
+/** One compact sample for `watch`; threats is null when the backend does not report them. */
+export function watchSample(state, now = new Date()) {
+  const { position, dimension, health, hunger, mode, job, threats } = summaryView(state);
+  return { time: now.toISOString(), position, dimension, health, hunger, mode, job, threats };
+}
+
+/** What still prevents "idle": a non-terminal job, a stopping flag, or (with manual) agent control. Empty means idle. */
+export function busyReasons(state, { manual = false } = {}) {
+  const reasons = [];
+  if (state.job && !terminalStatuses.has(state.job.status)) reasons.push(`job ${state.job.type} is ${state.job.status}`);
+  if (state.stopping) reasons.push('previous activity is stopping');
+  if (manual && state.mode !== 'manual') reasons.push(`control mode is ${state.mode ?? 'unknown'}`);
+  return reasons;
+}
+
+/**
+ * Heuristic danger level from one partial observation; thresholds:
+ * high   — health <= 6, a threat within 5 blocks, or hunger <= 6 with no listed food;
+ * medium — health <= 12, hunger <= 10, a threat within 16 blocks, no listed food,
+ *          or missing health, hunger, or threat data;
+ * low    — otherwise.
+ */
+export const RISK = { highHealth: 6, mediumHealth: 12, highHunger: 6, mediumHunger: 10, closeThreat: 5, nearThreat: 16 };
+export function riskView(state) {
+  const { health, hunger } = healthView(state);
+  const foodHunger = foodView(state).totalHunger;
+  const threatsKnown = Array.isArray(state.threats);
+  const threats = threatsKnown ? nearbyView(state, 'threats', { limit: Infinity }).threats : [];
+  const nearest = threats[0] ?? null;
+  const threatsWithin16 = threats.filter(threat => threat.distance <= RISK.nearThreat).length;
+  const high = [], medium = [];
+  const known = value => Number.isFinite(value);
+  const threatName = threat => threat.type ?? threat.name ?? 'threat';
+  if (!known(health)) medium.push('health unavailable');
+  else if (health <= RISK.highHealth) high.push(`health ${health} <= ${RISK.highHealth}`);
+  else if (health <= RISK.mediumHealth) medium.push(`health ${health} <= ${RISK.mediumHealth}`);
+  if (nearest && nearest.distance <= RISK.closeThreat) high.push(`${threatName(nearest)} ${round(nearest.distance)} blocks away (within ${RISK.closeThreat})`);
+  else if (threatsWithin16) medium.push(`${threatsWithin16} threat(s) within ${RISK.nearThreat} blocks`);
+  if (!threatsKnown) medium.push('threat data unavailable; absence does not prove safety');
+  if (!known(hunger)) medium.push('hunger unavailable');
+  else if (hunger <= RISK.highHunger && foodHunger === 0) high.push(`hunger ${hunger} <= ${RISK.highHunger} with no listed food in inventory`);
+  else if (hunger <= RISK.mediumHunger) medium.push(`hunger ${hunger} <= ${RISK.mediumHunger}`);
+  if (foodHunger === 0 && !(known(hunger) && hunger <= RISK.highHunger)) medium.push('no listed food in inventory');
+  return { level: high.length ? 'high' : medium.length ? 'medium' : 'low', reasons: [...high, ...medium],
+    inputs: { health: finite(health), hunger: finite(hunger), nearestThreatDistance: nearest ? nearest.distance : null,
+      threatsWithin16: threatsKnown ? threatsWithin16 : null, foodHunger },
+    caveat: 'Heuristic over partial observations: unloaded or unreported dangers (falls, lava, players, unseen mobs) are not assessed.' };
+}
+
+const countBy = (entries, key) => {
+  const counts = new Map();
+  for (const entry of entries) counts.set(key(entry), (counts.get(key(entry)) || 0) + 1);
+  return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+};
+
+export function censusView(state, { radius } = {}) {
+  const blocks = nearbyView(state, 'blocks', { radius, limit: Infinity }).blocks;
+  const threatsKnown = Array.isArray(state.threats);
+  const threats = threatsKnown ? nearbyView(state, 'threats', { radius, limit: Infinity }).threats : null;
+  return { radius: radius ?? null, observedBlocks: blocks.length, blocks: countBy(blocks, block => block.name ?? 'unknown'),
+    observedThreats: threats ? threats.length : null,
+    threats: threats && countBy(threats, threat => threat.type ?? threat.name ?? 'unknown').map(({ name, count }) => ({ type: name, count })),
+    note: 'Counts only loaded blocks and entities the backend reports; this is a partial observation.' };
+}
+
+export function slotsView(state) {
+  const stacks = (state.inventory || []).filter(stack => stack.count > 0).map(stack => {
+    let size;
+    try { size = maxStackSize(stack.name); } catch { size = { maxStack: 64, stackSizeAssumed: true }; }
+    return { slot: Number.isInteger(stack.slot) ? stack.slot : null, name: stack.name, count: stack.count, maxStack: size.maxStack,
+      room: Math.max(0, size.maxStack - stack.count), stackSizeAssumed: size.stackSizeAssumed };
+  });
+  // Stable sort; stacks without a reported slot keep their order after numbered slots.
+  stacks.sort((a, b) => (a.slot ?? Infinity) - (b.slot ?? Infinity));
+  return { occupiedSlots: stacks.length, slots: stacks };
+}
+
+/** Saved home as a target; refuses a missing home or one saved in a different dimension. */
+export function homeTarget(state) {
+  playerPosition(state);
+  const home = state.home;
+  if (!home) throw new Error('No home is saved. Run set-home first.');
+  if (home.dimension && home.dimension !== state.player.dimension) {
+    throw new Error(`Home is in ${home.dimension} but the player is in ${state.player.dimension ?? 'an unknown dimension'}.`);
+  }
+  return { x: home.x, y: home.y, z: home.z };
+}
+
+export const MAX_ROUTE_POINTS = 50;
+export function parseRoutePoints(values) {
+  if (!Array.isArray(values) || values.length < 1 || values.length > MAX_ROUTE_POINTS) throw new Error(`Give 1 to ${MAX_ROUTE_POINTS} route points.`);
+  return values.map((value, index) => {
+    const parts = String(value).split(',');
+    const numbers = parts.map(part => part.trim() === '' ? NaN : Number(part));
+    if (parts.length !== 3 || !numbers.every(Number.isFinite)) throw new Error(`Route point ${index + 1} "${value}" must be x,y,z numbers, for example 10,64,-20.`);
+    const point = { x: numbers[0], y: numbers[1], z: numbers[2] };
+    if (!positionSchema.safeParse(point).success) throw new Error(`Route point ${index + 1} "${value}" is outside the world: Y must be -64 to 320 and X/Z within ±29,999,984.`);
+    return point;
+  });
+}
+
+export function routeView(state, points) {
+  let from = playerPosition(state);
+  const legs = points.map(to => {
+    const leg = { from, to, distance: Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z),
+      horizontalDistance: Math.hypot(to.x - from.x, to.z - from.z), verticalOffset: to.y - from.y, compass: headingBetween(from, to).compass };
+    from = to;
+    return leg;
+  });
+  return { start: playerPosition(state), legs, totals: { legs: legs.length, distance: legs.reduce((sum, leg) => sum + leg.distance, 0),
+    horizontalDistance: legs.reduce((sum, leg) => sum + leg.horizontalDistance, 0) },
+    note: 'Straight-line legs; actual paths around terrain are longer.' };
 }

@@ -1,6 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const demoScenarios = ['default', 'hungry', 'hostile', 'stocked'];
+export const demoScenarios = ['default', 'hungry', 'hostile', 'stocked', 'full'];
+const MAIN_SLOTS = 36;
+const FULL_STACKS = [['minecraft:cobblestone', 20], ['minecraft:dirt', 10], ['minecraft:sand', 5]];
 
 /** A simulation for exercising the protocol; deliberately does not claim real gameplay. */
 export class DemoDriver {
@@ -15,6 +17,10 @@ export class DemoDriver {
     this.stopCount = 0;
     if (scenario === 'hungry') Object.assign(this.player, { health: 10, hunger: 4 });
     if (scenario === 'hostile') this.threats.push({ type: 'minecraft:zombie', x: 4, y: 64, z: -3 });
+    if (scenario === 'full') {
+      // Bread plus 35 full stacks occupies every main slot, so only items that already have a stack can be collected.
+      for (const [name, stacks] of FULL_STACKS) for (let i = 0; i < stacks; i++) this.inventory.push({ slot: this.inventory.length, name, count: 64 });
+    }
     if (scenario === 'stocked') Object.assign(this.chest, { items: [{ name: 'minecraft:oak_log', count: 12 }, { name: 'minecraft:cobblestone', count: 5 }], observedAt: Date.now() });
   }
   observe() {
@@ -37,6 +43,13 @@ export class DemoDriver {
     if (action.type === 'collect') {
       await delay(200, undefined, { signal });
       let item = this.inventory.find(item => item.name === action.block);
+      if (!item && this.scenario === 'full') {
+        this.inventory = this.inventory.filter(stack => stack.count > 0);
+        const used = new Set(this.inventory.map(stack => stack.slot));
+        const slot = Array.from({ length: MAIN_SLOTS }, (_, index) => index).find(index => !used.has(index));
+        if (slot === undefined) throw new Error('Inventory is full.');
+        item = { slot, name: action.block, count: 0 }; this.inventory.push(item);
+      }
       if (!item) { item = { slot: this.inventory.length, name: action.block, count: 0 }; this.inventory.push(item); }
       item.count += action.count;
       return { message: `Simulated collecting ${action.count} ${action.block}.` };

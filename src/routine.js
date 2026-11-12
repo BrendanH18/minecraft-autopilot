@@ -39,23 +39,56 @@ export async function loadRoutine(path) {
   } finally { await file.close(); }
 }
 
-/** Runs validated actions under one lease and stops at the first failure or loss of control. */
-export async function runRoutine(adapter, actions, { signal, log = () => {} } = {}) {
+export const MAX_ROUTINE_REPEAT = 20;
+
+/**
+ * Runs validated actions under one lease. Steps are numbered absolutely from 1; `completed` counts steps finished in this run and
+ * `total` stays the routine length. Loss of control, lease errors, and cancellation always stop; other action failures stop
+ * unless continueOnError records them in `errors`. Optional fields appear only when their option is used.
+ */
+export async function runRoutine(adapter, actions, { signal, log = () => {}, fromStep, continueOnError = false, repeat = 1, stopBelowHealth } = {}) {
+  const start = fromStep ?? 1;
+  if (!Number.isInteger(start) || start < 1 || start > actions.length) throw new Error(`The start step must be an integer from 1 to ${actions.length}, the routine length.`);
+  if (!Number.isInteger(repeat) || repeat < 1 || repeat > MAX_ROUTINE_REPEAT) throw new Error(`Repeat must be an integer from 1 to ${MAX_ROUTINE_REPEAT}.`);
+  if (stopBelowHealth !== undefined && !(stopBelowHealth >= 1 && stopBelowHealth <= 19)) throw new Error('The health stop must be from 1 to 19.');
   const results = [];
-  const report = (status, extra) => ({ status, completed: results.length, total: actions.length, results, ...extra });
+  const errors = [];
+  let step = start, iteration = 1, stepsRun = 0;
+  const tag = value => repeat > 1 ? { ...value, iteration } : value;
+  const label = () => `${step}/${actions.length}${repeat > 1 ? ` (iteration ${iteration}/${repeat})` : ''}`;
+  const report = (status, extra) => ({ status, completed: results.length, total: actions.length, ...(fromStep !== undefined && { startStep: start }),
+    ...(repeat > 1 && { iterations: repeat, stepsRun }), results, ...(continueOnError && { errors }), ...extra });
   try {
     signal?.throwIfAborted();
     await adapter.acquire();
-    for (const [index, action] of actions.entries()) {
-      signal?.throwIfAborted();
-      if (adapter.leaseError || (await adapter.observe()).mode !== 'agent') throw new Error('Control returned to the player.');
-      log(`Step ${index + 1}/${actions.length}: ${action.type}`);
-      results.push(await adapter.execute(action, { signal, onProgress: job => log(job.message) }));
+    for (iteration = 1; iteration <= repeat; iteration++) {
+      for (step = start; step <= actions.length; step++) {
+        const action = actions[step - 1];
+        signal?.throwIfAborted();
+        const state = await adapter.observe();
+        if (adapter.leaseError || state.mode !== 'agent') throw new Error('Control returned to the player.');
+        if (stopBelowHealth !== undefined) {
+          const health = state.player?.health;
+          if (!Number.isFinite(health)) throw new Error('Health is unavailable from this backend.');
+          if (health < stopBelowHealth) {
+            log(`Stopped before step ${label()}: health ${health} is below ${stopBelowHealth}.`);
+            return report('health_stop', tag({ stoppedBeforeStep: step, health }));
+          }
+        }
+        log(`Step ${label()}: ${action.type}`);
+        stepsRun++;
+        try { results.push(tag(await adapter.execute(action, { signal, onProgress: job => log(job.message) }))); }
+        catch (error) {
+          if (!continueOnError || signal?.aborted || adapter.leaseError || (await adapter.observe()).mode !== 'agent') throw error;
+          log(`Step ${label()} failed; continuing: ${error.message}`);
+          errors.push(tag({ step, error: error.message }));
+        }
+      }
     }
-    return report('completed');
+    return report(errors.length ? 'completed_with_errors' : 'completed');
   } catch (error) {
     const reason = signal?.aborted ? signal.reason?.message || error.message : error.message;
-    log(`Stopped at step ${results.length + 1}/${actions.length}: ${reason}`);
-    return report(signal?.aborted ? 'cancelled' : 'failed', { failedStep: results.length + 1, error: reason });
+    log(`Stopped at step ${label()}: ${reason}`);
+    return report(signal?.aborted ? 'cancelled' : 'failed', { failedStep: step, ...(repeat > 1 && { failedIteration: iteration }), error: reason });
   } finally { await adapter.release(); }
 }

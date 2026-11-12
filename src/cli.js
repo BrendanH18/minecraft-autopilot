@@ -14,6 +14,8 @@ import { parseCollectionCriterion, parseDepositCriterion, parseInventoryCriterio
 import { positionSchema, normalizeAction } from './protocol.js';
 import { inventoryView, nearbyView, homeView, storageView, distanceTo, playerPosition, healthView, itemName } from './cli-views.js';
 import { summaryView, jobView, findItemView, storageTotalsView, nearestView, directionView, foodView, freeSlotsView, snapshotView, parseSnapshot, compareView } from './cli-views.js';
+import { watchSample, busyReasons, riskView, censusView, slotsView, homeTarget, parseRoutePoints, routeView, diffSnapshotsView } from './cli-views.js';
+import { waypointFile, waypointName, dimensionId, readWaypoints, writeWaypoints, addWaypoint, removeWaypoint, findWaypoint, assertSameDimension } from './waypoints.js';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -159,11 +161,18 @@ program.command('storage').description('Show nearby storage and last observed co
   .option('--radius <blocks>', 'maximum distance from the player', positiveNumber)
   .option('--limit <n>', 'maximum results', positiveInteger, 20)
   .action(options => view(state => storageView(state, options)));
-program.command('distance').description('Measure straight-line and horizontal distance to a coordinate without moving.')
-  .argument('<x>', 'X coordinate', number).argument('<y>', 'Y coordinate', number).argument('<z>', 'Z coordinate', number)
-  .action((x, y, z) => {
-    const target = positionSchema.parse({ x, y, z });
-    return view(state => distanceTo(state, target));
+/** Exactly one of X Y Z or --home; null means measure to the saved home after observing. */
+function coordinatesOrHome(x, y, z, options) {
+  const given = [x, y, z].filter(value => value !== undefined).length;
+  if (options.home ? given : given !== 3) throw new Error('Pass either all three X Y Z coordinates or --home.');
+  return options.home ? null : positionSchema.parse({ x, y, z });
+}
+program.command('distance').description('Measure straight-line and horizontal distance to a coordinate or the saved home without moving.')
+  .argument('[x]', 'X coordinate', number).argument('[y]', 'Y coordinate', number).argument('[z]', 'Z coordinate', number)
+  .option('--home', 'measure to the saved home instead of a coordinate')
+  .action((x, y, z, options) => {
+    const target = coordinatesOrHome(x, y, z, options);
+    return view(state => distanceTo(state, target ?? homeTarget(state)));
   });
 program.command('position').description('Show current coordinates and dimension without taking control.')
   .action(() => view(state => ({ position: playerPosition(state), dimension: state.player.dimension })));
@@ -182,11 +191,12 @@ program.command('storage-totals').description('Total last observed contents acro
 program.command('nearest').description('Show the nearest observed block of a type with distance and bearing.')
   .argument('<block>', 'Minecraft block name', itemName)
   .action(block => view(state => nearestView(state, block)));
-program.command('direction').description('Show compass bearing, yaw, pitch, and distance to a coordinate without moving.')
-  .argument('<x>', 'X coordinate', number).argument('<y>', 'Y coordinate', number).argument('<z>', 'Z coordinate', number)
-  .action((x, y, z) => {
-    const target = positionSchema.parse({ x, y, z });
-    return view(state => directionView(state, target));
+program.command('direction').description('Show compass bearing, yaw, pitch, and distance to a coordinate or the saved home without moving.')
+  .argument('[x]', 'X coordinate', number).argument('[y]', 'Y coordinate', number).argument('[z]', 'Z coordinate', number)
+  .option('--home', 'point to the saved home instead of a coordinate')
+  .action((x, y, z, options) => {
+    const target = coordinatesOrHome(x, y, z, options);
+    return view(state => directionView(state, target ?? homeTarget(state)));
   });
 program.command('food').description('List inventory food and the hunger it can restore without eating.')
   .action(() => view(foodView));
@@ -214,6 +224,114 @@ program.command('compare').description('Compare a saved snapshot with the curren
     try { text = readFileSync(file, 'utf8'); } catch (error) { throw new Error(`Cannot read snapshot ${file}: ${error.code || error.message}.`); }
     const snapshot = parseSnapshot(text);
     return view(state => compareView(snapshot, state));
+  });
+const within = (min, max, integer) => value => {
+  const parsed = number(value);
+  if (parsed < min || parsed > max || integer && !Number.isInteger(parsed)) throw new InvalidArgumentError(`Must be ${integer ? 'an integer' : 'a number'} from ${min} to ${max}.`);
+  return parsed;
+};
+program.command('watch').description('Print one compact JSON observation line per interval without taking control; Ctrl+C stops.')
+  .option('--interval <seconds>', 'seconds between samples, 1 to 60', within(1, 60), 5)
+  .option('--count <n>', 'stop after 1 to 10000 samples; default runs until Ctrl+C', within(1, 10_000, true))
+  .action(async options => {
+    const adapter = await connect();
+    try {
+      for (let sample = 0; options.count === undefined || sample < options.count; sample++) {
+        if (sample) await delay(options.interval * 1000, undefined, { signal: abortController.signal });
+        console.log(JSON.stringify(watchSample(await adapter.observe())));
+      }
+    } catch (error) { if (!abortController.signal.aborted) throw error; }
+    finally { await adapter.close(); }
+  });
+program.command('wait-idle').description('Wait until no job is running or stopping, without taking control.')
+  .option('--timeout <seconds>', 'give up after 1 to 3600 seconds', within(1, 3600), 60)
+  .option('--manual', 'also wait until control has returned to the player')
+  .action(async options => {
+    const adapter = await connect();
+    const started = Date.now(), deadline = started + options.timeout * 1000;
+    try {
+      while (true) {
+        const state = await adapter.observe();
+        const busy = busyReasons(state, options);
+        if (!busy.length) return print({ status: 'idle', waitedMs: Date.now() - started, mode: state.mode ?? null, job: jobView(state).job });
+        if (Date.now() >= deadline) throw new Error(`Still busy after ${options.timeout} s: ${busy.join('; ')}.`);
+        await delay(Math.min(250, deadline - Date.now()), undefined, { signal: abortController.signal });
+      }
+    } finally { await adapter.close(); }
+  });
+program.command('risk').description('Rate observed danger low, medium, or high from health, hunger, food, and threats; a heuristic.')
+  .action(() => view(riskView));
+program.command('census').description('Count observed blocks by name and threats by type; a partial observation.')
+  .option('--radius <blocks>', 'maximum distance from the player', positiveNumber)
+  .action(options => view(state => censusView(state, options)));
+program.command('slots').description('List occupied inventory slots with stack size and room without taking control.')
+  .action(() => view(slotsView));
+program.command('route').description('Measure straight-line legs from the current position through 1–50 x,y,z points without moving.')
+  .argument('<points...>', 'points as x,y,z; put -- before the first point if it starts with a minus sign')
+  .action(points => {
+    const parsed = parseRoutePoints(points);
+    return view(state => routeView(state, parsed));
+  });
+function readSnapshotFile(file) {
+  let text;
+  try { text = readFileSync(file, 'utf8'); } catch (error) { throw new Error(`Cannot read snapshot ${file}: ${error.code || error.message}.`); }
+  try { return parseSnapshot(text); } catch (error) { throw new Error(`${file}: ${error.message}`); }
+}
+program.command('diff-snapshots').description('Compare two snapshot files offline without contacting the bridge.')
+  .argument('<first>', 'earlier snapshot JSON file').argument('<second>', 'later snapshot JSON file')
+  .action((first, second) => print(diffSnapshotsView(readSnapshotFile(first), readSnapshotFile(second))));
+const waypoint = program.command('waypoint').description('Save, list, remove, and walk to named waypoints stored in the project data directory.');
+waypoint.command('add').description('Save a waypoint at the current position or at X Y Z.')
+  .argument('<name>', 'lowercase name, up to 32 letters, digits, _ or -', waypointName)
+  .argument('[x]', 'X coordinate', number).argument('[y]', 'Y coordinate', number).argument('[z]', 'Z coordinate', number)
+  .option('--dimension <id>', 'dimension for X Y Z, for example minecraft:the_nether; defaults to the observed dimension', dimensionId)
+  .option('--force', 'replace an existing waypoint with the same name')
+  .action(async (name, x, y, z, options) => {
+    const given = [x, y, z].filter(value => value !== undefined).length;
+    if (given !== 0 && given !== 3) throw new Error('Pass all three X Y Z coordinates, or none to use the current position.');
+    if (!given && options.dimension) throw new Error('--dimension applies only with X Y Z; the current position uses the observed dimension.');
+    const existing = await readWaypoints();
+    if (!options.force && existing.some(entry => entry.name === name)) throw new Error(`Waypoint ${name} already exists; pass --force to replace it.`);
+    let dimension = options.dimension;
+    if (!given || !dimension) {
+      const adapter = await connect();
+      let state;
+      try { state = await adapter.observe(); } finally { await adapter.close(); }
+      if (!given) ({ x, y, z } = playerPosition(state));
+      dimension = state.player.dimension;
+      if (typeof dimension !== 'string') throw new Error('The backend did not report a dimension; pass X Y Z with --dimension.');
+    }
+    const result = addWaypoint(await readWaypoints(), { name, x, y, z, dimension }, { force: options.force });
+    await writeWaypoints(result.waypoints);
+    print({ saved: result.waypoint, replaced: result.replaced, file: waypointFile });
+  });
+waypoint.command('list').description('List saved waypoints by name; works without a bridge.')
+  .option('--distance', 'also observe the player and add distances for waypoints in the same dimension')
+  .action(async options => {
+    let waypoints = await readWaypoints();
+    if (options.distance) {
+      const adapter = await connect();
+      let state;
+      try { state = await adapter.observe(); } finally { await adapter.close(); }
+      waypoints = waypoints.map(entry => ({ ...entry, distance: entry.dimension === state.player?.dimension ? distanceTo(state, entry).distance : null }));
+    }
+    print({ count: waypoints.length, waypoints, file: waypointFile });
+  });
+waypoint.command('remove').description('Delete a saved waypoint.')
+  .argument('<name>', 'waypoint name', waypointName)
+  .action(async name => {
+    const waypoints = removeWaypoint(await readWaypoints(), name);
+    await writeWaypoints(waypoints);
+    print({ removed: name, remaining: waypoints.length, file: waypointFile });
+  });
+waypoint.command('goto').description('Walk to a saved waypoint like goto; refuses a waypoint in another dimension before taking control.')
+  .argument('<name>', 'waypoint name', waypointName)
+  .action(async name => {
+    const target = findWaypoint(await readWaypoints(), name);
+    const adapter = await connect();
+    try { assertSameDimension(target, await adapter.observe()); } finally { await adapter.close(); }
+    log(`Walking to waypoint ${target.name} at ${target.x} ${target.y} ${target.z} in ${target.dimension}.`);
+    return perform({ type: 'goto', x: target.x, y: target.y, z: target.z });
   });
 program.command('inspect-storage').description('Open known storage to refresh observed contents (server bot and demo); takes control.')
   .action(() => perform({ type: 'inspect_storage' }));
@@ -245,16 +363,32 @@ program.command('guard').description('Stay under agent control with local eating
 program.command('run').description('Validate a JSON routine of 1–100 actions, then run it in order under one control session.')
   .argument('<file>', 'JSON file containing { "actions": [ ... ] } or an array of actions (at most 1 MiB)')
   .option('--dry-run', 'validate and print the plan without taking control')
+  .option('--from-step <n>', 'start at this 1-based step after validating the whole routine', positiveInteger)
+  .option('--continue-on-error', 'record failed actions in errors and continue; loss of control and cancellation still stop')
+  .option('--repeat <n>', 'run the selected steps 1 to 20 times under one control session', positiveInteger, 1)
+  .option('--stop-below-health <n>', 'stop before any step when observed health is below 1 to 19', number)
   .action(async (file, options) => {
-    const { loadRoutine, runRoutine } = await import('./routine.js');
+    const { loadRoutine, runRoutine, MAX_ROUTINE_REPEAT } = await import('./routine.js');
     const actions = await loadRoutine(file);
-    if (options.dryRun) return print({ status: 'validated', total: actions.length, actions });
+    if (options.fromStep > actions.length) throw new Error(`--from-step must be from 1 to ${actions.length}, the routine length.`);
+    if (options.repeat > MAX_ROUTINE_REPEAT) throw new Error(`--repeat must be from 1 to ${MAX_ROUTINE_REPEAT}.`);
+    if (options.stopBelowHealth !== undefined && !(options.stopBelowHealth >= 1 && options.stopBelowHealth <= 19)) throw new Error('--stop-below-health must be from 1 to 19.');
+    if (options.dryRun) return print({ status: 'validated', total: actions.length, ...(options.fromStep !== undefined && { startStep: options.fromStep }), ...(options.repeat > 1 && { iterations: options.repeat }), actions });
     const adapter = await connect();
     try {
-      const result = await runRoutine(adapter, actions, { signal: abortController.signal, log });
+      const result = await runRoutine(adapter, actions, { signal: abortController.signal, log, fromStep: options.fromStep, continueOnError: !!options.continueOnError,
+        repeat: options.repeat, stopBelowHealth: options.stopBelowHealth });
       print(result);
       if (result.status !== 'completed') process.exitCode = 1;
     } finally { await adapter.close(); }
+  });
+program.command('paths').description('Show local data and discovery file locations without contacting the bridge or printing credentials.')
+  .action(async () => {
+    const { profileFile, resolveBridgePath } = await import('./config.js');
+    const bridge = await resolveBridgePath(program.opts().bridge);
+    const waypointsFile = waypointFile;
+    print({ dataDirectory, defaultBridgeFile: bridgeFile, profileFile, profileExists: existsSync(profileFile),
+      bridgeFile: bridge, bridgeExists: existsSync(bridge), waypointsFile, waypointsExists: existsSync(waypointsFile) });
   });
 program.command('stop').description('Cancel all agent actions and return control, including another CLI session.')
   .action(async () => print(await (await connect()).emergencyStop()));
@@ -266,7 +400,7 @@ const numberIn = (min, max, integer) => value => {
 };
 const ollamaOption = () => new Option('--ollama <url>', 'local Ollama URL').env('MC_AGENT_OLLAMA').default('http://127.0.0.1:11434');
 program.command('agent').description('Run a bounded natural-language task using a local Ollama model.')
-  .argument('<goal>', 'task for the agent').addOption(new Option('--model <name>', 'installed Ollama model name').env('MC_AGENT_MODEL').makeOptionMandatory())
+  .argument('[goal]', 'task for the agent; or use --goal-file').addOption(new Option('--model <name>', 'installed Ollama model name').env('MC_AGENT_MODEL').makeOptionMandatory())
   .addOption(ollamaOption())
   .option('--steps <n>', 'maximum model decisions', positiveInteger, 30)
   .option('--minutes <n>', 'maximum runtime', positiveInteger, 15)
@@ -290,17 +424,29 @@ program.command('agent').description('Run a bounded natural-language task using 
   .option('--history <n>', 'recent decisions sent to the model, 1 to 50', numberIn(1, 50, true), 12)
   .option('--fence <blocks>', 'refuse goto targets farther than 1 to 10000 blocks horizontally from the start', numberIn(1, 10_000))
   .option('--allow-actions <list>', 'comma list of allowed planner actions; done is always allowed')
+  .option('--verify-min-free-slots <n>', 'minimum free main inventory slots at completion, 0 to 36', numberIn(0, 36, true))
+  .option('--verify-max-health-loss <n>', 'final health at most 0 to 20 below the starting health', numberIn(0, 20))
+  .option('--goal-file <file>', 'read the goal from a regular text file (at most 16000 characters) instead of the argument')
+  .option('--stop-below-health <n>', 'stop between actions when health is below 1 to 19 (exit 2)', numberIn(1, 19))
+  .option('--retry-invalid <n>', 'consecutive invalid model outputs to refuse and retry, 0 to 5', numberIn(0, 5, true), 0)
+  .option('--temperature <t>', 'Ollama sampling temperature, 0 to 2', numberIn(0, 2), 0)
+  .option('--seed <n>', 'Ollama sampling seed, 0 to 2147483647', numberIn(0, 2_147_483_647, true))
+  .option('--show-prompt', 'with --dry-run, include the system prompt and first model message')
   .action(async (goal, options) => {
     if (options.steps > 1000 || options.minutes > 1440 || options.modelTimeout > 3600) throw new Error('Limits must be <= 1000 steps, <= 1440 minutes, and a model timeout <= 3600 seconds.');
-    const { runAgent, parseAllowedActions } = await import('./agent.js');
+    if ((goal === undefined) === (options.goalFile === undefined)) throw new Error('Give the goal either as an argument or with --goal-file, not both.');
+    if (options.showPrompt && !options.dryRun) throw new Error('--show-prompt requires --dry-run.');
+    const { runAgent, parseAllowedActions, readGoalFile } = await import('./agent.js');
+    if (options.goalFile !== undefined) goal = await readGoalFile(options.goalFile);
     const allowActions = options.allowActions === undefined ? undefined : parseAllowedActions(options.allowActions);
     const adapter = await connect();
     try {
       const result = await runAgent(adapter, goal, { model: options.model, ollamaUrl: options.ollama, maxSteps: options.steps, minutes: options.minutes,
-        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, deposit: options.verifyDeposit, returnHome: options.verifyHome, minHealth: options.verifyHealth, minHunger: options.verifyHunger, destination: options.verifyAt, inventory: options.verifyInventory, maxThreats: options.verifyMaxThreats, homeRadius: options.verifyHomeRadius, maxInventory: options.verifyMaxInventory, maxDistance: options.verifyMaxDistance }, signal: abortController.signal, log,
-        dryRun: !!options.dryRun, transcript: options.transcript, maxFailures: options.maxFailures, contextTokens: options.contextTokens, history: options.history, fence: options.fence, allowActions });
+        modelTimeout: options.modelTimeout, think: options.thinking ? undefined : false, criteria: { collect: options.verifyCollect, deposit: options.verifyDeposit, returnHome: options.verifyHome, minHealth: options.verifyHealth, minHunger: options.verifyHunger, destination: options.verifyAt, inventory: options.verifyInventory, maxThreats: options.verifyMaxThreats, homeRadius: options.verifyHomeRadius, maxInventory: options.verifyMaxInventory, maxDistance: options.verifyMaxDistance, minFreeSlots: options.verifyMinFreeSlots, maxHealthLoss: options.verifyMaxHealthLoss }, signal: abortController.signal, log,
+        dryRun: !!options.dryRun, transcript: options.transcript, maxFailures: options.maxFailures, contextTokens: options.contextTokens, history: options.history, fence: options.fence, allowActions,
+        stopBelowHealth: options.stopBelowHealth, retryInvalid: options.retryInvalid, temperature: options.temperature, seed: options.seed, showPrompt: !!options.showPrompt });
       print(result);
-      if (result.status === 'criteria_unmet' || result.status === 'step_limit' && result.verification) process.exitCode = 2;
+      if (result.status === 'criteria_unmet' || result.status === 'health_stop' || result.status === 'step_limit' && result.verification) process.exitCode = 2;
     }
     finally { await adapter.close(); }
   });
@@ -313,6 +459,13 @@ program.command('models').description('List locally installed Ollama models with
     if (!models.length) log('No models are installed. Pull one with Ollama first, for example: ollama pull MODEL_NAME');
     print(models);
   });
+program.command('transcript-summary').description('Summarize a planner --transcript file offline, without connecting to Minecraft or Ollama.')
+  .argument('<file>', 'JSON Lines transcript written by agent --transcript (at most 10 MiB)')
+  .option('--run <n>', 'summarize this run (1 = first start event); default is the last run', positiveInteger)
+  .action(async (file, options) => {
+    const { readTranscript, summarizeTranscript } = await import('./transcript.js');
+    print(summarizeTranscript(await readTranscript(file), { run: options.run }));
+  });
 
 program.command('mcp').description('Expose Minecraft tools over MCP stdio for a local agent.')
   .action(async () => {
@@ -323,7 +476,7 @@ program.command('mcp').description('Expose Minecraft tools over MCP stdio for a 
 
 program.command('demo').description('Run a simulated player bridge; no Minecraft or model needed.')
   .option('--smoke', 'run a short end-to-end demonstration and exit')
-  .addOption(new Option('--scenario <name>', 'starting state: default, hungry (hunger 4, health 10), hostile (a nearby zombie), or stocked (a pre-opened chest with items)').choices(demoScenarios).default('default'))
+  .addOption(new Option('--scenario <name>', 'starting state: default, hungry (hunger 4, health 10), hostile (a nearby zombie), stocked (a pre-opened chest with items), or full (all 36 inventory slots occupied)').choices(demoScenarios).default('default'))
   .action(async options => {
     let directory;
     if (options.smoke) {
@@ -339,6 +492,8 @@ program.command('demo').description('Run a simulated player bridge; no Minecraft
     try {
       await adapter.execute({ type: 'set_home' });
       await adapter.execute({ type: 'goto', x: 5, y: 64, z: 5 });
+      // A full inventory has no slot for new logs until something is stored.
+      if (options.scenario === 'full') await adapter.execute({ type: 'deposit', item: 'sand' });
       await adapter.execute({ type: 'collect', block: 'oak_log', count: 8 });
       await adapter.execute({ type: 'deposit', item: 'oak_log', count: 8 });
       await adapter.execute({ type: 'eat' });
@@ -368,9 +523,12 @@ program.command('server').description('Connect a standalone bot to a Java server
 
 program.command('doctor').description('Check local prerequisites without connecting to Minecraft.')
   .option('--ollama <url>', 'also check a local Ollama server, for example http://127.0.0.1:11434')
+  .option('--strict', 'exit 1 unless ready is true (Node, JDK, bundle, bridge, and any requested Ollama)')
   .action(async options => {
     const { inspectPrerequisites } = await import('./doctor.js');
-    print(await inspectPrerequisites({ discoveryPath: program.opts().bridge, ollamaUrl: options.ollama }));
+    const result = await inspectPrerequisites({ discoveryPath: program.opts().bridge, ollamaUrl: options.ollama });
+    print(result);
+    if (options.strict && !result.ready) process.exitCode = 1;
   });
 
 try { await program.parseAsync(); }

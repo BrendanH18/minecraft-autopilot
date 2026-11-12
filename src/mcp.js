@@ -1,8 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { actionSchema } from './protocol.js';
-import { inventoryView, nearbyView, storageView } from './cli-views.js';
+import { actionSchema, positionSchema } from './protocol.js';
+import { inventoryView, nearbyView, storageView, summaryView, findItemView, directionView, homeTarget } from './cli-views.js';
 
 export async function serveMcp(adapter) {
   const server = new McpServer({ name: 'minecraft-agent', version: '0.1.0' });
@@ -29,6 +29,26 @@ export async function serveMcp(adapter) {
     const state = await adapter.observe();
     const options = { name, radius, limit };
     return kind === 'containers' ? storageView(state, options) : nearbyView(state, kind, options);
+  }));
+  server.registerTool('minecraft_summary', {
+    description: 'Read position, dimension, health, hunger, control mode, current job, home distance, threat count, and inventory totals without taking control.',
+    annotations: { readOnlyHint: true }, inputSchema: {},
+  }, wrap(async () => summaryView(await adapter.observe())));
+  server.registerTool('minecraft_find_item', {
+    description: 'Count an item in inventory and in last observed storage, nearest container first, without opening containers or taking control.',
+    annotations: { readOnlyHint: true }, inputSchema: { item: z.string().max(100).describe('item name, for example oak_log') },
+  }, wrap(async ({ item }) => findItemView(await adapter.observe(), item)));
+  server.registerTool('minecraft_direction', {
+    description: 'Compass bearing, yaw, pitch, and distance to a coordinate or the saved home, without moving or taking control. Pass either x, y, z or home: true.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { x: z.number().optional(), y: z.number().optional(), z: z.number().optional(), home: z.literal(true).optional() },
+  }, wrap(async ({ home, ...coordinates }) => {
+    const given = ['x', 'y', 'z'].filter(axis => coordinates[axis] !== undefined);
+    if (home ? given.length : given.length !== 3) throw new Error('Pass either x, y, and z, or home: true.');
+    const target = home ? undefined : positionSchema.safeParse(coordinates);
+    if (target && !target.success) throw new Error('Coordinates must be inside the world: Y from -64 to 320 and X/Z within ±29,999,984.');
+    const state = await adapter.observe();
+    return directionView(state, home ? homeTarget(state) : target.data);
   }));
   server.registerTool('minecraft_take_control', {
     description: 'Take exclusive control of the currently logged-in player. F8 or minecraft_stop returns control. Do this only when the user asks you to play.', inputSchema: {},

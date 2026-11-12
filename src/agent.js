@@ -103,6 +103,35 @@ export async function listModels({ ollamaUrl = 'http://127.0.0.1:11434', timeout
 const numberWords = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
 const finalView = state => state?.connected && state.player ? { position: state.player.position ?? null, health: state.player.health ?? null, hunger: state.player.hunger ?? null } : null;
 
+/** The goal rules shared by API callers and --goal-file. */
+export function validateGoal(goal) {
+  if (typeof goal !== 'string' || !goal.trim() || goal.length > 16_000) throw new Error('The goal must contain 1 to 16000 characters.');
+  return goal;
+}
+
+/** Reads a goal from a regular file without blocking on a FIFO or device; one trailing newline is dropped. */
+export async function readGoalFile(path) {
+  let file;
+  try { file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK); }
+  catch (error) { throw new Error(`Cannot read goal file ${path}: ${error.code || error.message}.`); }
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) throw new Error('The goal file must be a regular file.');
+    // 16000 UTF-16 characters need at most 48000 UTF-8 bytes, plus a CRLF.
+    if (info.size > 48_002) throw new Error('The goal must contain 1 to 16000 characters.');
+    const buffer = Buffer.alloc(48_003);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > 48_002) throw new Error('The goal must contain 1 to 16000 characters.');
+    return validateGoal(buffer.subarray(0, bytesRead).toString('utf8').replace(/\r?\n$/, ''));
+  } finally { await file.close(); }
+}
+
+/** Short, model-readable reason for an unparseable decision. */
+function invalidReason(error) {
+  const detail = error instanceof z.ZodError ? error.issues.map(issue => `${issue.path.join('.') || 'output'}: ${issue.message}`).join('; ') : error.message;
+  return `Invalid action: ${String(detail).slice(0, 300)}`;
+}
+
 async function openTranscript(path) {
   // Append only; never follow a symlink planted at the path or block on a FIFO. New files are owner-only.
   const file = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
@@ -111,8 +140,9 @@ async function openTranscript(path) {
 }
 
 export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0.0.1:11434', maxSteps = 30, minutes = 15, modelTimeout = 120, think, criteria = {}, signal, log = console.error, fetchImpl = fetch,
-  dryRun = false, transcript, maxFailures = 3, contextTokens = 8192, history: historyWindow = 12, fence, allowActions } = {}) {
-  if (typeof goal !== 'string' || !goal.trim() || goal.length > 16_000) throw new Error('The goal must contain 1 to 16000 characters.');
+  dryRun = false, transcript, maxFailures = 3, contextTokens = 8192, history: historyWindow = 12, fence, allowActions,
+  temperature = 0, seed, retryInvalid = 0, stopBelowHealth, showPrompt = false } = {}) {
+  validateGoal(goal);
   if (typeof model !== 'string' || !model.trim() || model.length > 200) throw new Error('Specify a local Ollama model with --model (1 to 200 characters).');
   if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 1000
     || !Number.isFinite(minutes) || minutes <= 0 || minutes > 1440
@@ -127,12 +157,20 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
     throw new Error('Use 1 to 10 integer failures, 2048 to 131072 integer context tokens, and an integer history of 1 to 50 decisions.');
   }
   if (fence !== undefined && !(Number.isFinite(fence) && fence >= 1 && fence <= 10_000)) throw new Error('The fence must be 1 to 10000 blocks.');
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw new Error('The temperature must be a number from 0 to 2.');
+  if (seed !== undefined && !(Number.isInteger(seed) && seed >= 0 && seed <= 2_147_483_647)) throw new Error('The seed must be an integer from 0 to 2147483647.');
+  if (!Number.isInteger(retryInvalid) || retryInvalid < 0 || retryInvalid > 5) throw new Error('Use 0 to 5 integer invalid-output retries.');
+  if (stopBelowHealth !== undefined && !(Number.isFinite(stopBelowHealth) && stopBelowHealth >= 1 && stopBelowHealth <= 19)) throw new Error('The stop-below health must be 1 to 19.');
+  if (typeof showPrompt !== 'boolean') throw new Error('showPrompt must be a boolean when supplied.');
+  if (showPrompt && !dryRun) throw new Error('showPrompt (--show-prompt) requires a dry run.');
   if (transcript !== undefined && (typeof transcript !== 'string' || !transcript.trim() || transcript.length > 4096)) throw new Error('The transcript path must contain 1 to 4096 characters.');
   const allowed = allowActions === undefined ? null : new Set(parseAllowedActions(allowActions));
   const format = allowed ? { ...decisionJsonSchema, properties: { ...decisionJsonSchema.properties, type: { enum: [...allowed, 'done'] } } } : decisionJsonSchema;
   const endpoint = ollamaEndpoint(ollamaUrl, '/api/chat');
   const started = Date.now();
   const actionCounts = {};
+  const usage = { requests: 0, promptTokens: 0, outputTokens: 0, durationNs: 0 };
+  const counted = value => Number.isFinite(value) && value >= 0 ? value : 0;
   let lastState = null;
   const observe = async () => (lastState = await adapter.observe());
   const file = transcript === undefined ? null : await openTranscript(transcript);
@@ -152,15 +190,29 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
       if (!Number.isFinite(position?.x) || !Number.isFinite(position?.z)) throw new Error('The starting position is unavailable, so the fence cannot be enforced.');
       start = { x: position.x, z: position.z };
     }
-    await note('start', { goal, model, dryRun, maxSteps, minutes, modelTimeout, maxFailures, contextTokens, history: historyWindow,
+    await note('start', { goal, model, dryRun, maxSteps, minutes, modelTimeout, maxFailures, contextTokens, history: historyWindow, temperature, ...(seed !== undefined && { seed }),
+      retryInvalid, ...(stopBelowHealth !== undefined && { stopBelowHealth }),
       ...(allowed && { allowedActions: [...allowed] }), ...(start && { fence: { ...start, radius: fence } }), criteria: objective?.description ?? null });
-    if (dryRun) return { status: 'dry_run', criteria: objective?.description ?? null, progress: objective?.check(initialState) ?? null };
+    // The one builder for what the model sees, so --show-prompt cannot drift from real requests.
+    const userMessage = (state, history) => ({ role: 'user', content: JSON.stringify({ goal, initialState, state, criteria: objective?.description, progress: objective?.check(state), history: history.slice(-historyWindow),
+      ...(allowed && { allowedActions: [...allowed, 'done'] }), ...(start && { fence: { ...start, radius: fence } }) }) });
+    if (dryRun) return { status: 'dry_run', criteria: objective?.description ?? null, progress: objective?.check(initialState) ?? null,
+      ...(showPrompt && { systemPrompt, firstMessage: userMessage(initialState, []) }) };
     bounded.throwIfAborted();
     await adapter.acquire();
     const history = [];
     let failures = 0;
     let rejectedDone = 0;
     let completed = null;
+    let invalid = 0;
+    // Health below the limit ends the task between actions; an action already running is never interrupted for it.
+    const healthStop = (state, steps) => {
+      const health = state.player?.health;
+      if (stopBelowHealth === undefined || !Number.isFinite(health) || health >= stopBelowHealth) return null;
+      log(`Health ${health} is below ${stopBelowHealth}; stopping.`);
+      return { status: 'health_stop', reason: `Health ${health} is below the stop threshold of ${stopBelowHealth}; stopped for you to take over.`, steps,
+        ...(objective && { verification: objective.check(state) }) };
+    };
     const reject = async (step, action, reason, extra) => {
       history.push({ action, rejected: reason, ...extra });
       await note('rejection', { step, action, reason });
@@ -173,6 +225,8 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
           const state = await observe();
           if (state.mode !== 'agent' || adapter.leaseError) throw adapter.leaseError || new Error('Control returned to the player.');
           if (state.recovering) { await delay(500, undefined, { signal: bounded }); continue; }
+          const weak = healthStop(state, 0);
+          if (weak) return weak;
           try {
             await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
             break;
@@ -193,19 +247,22 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
         const state = await observe();
         if (state.mode !== 'agent' || adapter.leaseError) throw adapter.leaseError || new Error('Control returned to the player.');
         if (state.recovering) { await delay(500, undefined, { signal: bounded }); step--; continue; }
+        const lowHealth = healthStop(state, step);
+        if (lowHealth) return lowHealth;
         const requestTimeout = AbortSignal.timeout(Math.ceil(modelTimeout * 1000));
         let output;
         try {
           const response = await fetchImpl(endpoint, {
             method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.any([bounded, requestTimeout]),
-            body: JSON.stringify({ model, stream: false, format, ...(think !== undefined && { think }), options: { temperature: 0, num_ctx: contextTokens }, messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: JSON.stringify({ goal, initialState, state, criteria: objective?.description, progress: objective?.check(state), history: history.slice(-historyWindow),
-                ...(allowed && { allowedActions: [...allowed, 'done'] }), ...(start && { fence: { ...start, radius: fence } }) }) },
-            ] }),
+            body: JSON.stringify({ model, stream: false, format, ...(think !== undefined && { think }),
+              options: { temperature, num_ctx: contextTokens, ...(seed !== undefined && { seed }) }, messages: [{ role: 'system', content: systemPrompt }, userMessage(state, history)] }),
           });
           if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
           output = await response.json();
+          usage.requests++;
+          usage.promptTokens += counted(output?.prompt_eval_count);
+          usage.outputTokens += counted(output?.eval_count);
+          usage.durationNs += counted(output?.total_duration);
         } catch (error) {
           bounded.throwIfAborted();
           if (requestTimeout.aborted) throw new Error(`Ollama did not answer within ${modelTimeout} seconds, so this decision was not executed; earlier actions in this task still took effect. Try --no-thinking, a smaller model, or a longer --model-timeout.`);
@@ -215,15 +272,28 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
         const content = output?.message?.content;
         if (typeof content !== 'string' || !content.trim()) throw new Error('Ollama returned no action. Try --no-thinking, a smaller model, or a longer --model-timeout.');
         if (content.length > 65_536) throw new Error('Ollama returned an oversized action (maximum 65536 characters); no action was executed.');
+        const tokens = { ...(Number.isFinite(output.prompt_eval_count) && { promptTokens: output.prompt_eval_count }), ...(Number.isFinite(output.eval_count) && { outputTokens: output.eval_count }) };
         let decision;
         try { decision = parseDecision(content); }
-        catch { throw new Error('The model returned an invalid action, so it was not executed; earlier actions in this task still took effect.'); }
+        catch (error) {
+          if (invalid++ >= retryInvalid) throw new Error('The model returned an invalid action, so it was not executed; earlier actions in this task still took effect.');
+          // The rejected output consumed a decision; the model sees why and may try again.
+          const reason = invalidReason(error);
+          history.push({ rejected: reason });
+          await note('rejection', { step: step + 1, reason, ...tokens });
+          log(`Step ${step + 1}: ${reason} (retry ${invalid} of ${retryInvalid}).`);
+          continue;
+        }
+        invalid = 0;
         // The model may have taken minutes. Recheck ownership before dispatching.
         let currentState = await observe();
         bounded.throwIfAborted();
         if (currentState.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player while the model was thinking.');
         log(`Step ${step + 1}: ${JSON.stringify(decision)}`);
-        await note('decision', { step: step + 1, decision });
+        await note('decision', { step: step + 1, decision, ...tokens });
+        // Health can fall while the model thinks; the decision is not dispatched below the threshold.
+        const hurt = healthStop(currentState, step + 1);
+        if (hurt) return hurt;
         if (decision.type === 'done') {
           let verification;
           let inspectionError;
@@ -287,6 +357,12 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
           log(`Action failed: ${error.message}`);
           if (++failures >= maxFailures) throw new Error(failureStop);
         }
+        if (stopBelowHealth !== undefined) {
+          const after = await observe();
+          if (after.mode !== 'agent' || adapter.leaseError) throw adapter.leaseError || new Error('Control returned to the player.');
+          const lowHealth = healthStop(after, step + 1);
+          if (lowHealth) return lowHealth;
+        }
       }
       // Observe after the last action so final and verification describe the end state.
       const finalState = await observe();
@@ -296,7 +372,8 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
   }
 
   try {
-    const result = { ...(await run()), durationMs: Date.now() - started, actionCounts, final: finalView(lastState) };
+    const result = { ...(await run()), durationMs: Date.now() - started, actionCounts, final: finalView(lastState),
+      model: { requests: usage.requests, promptTokens: usage.promptTokens, outputTokens: usage.outputTokens, modelMs: Math.round(usage.durationNs / 1e6) } };
     await note('finish', { result }).catch(error => log(`Could not finish the transcript: ${error.message}`));
     return result;
   } catch (error) {
