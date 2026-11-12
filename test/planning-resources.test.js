@@ -94,3 +94,17 @@ test('fractional comparisons honor inclusive reserve, delivery, quality, and cos
   assert.equal(run('durability','repair-or-replace',3,0.1,0.3).choice,'repair');
   assert.equal(run('project-cost','rent-or-buy',0.4,0.3,1,0.1).choice,'buy');
 });
+
+test('cumulative fractional wear and replenishment retain feasible prefixes',()=>{
+  const wear=Array(50).fill('.3').join(','),receipts=Array(50).fill('0').join(',');
+  assert.deepEqual(run('durability','action-prefix',15,wear,0),{actions:50,unused:0});
+  assert.deepEqual(run('durability','action-prefix',20,wear,5),{actions:50,unused:0});
+  assert.deepEqual(run('durability','action-prefix',15,`${wear},.3`,0),{actions:50,unused:0});
+  assert.equal(run('durability','action-prefix',14.99,wear,0).actions,49);
+  assert.equal(run('replenish','stockout-period',15,receipts,wear),null);
+  assert.equal(run('replenish','order-gap',15,receipts,wear).at(-1),0);
+  assert.equal(run('replenish','backorder-area',15,receipts,wear),0);
+  assert.equal(run('replenish','stockout-period',14.99,receipts,wear),50);
+  assert.equal(run('replenish','stockout-period',15,`${receipts},0`,`${wear},.001`),51);
+  close(run('replenish','order-gap',0,'1,0,0','.3,.3,.4'),[.7,.4,0]);
+});

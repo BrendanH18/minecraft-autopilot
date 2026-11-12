@@ -1,8 +1,14 @@
-import { demand, sum, same, sequence } from './offline-kit.js';
+import { demand, sum, same, sequence, compensatedAdder } from './offline-kit.js';
 import { wholeFloor, wholeCeil, budgetFits } from './resource-rounding.js';
 
 // Treat only floating-point roundoff at an arithmetic equality as zero.
 const difference = (a, b) => budgetFits(a,b) && budgetFits(b,a) ? 0 : a-b;
+
+function stockBalances(initial, deliveries, demands) {
+  same(deliveries,demands);
+  const receipts=compensatedAdder(initial),uses=compensatedAdder();
+  return deliveries.map((delivery,i)=>difference(receipts(delivery),uses(demands[i])));
+}
 
 function queue(arrivals, services) {
   same(arrivals,services);
@@ -70,10 +76,10 @@ export const RESOURCE_GROUPS = [
     { signature: "review-target <daily-demand> <lead-days> <review-days> <safety-stock>", description: "Compute target covering lead time plus periodic review and a safety amount.", types: ["q", "q", "q", "q"], run: (a,b,c,d) => { return a*(b+c)+d; } },
     { signature: "coverage-days <position> <daily-demand>", description: "Report signed coverage duration including backorders.", types: ["n", "p"], run: (a,b) => { return a/b; } },
     { signature: "order-trigger <position> <reorder-level>", description: "Test whether signed inventory position has reached the supplied trigger.", types: ["n", "q"], run: (a,b) => { return a<=b; } },
-    { signature: "order-gap <on-hand> <deliveries> <demands>", description: "Project signed closing stock after each paired receipt and demand period.", types: ["q", "L", "L"], run: (a,b,c) => { same(b,c);let v=a;return b.map((r,i)=>v=difference(v+r,c[i])); } },
-    { signature: "stockout-period <on-hand> <deliveries> <demands>", description: "Find the first one-based period with negative closing stock, or null.", types: ["q", "L", "L"], run: (a,b,c) => { same(b,c);let v=a;const i=b.findIndex((r,i)=>(v=difference(v+r,c[i]))<0);return i<0?null:i+1; } },
-    { signature: "backorder-area <on-hand> <deliveries> <demands>", description: "Sum negative closing stock magnitudes over equal-duration periods.", types: ["q", "L", "L"], run: (a,b,c) => { same(b,c);let v=a;return sum(b.map((r,i)=>Math.max(0,-(v=difference(v+r,c[i]))))); } },
-    { signature: "positive-stock-area <on-hand> <deliveries> <demands>", description: "Sum positive closing stock over equal-duration periods for holding estimates.", types: ["q", "L", "L"], run: (a,b,c) => { same(b,c);let v=a;return sum(b.map((r,i)=>Math.max(0,v=difference(v+r,c[i])))); } },
+    { signature: "order-gap <on-hand> <deliveries> <demands>", description: "Project signed closing stock after each paired receipt and demand period.", types: ["q", "L", "L"], run: (a,b,c) => stockBalances(a,b,c) },
+    { signature: "stockout-period <on-hand> <deliveries> <demands>", description: "Find the first one-based period with negative closing stock, or null.", types: ["q", "L", "L"], run: (a,b,c) => { const i=stockBalances(a,b,c).findIndex(v=>v<0);return i<0?null:i+1; } },
+    { signature: "backorder-area <on-hand> <deliveries> <demands>", description: "Sum negative closing stock magnitudes over equal-duration periods.", types: ["q", "L", "L"], run: (a,b,c) => sum(stockBalances(a,b,c).map(v=>Math.max(0,-v))) },
+    { signature: "positive-stock-area <on-hand> <deliveries> <demands>", description: "Sum positive closing stock over equal-duration periods for holding estimates.", types: ["q", "L", "L"], run: (a,b,c) => sum(stockBalances(a,b,c).map(v=>Math.max(0,v))) },
     { signature: "economic-order <annual-demand> <order-cost> <unit-holding-cost>", description: "Compute continuous economic order quantity under constant-demand assumptions.", types: ["q", "p", "p"], run: (a,b,c) => { return Math.sqrt(2*a*b/c); } },
     { signature: "orders-per-year <annual-demand> <order-quantity>", description: "Estimate continuous annual orders at a supplied lot size.", types: ["q", "p"], run: (a,b) => { return a/b; } },
     { signature: "order-cycle <order-quantity> <daily-demand>", description: "Estimate constant-demand duration between identical replenishment lots.", types: ["q", "p"], run: (a,b) => { return a/b; } },
@@ -196,7 +202,7 @@ export const RESOURCE_GROUPS = [
     { signature: "mission-return-reserve <outbound-actions> <return-actions> <wear> <contingency>", description: "Separate mission and return wear with an explicit contingency.", types: ["c", "c", "q", "q"], run: (a,b,c,d) => { return {mission:a*c,returning:b*c,total:(a+b)*c+d}; } },
     { signature: "first-insufficient-tool <durabilities> <required-wear>", description: "List one-based tools unable to cover a supplied wear budget.", types: ["L", "q"], run: (a,b) => { return a.flatMap((v,i)=>v<b?[i+1]:[]); } },
     { signature: "repair-kit-budget <durabilities> <targets> <repair-unit>", description: "Budget whole independent repair units for every tool, without sharing overfill.", types: ["L", "L", "p"], run: (a,b,c) => { same(a,b);return {units:a.map((v,i)=>wholeCeil(Math.max(0,b[i]-v)/c)),total:sum(a.map((v,i)=>wholeCeil(Math.max(0,b[i]-v)/c)))}; } },
-    { signature: "action-prefix <remaining> <action-wear> <reserve>", description: "Count the longest source-order action prefix fitting available durability.", types: ["q", "L", "q"], run: (a,b,c) => { let left=Math.max(0,a-c),n=0;for(const v of b){if(!budgetFits(v,left))break;left=Math.max(0,left-v);n++;}return {actions:n,unused:left}; } },
+    { signature: "action-prefix <remaining> <action-wear> <reserve>", description: "Count the longest source-order action prefix fitting available durability.", types: ["q", "L", "q"], run: (a,b,c) => { const available=Math.max(0,a-c),add=compensatedAdder();let used=0,n=0;for(const v of b){const next=add(v);if(!budgetFits(next,available))break;used=next;n++;}return {actions:n,unused:Math.max(0,difference(available,used))}; } },
   ] },
   { name: "harvest", note: "Offline repeated-harvest estimates from supplied yields, timings, replant needs, and losses. No crop rules or growth probabilities are assumed.", commands: [
     { signature: "net-cycle-yield <gross> <replant> <loss>", description: "Compute signed net harvest after per-cycle replant and explicit loss.", types: ["q", "q", "q"], run: (a,b,c) => { return a-b-c; } },
