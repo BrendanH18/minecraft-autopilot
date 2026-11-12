@@ -127,6 +127,23 @@ test('stop-below-health ends the task before a decision or after an action and r
   const baseline = await runAgent(storing, 'Store', { ...quiet, stopBelowHealth: 6, criteria: { deposit: { item: 'oak_log', count: 1 } }, fetchImpl: async () => { throw new Error('No model call expected.'); } });
   assert.deepEqual([baseline.status, baseline.steps, storing.actions.length, storing.releases], ['health_stop', 0, 0, 1]);
 
+  // Health that falls during the final storage verification stops instead of reporting success.
+  const verifying = fakeAdapter();
+  verifying.state.containers = [{ x: 0, y: 64, z: 1, items: [] }];
+  const execute = verifying.execute.bind(verifying);
+  let inspections = 0;
+  // The final inspection finds the deposit (so criteria pass) while health has fallen.
+  verifying.execute = async action => {
+    if (action.type === 'inspect_storage' && ++inspections === 2) {
+      verifying.state.player.health = 4;
+      verifying.state.containers[0].items = [{ name: 'minecraft:oak_log', count: 1 }];
+    }
+    return execute(action);
+  };
+  const final = await runAgent(verifying, 'Store', { ...quiet, stopBelowHealth: 8, criteria: { deposit: { item: 'oak_log', count: 1 } },
+    fetchImpl: scripted([{ type: 'done', reason: 'Stored.' }]) });
+  assert.deepEqual([final.status, final.steps, inspections, verifying.releases], ['health_stop', 1, 2, 1]);
+
   const fine = fakeAdapter();
   const unaffected = await runAgent(fine, 'Wait', { ...quiet, stopBelowHealth: 14, fetchImpl: scripted([{ type: 'wait', seconds: 1 }, { type: 'done', reason: 'Waited.' }]) });
   assert.equal(unaffected.status, 'model_finished', 'health equal to the threshold continues');

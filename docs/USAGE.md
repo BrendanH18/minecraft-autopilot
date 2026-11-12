@@ -517,7 +517,7 @@ file (FIFOs and devices are refused without blocking); one trailing newline is d
 rest must contain 1 to 16000 characters.
 
 `--stop-below-health` is checked before the deposit baseline inspection, before each model decision
-(after any automatic recovery finishes), again before dispatching the decision the model returned,
+(after any automatic recovery finishes), again before dispatching the decision the model returned, after final storage verification,
 and after each action. It never interrupts a running action. When health is below
 the threshold, the planner releases control and returns `status: "health_stop"` with a reason
 naming the health, plus `verification` when criteria were given; the CLI exits 2. Unavailable

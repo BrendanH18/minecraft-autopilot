@@ -258,7 +258,7 @@ test('wait-idle waits for a running job, reports what is busy on timeout, and ho
   assert.ok(quiet.waitedMs < 1000);
   const adapter = await FabricAdapter.connect(discoveryPath);
   t.after(() => adapter.close());
-  const job = adapter.execute({ type: 'wait', seconds: 2 });
+  const job = adapter.execute({ type: 'wait', seconds: 5 });
   while (harness.job?.status !== 'running') await new Promise(resolve => setTimeout(resolve, 20));
   const before = acquires();
   const waiting = run('wait-idle', '--timeout', '10');

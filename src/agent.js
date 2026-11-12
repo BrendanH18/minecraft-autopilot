@@ -309,6 +309,8 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
             currentState = await observe();
             bounded.throwIfAborted();
             if (currentState.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player during storage verification.');
+            const hurtVerifying = healthStop(currentState, step + 1);
+            if (hurtVerifying) return hurtVerifying;
           }
           verification = objective?.check(currentState, { storageRefreshed: !!criteria.deposit && !inspectionError });
           if (inspectionError) {
