@@ -179,3 +179,12 @@ The [100 batch 6 additions](docs/IMPROVEMENTS.md#batch-6-100-logistics-terrain-r
 provide [logistics](docs/LOGISTICS.md), [terrain observations](docs/TERRAIN.md),
 [offline routine auditing](docs/ROUTINE-AUDIT.md), and
 [snapshot timelines](docs/TIMELINE.md). Run `mc-agent GROUP --help` for commands.
+
+The next [100 batch 7 additions](docs/IMPROVEMENTS.md#batch-7-100-expedition-blueprint-checkpoint-and-composition-additions)
+provide [expedition budgets](docs/EXPEDITION.md),
+[construction material estimates](docs/BLUEPRINT.md),
+[saved-snapshot checks](docs/CHECKPOINT.md), and
+[routine composition](docs/COMPOSE.md), with 25 commands per group.
+Expedition reads one observation; the other three groups run offline.
+Construction and production plans are estimates; gameplay building and crafting
+remain future work. Generated routines print validated JSON for review before execution.

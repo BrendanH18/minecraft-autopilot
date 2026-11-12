@@ -6,6 +6,12 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 100 CLI additions for read-only expedition budgets, offline construction
+  material estimates, saved-snapshot predicates, and validated routine
+  composition; see [batch 7](docs/IMPROVEMENTS.md#batch-7-100-expedition-blueprint-checkpoint-and-composition-additions).
+  Each addition has behavioral and real CLI process coverage. Existing live
+  Fabric and authenticated-handoff acceptance gates remain open.
+
 - 100 more CLI tools for multi-item stock planning, spatial observation queries, route geometry, and validated routine editing; see [batch 5](docs/IMPROVEMENTS.md#batch-5-100-stock-spatial-geometry-and-workbench-additions).
 
 - 100 CLI additions across inventory/storage reports, world surveys, offline navigation, and routine tooling; see [batch 4](docs/IMPROVEMENTS.md#batch-4-100-planning-and-reporting-additions).
