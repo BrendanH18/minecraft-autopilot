@@ -118,3 +118,16 @@ test('all 25 Commander entry points dispatch their matching read-only view', asy
     assert.equal(program.commands[0].commands.length, 25);
   }
 });
+
+test('live backend category filters distinguish unavailable scans from no matches', () => {
+  for (const backend of ['fabric', 'mineflayer']) {
+    for (const name of ['ores', 'hazards', 'liquids']) {
+      const input = state(); input.backend = backend;
+      input.blocks = [{ name: 'minecraft:oak_log', x: 0, y: 64, z: 0 }];
+      const result = surveyView(input, name);
+      assert.equal(result.supported, false);
+      assert.deepEqual(result.blocks, []);
+      assert.match(result.reason, /only report collection targets/);
+    }
+  }
+});

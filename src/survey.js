@@ -55,7 +55,13 @@ export function surveyView(state, report, { now = Date.now() } = {}) {
     const entries = collection(field).filter(located);
     return observed(field, { groups: group(entries, entry => headingBetween(position, entry).compass ?? 'same_column'), unlocated: collection(field).length - entries.length });
   };
-  const selectedBlocks = predicate => observed('blocks', { blocks: measured('blocks').filter(entry => predicate(entry.name)) });
+  const selectedBlocks = predicate => {
+    if (['ores', 'hazards', 'liquids'].includes(report) && ['fabric', 'mineflayer'].includes(state.backend)) {
+      return { supported: false, scope: 'partial_observation', blocks: [],
+        reason: 'Current Fabric and Mineflayer backends only report collection targets; ores, hazards, and liquids are unavailable from these observations.' };
+    }
+    return observed('blocks', { blocks: measured('blocks').filter(entry => predicate(entry.name)) });
+  };
   switch (report) {
     case 'block-position': return { block };
     case 'chunk': return { x: Math.floor(block.x / 16), z: Math.floor(block.z / 16), localX: local(block.x, 16), localZ: local(block.z, 16) };

@@ -2,6 +2,12 @@
 
 `mc-agent survey <report>` takes one observation without acquiring control or changing the world. Global `--bridge` and `--json` options work normally. Coordinates refer to the currently observed dimension. Reports operate on the backend's partial, loaded observations; an absent collection is `supported: false`, distinct from an empty reported collection. No report proves that an area is safe or exhaustively scanned.
 
+Current Fabric and Mineflayer block observations only include supported collection
+targets. Consequently `ores`, `hazards`, and `liquids` return `supported: false`
+with an explanation on these backends, even beside matching blocks. These three
+filters can process observations containing broader block data, but the current
+live backends cannot supply it. Empty output does not mean no dangers or ores.
+
 The 25 additions are:
 
 1. `block-position`: floor fractional player coordinates to the occupied block, including negative coordinates.
