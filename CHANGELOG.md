@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 100 more CLI tools for multi-item stock planning, spatial observation queries, route geometry, and validated routine editing; see [batch 5](docs/IMPROVEMENTS.md#batch-5-100-stock-spatial-geometry-and-workbench-additions).
+
 - 100 CLI additions across inventory/storage reports, world surveys, offline navigation, and routine tooling; see [batch 4](docs/IMPROVEMENTS.md#batch-4-100-planning-and-reporting-additions).
 
 - Ten focused CLI commands, six final-state verification criteria/options, and planner/storage reliability improvements; see [the 30-change inventory](docs/IMPROVEMENTS.md#batch-1-cli-verification-and-planner-improvements).

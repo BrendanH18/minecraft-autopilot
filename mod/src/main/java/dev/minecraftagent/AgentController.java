@@ -500,7 +500,9 @@ public final class AgentController {
             state.add("home", homes.get(identity()));
             JsonArray threats = new JsonArray();
             for (HostileEntity entity : client.world.getEntitiesByClass(HostileEntity.class, client.player.getBoundingBox().expand(16), entity -> entity.isAlive())) {
-                JsonObject threat = new JsonObject(); threat.addProperty("type", Registries.ENTITY_TYPE.getId(entity.getType()).toString()); threat.addProperty("distance", entity.distanceTo(client.player)); threats.add(threat);
+                JsonObject threat = new JsonObject(); threat.addProperty("type", Registries.ENTITY_TYPE.getId(entity.getType()).toString()); threat.addProperty("distance", entity.distanceTo(client.player));
+                threat.addProperty("x", entity.getX()); threat.addProperty("y", entity.getY()); threat.addProperty("z", entity.getZ());
+                threats.add(threat);
                 if (threats.size() >= 16) break;
             }
             state.add("threats", threats);

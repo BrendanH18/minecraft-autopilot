@@ -33,3 +33,35 @@ test('all 50 observation CLI additions traverse the authenticated bridge without
   assert.deepEqual(after.inventory, before.inventory);
   assert.deepEqual(after.containers, before.containers);
 });
+
+test('new spatial and stock reports cross the bridge during another controller lease', { timeout: 60000 }, async t => {
+  const { SCENE_COMMANDS } = await import('../src/scene-tools.js');
+  const { STOCK_COMMANDS } = await import('../src/stock-tools.js');
+  const directory = await testDirectory(t), discoveryPath = join(directory, 'bridge.json');
+  const harness = new Harness(new DemoDriver({ scenario: 'stocked' }), { leaseMs: 120000 });
+  const bridge = await startBridge(harness, { discoveryPath });
+  t.after(() => bridge.close());
+  // Establish home before the observer exercises home-relative reports.
+  const owner = '11111111-1111-4111-8111-111111111111';
+  harness.acquire(owner);
+  harness.start(owner, { type: 'set_home' });
+  await harness.task;
+  harness.job = null;
+  const before = await harness.observe();
+  const stock = { 'kit-check': ['oak_log=8'], 'kit-restock': ['oak_log=8'], 'kit-deposit': ['oak_log=8'],
+    'kit-capacity': ['oak_log=8'], 'kit-trips': ['oak_log=8'], 'kit-scale': ['2', 'oak_log=8'], 'least-stocked': ['5'],
+    'count-range': ['0', '100'], only: ['oak_log'], exclude: ['oak_log'], 'food-portions': ['10'], 'food-duration': ['10'],
+    'storage-within': ['16'], 'storage-older': ['60'], 'source-plan': ['oak_log', '8'], 'stack-fill': ['50'] };
+  for (const [group, commands] of [['stock', STOCK_COMMANDS], ['scene', SCENE_COMMANDS]]) for (const [sig] of commands) {
+    const name = sig.split(' ')[0]; let args = stock[name] ?? [];
+    if (group === 'scene') {
+      const kind = name.split('-').at(-1);
+      args = ({ box: ['-16,0,-16', '16,100,16'], layer: ['60', '70'], chunk: ['0', '0'], around: ['0,64,0', '16'], home: ['16'], shell: ['0', '16'] })[kind] ?? (name === 'block-clearance' ? ['oak_log'] : []);
+    }
+    const { stdout, stderr } = await exec(process.execPath, ['src/cli.js', '--bridge', discoveryPath, '--json', group, name, '--', ...args]);
+    assert.ok(JSON.parse(stdout), `${group} ${name}`); assert.equal(stderr, '');
+  }
+  const after = await harness.observe();
+  assert.equal(after.mode, before.mode); assert.equal(harness.owner, owner); assert.equal(after.job, null); assert.deepEqual(after.player, before.player);
+  assert.deepEqual(after.inventory, before.inventory); assert.deepEqual(after.containers, before.containers);
+});

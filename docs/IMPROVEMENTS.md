@@ -193,3 +193,24 @@ exercises all new verification flags together and verifies step-limit exit code 
 The full Node suite, syntax check, and demo smoke exercise the integrated change.
 These checks use a simulation and local fake Ollama responses; they do not extend the project's
 recorded real-game or real-model acceptance claims in [development](DEVELOPMENT.md#validation).
+
+## Batch 5: 100 stock, spatial, geometry, and workbench additions
+
+This batch adds 100 independently callable CLI commands, in four groups of 25.
+The numbered inventories, arguments, examples, and limitations are in:
+
+- [Stock planning: additions 1–25](STOCK.md)
+- [Spatial observation queries: additions 26–50](SCENE.md) (local numbering 1–25)
+- [Geometry: additions 51–75](GEOMETRY.md) (local numbering 1–25)
+- [Routine workbench: additions 76–100](WORKBENCH.md) (local numbering 1–25)
+
+Stock and scene consume one observation without acquiring a control lease or opening
+containers. Geometry and workbench run offline. Routine outputs are revalidated
+against the existing action protocol before being printed, and never executed.
+No new backend capability or live acceptance claim is introduced.
+
+Focused tests check each command's results, registration, and invalid inputs.
+`test/feature-cli.test.js` also sends all 50 new observation commands through the
+authenticated demo bridge while another controller owns the lease, checking that
+player state, inventory, storage, and ownership remain unchanged. The full Node
+suite, syntax check, and demo smoke cover integration.
