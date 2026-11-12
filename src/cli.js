@@ -19,6 +19,11 @@ import { waypointFile, waypointName, dimensionId, readWaypoints, writeWaypoints,
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { registerSupplies } from './supplies.js';
+import { registerSurvey } from './survey.js';
+import { registerNavigation } from './navigation.js';
+import { registerRoutineTools } from './routine-tools.js';
+
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
   .option('--bridge <file>', 'bridge discovery file', bridgeFile).option('--json', 'print machine-readable results');
@@ -535,6 +540,11 @@ program.command('doctor').description('Check local prerequisites without connect
     print(result);
     if (options.strict && !result.ready) process.exitCode = 1;
   });
+
+registerSupplies(program, { view, print });
+registerSurvey(program, { view, print });
+registerNavigation(program, { print });
+registerRoutineTools(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {
