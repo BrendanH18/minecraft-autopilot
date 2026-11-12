@@ -16,7 +16,7 @@ function union(rows) {
 const measure = rows => sum(rows.map(([a,b])=>b-a));
 const gaps = rows => pairs(union(rows)).map(([a,b])=>[a[1],b[0]]);
 function clip(rows,lo,hi) { demand(lo<=hi,'Lower bound exceeds upper bound.'); return union(rows).filter(([a,b])=>b>=lo&&a<=hi).map(([a,b])=>[Math.max(a,lo),Math.min(b,hi)]); }
-function exclude(rows,lo,hi) { demand(lo<=hi);if(lo===hi)return union(rows);return union(rows).flatMap(([a,b])=>b<=lo||a>=hi?[[a,b]]:[...(a<lo?[[a,lo]]:[]),...(b>hi?[[hi,b]]:[])]); }
+function exclude(rows,lo,hi) { demand(lo<=hi);if(lo===hi)return union(rows);return union(rows).flatMap(([a,b])=>b<=lo||a>=hi?[[a,b]]:[...(a<=lo?[[a,lo]]:[]),...(b>=hi?[[hi,b]]:[])]); }
 function quantile(rows,f) { const u=union(rows);let left=measure(u)*f; for(const [a,b] of u){if(left<=b-a)return a+left;left-=b-a;}return u.at(-1)[1]; }
 function schedule(ds) { const add=compensatedAdder();let t=0;return ds.map((d,index)=>{const start=t;t=add(d);return {index,start,end:t,duration:d};}); }
 function graph(n,edges) {
@@ -35,6 +35,7 @@ function nearest(p,x,z){return p.map((v,index)=>({index,distance:Math.hypot(v[0]
 function segments(p){return pairs(p).map(([a,b])=>Math.hypot(b[0]-a[0],b[1]-a[1]));}
 function profile(v,spacing){return pairs(v).map(([a,b])=>(b-a)/spacing);}
 function windowSum(v,k){demand(k<=v.length,'Window exceeds list length.');return sequence(v.length-k+1,i=>sum(v.slice(i,i+k)));}
+function cyclePhase(period,time) { const cycles=time/period;return wholeFloor(cycles)===wholeCeil(cycles)?0:((time%period)+period)%period; }
 function patrolTime(length,speed,rest,laps){return laps*(length/speed+rest);}
 export const COORDINATION_GROUPS=[];
 
@@ -304,7 +305,7 @@ patrol.commands.push({signature:"moving-time <length> <speed> <laps>",types:["q"
 patrol.commands.push({signature:"distance <length> <laps>",types:["q", "c"],description:"Total distance over whole laps.",run:(l,n)=>l*n});
 patrol.commands.push({signature:"fit-laps <length> <speed> <rest> <budget>",types:["q", "p", "q", "q"],description:"Count complete movement-plus-rest cycles fitting a time budget.",run:(l,s,r,b)=>{demand(l/s+r>0);return wholeFloor(b/(l/s+r));}});
 patrol.commands.push({signature:"last-rest-free <length> <speed> <rest> <laps>",types:["q", "p", "q", "c"],description:"Budget laps with no rest after the final lap.",run:(l,s,r,n)=>n?patrolTime(l,s,r,n)-r:0});
-patrol.commands.push({signature:"phase <period> <time>",types:["p", "n"],description:"Normalize a timestamp to a cycle phase in time units.",run:(p,t)=>((t%p)+p)%p});
+patrol.commands.push({signature:"phase <period> <time>",types:["p", "n"],description:"Normalize a timestamp to a cycle phase in time units.",run:(p,t)=>cyclePhase(p,t)});
 patrol.commands.push({signature:"cycle-index <period> <time>",types:["p", "q"],description:"Zero-based cycle index at a nonnegative timestamp.",run:(p,t)=>wholeFloor(t/p)});
 patrol.commands.push({signature:"next-pass <period> <phase> <time>",types:["p", "q", "q"],description:"First pass at supplied phase at or after time; phase must be below period.",run:(p,f,t)=>{demand(f<p);return f+Math.max(0,wholeCeil((t-f)/p))*p;}});
 patrol.commands.push({signature:"wait-pass <period> <phase> <time>",types:["p", "q", "q"],description:"Delay until the next pass at a supplied valid phase.",run:(p,f,t)=>{demand(f<p);return f+Math.max(0,wholeCeil((t-f)/p))*p-t;}});
@@ -315,5 +316,5 @@ patrol.commands.push({signature:"stagger-gap <period> <patrollers>",types:["p", 
 patrol.commands.push({signature:"required-patrollers <period> <max-gap>",types:["p", "p"],description:"Minimum ideal equally spaced patrollers for a pass-gap target.",run:(p,g)=>wholeCeil(p/g)});
 patrol.commands.push({signature:"watch-share <period> <duration> <patrollers>",types:["p", "q", "s"],description:"Ideal covered time fraction under evenly staggered identical watch intervals.",run:(p,d,n)=>Math.min(1,d*n/p)});
 patrol.commands.push({signature:"checkpoint-phase <length> <speed> <distance>",types:["p", "p", "q"],description:"Arrival phase at a loop checkpoint; distance must fit loop.",run:(l,s,d)=>{demand(d<=l);return d/s;}});
-patrol.commands.push({signature:"position <length> <speed> <rest> <time>",types:["p", "p", "q", "q"],description:"Loop distance at a timestamp; rest holds position at loop end.",run:(l,s,r,t)=>{const p=l/s+r,phase=t%p;return Math.min(l,phase*s);}});
-patrol.commands.push({signature:"state <length> <speed> <rest> <time>",types:["p", "p", "q", "q"],description:"Classify movement or end-of-loop rest at timestamp.",run:(l,s,r,t)=>t%(l/s+r)<l/s?"moving":"resting"});
+patrol.commands.push({signature:"position <length> <speed> <rest> <time>",types:["p", "p", "q", "q"],description:"Loop distance at a timestamp; rest holds position at loop end.",run:(l,s,r,t)=>{const p=l/s+r,phase=cyclePhase(p,t);return Math.min(l,phase*s);}});
+patrol.commands.push({signature:"state <length> <speed> <rest> <time>",types:["p", "p", "q", "q"],description:"Classify movement or end-of-loop rest at timestamp.",run:(l,s,r,t)=>!budgetFits(l/s,cyclePhase(l/s+r,t))?"moving":"resting"});

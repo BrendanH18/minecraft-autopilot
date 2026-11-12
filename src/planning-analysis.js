@@ -2,7 +2,7 @@ import { demand, sum, same, sequence, compensatedAdder } from './offline-kit.js'
 import { wholeCeil, budgetFits } from './resource-rounding.js';
 
 // Pure calculations on caller-supplied measurements. No data is fetched.
-const mean = a => sum(a) / a.length;
+const mean = a => a[0] + sum(a.map(v => v - a[0])) / a.length;
 const sorted = a => [...a].sort((x, y) => x - y);
 function quantile(a, p) { const s = sorted(a), at = (s.length - 1) * p, lo = Math.floor(at); return s[lo] + (s[Math.ceil(at)] - s[lo]) * (at - lo); }
 const variance = a => { const m = mean(a); return mean(a.map(v => (v - m) ** 2)); };
@@ -203,10 +203,10 @@ export const ANALYSIS_GROUPS = [
     command("geometric-quantile <fraction> <chance>", "r r", "Find one-based geometric quantile; zero fraction returns one.", (q,p)=>{demand(p>0);if(p===1||q===0)return 1;demand(q<1);return Math.max(1,wholeCeil(Math.log1p(-q)/Math.log1p(-p)));}),
     command("expected-value <outcomes> <probabilities>", "l L", "Compute weighted expectation for explicit probabilities summing to one.", (a,p)=>{same(a,p);probabilityWeights(p);return sum(a.map((v,i)=>v*p[i]));}),
     command("outcome-variance <outcomes> <probabilities>", "l L", "Compute variance of an explicitly supplied discrete distribution.", (a,p)=>{same(a,p);probabilityWeights(p);const m=sum(a.map((v,i)=>v*p[i]));return sum(a.map((v,i)=>p[i]*(v-m)**2));}),
-    command("expected-utility <outcomes> <probabilities> <risk>", "l L p", "Average negative exponential utility under explicit outcome probabilities and supplied risk scale.", (a,p,r)=>{same(a,p);probabilityWeights(p);return -sum(a.map((v,i)=>p[i]*Math.exp(-v/r)));}),
+    command("expected-utility <outcomes> <probabilities> <risk>", "l L p", "Average negative exponential utility under explicit outcome probabilities and supplied risk scale.", (a,p,r)=>{same(a,p);probabilityWeights(p);return -sum(a.map((v,i)=>p[i]===0?0:p[i]*Math.exp(-v/r)));}),
     command("conditional <intersection> <condition>", "r r", "Divide intersection probability by a positive condition probability, checking consistency.", (i,c)=>{demand(c>0&&i<=c);return i/c;}),
     command("bayes <prior> <likelihood> <false-positive>", "r r r", "Compute posterior from prior, true likelihood, and alternative likelihood.", (p,l,f)=>divide(p*l,p*l+(1-p)*f)),
-    command("union <first> <second> <intersection>", "r r r", "Calculate union chance with intersection consistency bounds.", (a,b,i)=>{demand(i<=Math.min(a,b)&&i>=Math.max(0,a+b-1));return a+b-i;}),
+    command("union <first> <second> <intersection>", "r r r", "Calculate union chance with intersection consistency bounds.", (a,b,i)=>{demand(i<=Math.min(a,b)&&budgetFits(Math.max(0,a+b-1),i));return Math.min(1,a+b-i);}),
     command("odds <chance>", "r", "Convert probability below one to odds in favor.", p=>divide(p,1-p)),
     command("from-odds <odds>", "q", "Convert nonnegative odds in favor to a probability.", o=>o/(1+o)),
     command("risk-ratio <first-chance> <second-chance>", "r r", "Divide first risk by a positive comparison risk.", (a,b)=>divide(a,b)),
@@ -277,14 +277,14 @@ export const ANALYSIS_GROUPS = [
     command("seasonal-repeat <values> <period> <horizon>", "l s c", "Repeat the final supplied season cyclically for a bounded horizon.", (a,p,h)=>{demand(p<=a.length);return sequence(h,i=>a[a.length-p+i%p]);}),
     command("seasonal-drift <values> <period> <horizon>", "l s c", "Repeat final season with average per-season drift between the last two complete seasons.", (a,p,h)=>{demand(2*p<=a.length);const d=mean(a.slice(-p))-mean(a.slice(-2*p,-p));return sequence(h,i=>a[a.length-p+i%p]+(Math.floor(i/p)+1)*d);}),
     command("constant-rate <start> <rate> <times>", "n n L", "Project a supplied starting quantity using a fixed signed rate at nonnegative elapsed times.", (s,r,t)=>t.map(v=>s+r*v)),
-    command("compound <start> <factor> <periods>", "q q C", "Project a nonnegative starting quantity under a supplied multiplicative factor.", (s,f,t)=>t.map(v=>s*f**v)),
+    command("compound <start> <factor> <periods>", "q q C", "Project a nonnegative starting quantity under a supplied multiplicative factor.", (s,f,t)=>t.map(v=>s===0?0:s*f**v)),
     command("bounded-growth <start> <rate> <capacity> <times>", "q q q L", "Project linear nonnegative growth capped at supplied capacity; start must fit.", (s,r,c,t)=>{demand(s<=c);return t.map(v=>Math.min(c,s+r*v));}),
     command("depletion <stock> <consumption-rate> <times>", "q q L", "Project remaining stock under fixed use, floored at zero.", (s,r,t)=>t.map(v=>Math.max(0,s-r*v))),
     command("time-to-target <start> <target> <rate>", "n n n", "Compute nonnegative time for a fixed signed rate to reach a target; impossible direction rejected.", (s,t,r)=>{if(s===t)return 0;const time=divide(t-s,r);demand(time>=0);return time;}),
     command("time-to-empty <stock> <use-rate>", "q p", "Compute continuous stock exhaustion time under fixed positive use.", (s,r)=>s/r),
     command("reorder-time <stock> <threshold> <use-rate>", "q q p", "Compute time to reach a reorder threshold under fixed use, zero if already at or below it.", (s,t,r)=>Math.max(0,s-t)/r),
     command("exponential-decay <start> <half-life> <times>", "q p L", "Project a supplied quantity using an explicit positive half-life.", (s,h,t)=>t.map(v=>s*2**(-v/h))),
-    command("doubling <start> <doubling-time> <times>", "q p L", "Project a quantity using an explicit positive doubling time.", (s,d,t)=>t.map(v=>s*2**(v/d))),
+    command("doubling <start> <doubling-time> <times>", "q p L", "Project a quantity using an explicit positive doubling time.", (s,d,t)=>t.map(v=>s===0?0:s*2**(v/d))),
     command("logistic <start> <capacity> <rate> <times>", "p p q L", "Project a deterministic logistic curve with supplied positive start and capacity.", (s,c,r,t)=>{demand(s<=c);return t.map(v=>c/(1+(c/s-1)*Math.exp(-r*v)));}),
     command("damped-trend <level> <trend> <damping> <horizon>", "n n r c", "Accumulate a geometrically damped supplied trend through future steps.", (l,t,d,h)=>{let v=l;return sequence(h,i=>v+=t*d**(i+1));}),
     command("level-trend <level> <trend> <horizon>", "n n c", "Extend explicit fitted level and trend without re-estimating parameters.", (l,t,h)=>sequence(h,i=>l+t*(i+1))),

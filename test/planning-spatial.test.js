@@ -96,3 +96,16 @@ test('hip roofs account for all faces and tunnel passages exclude both endpoints
   assert.equal(calculation('tunnel','cross-passages',['1','5','3','2','3']),0);
   assert.equal(calculation('tunnel','cross-passages',['2','1','3','2','3']),0);
 });
+
+test('nonzero subnormal vectors normalize without reciprocal overflow', () => {
+  assert.deepEqual(calculation('vector','normalize',['[[1e-320,0,0]]']),[[1,0,0]]);
+  assert.throws(() => calculation('vector','normalize',['[[0,0,0]]']));
+});
+
+test('voxel overlap scalar accepts individually bounded sets with larger unions', () => {
+  const first=JSON.stringify(Array.from({length:1000},(_,i)=>[i,0,0]));
+  const second=JSON.stringify(Array.from({length:1000},(_,i)=>[i+1000,0,0]));
+  assert.equal(calculation('voxel','overlap-fraction',[first,second]),0);
+  assert.equal(calculation('voxel','overlap-fraction',[first,first]),1);
+  assert.throws(() => calculation('voxel','union',[first,second]));
+});

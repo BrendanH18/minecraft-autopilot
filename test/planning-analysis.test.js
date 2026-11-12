@@ -114,3 +114,23 @@ test('forecast inventory paths allow decimal depletion but reject real shortages
     assert.throws(() => run('forecast','inventory-path',['.999',receipts,uses]));
   }
 });
+
+test('constant decimal measurements have no variance without erasing real variation', () => {
+  assert.throws(() => run('series','standardize',['.1,.1,.1']));
+  assert.throws(() => run('association','pearson',['.1,.1,.1','.1,.1,.1']));
+  close(run('series','center',['.1,.1,.1']),[0,0,0]);
+  const values=run('series','standardize',['.1,.100000000001,.100000000002']);
+  assert.ok(values[0]<0 && values[2]>0 && values.every(Number.isFinite));
+});
+
+test('probability arithmetic respects zero-weight outcomes and consistent boundaries', () => {
+  close(run('probability','expected-utility',['-1000,1','0,1','1']),-Math.exp(-1));
+  assert.equal(run('probability','union',['.8','.4','.2']),1);
+  assert.throws(() => run('probability','union',['.8','.4','.19']));
+});
+
+test('zero quantity remains zero even when its unused growth factor overflows', () => {
+  assert.deepEqual(run('forecast','compound',['0','2','1024']),[0]);
+  assert.deepEqual(run('forecast','doubling',['0','1','1024']),[0]);
+  assert.throws(() => run('forecast','compound',['1','2','1024']));
+});

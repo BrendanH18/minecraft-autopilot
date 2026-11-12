@@ -108,3 +108,8 @@ test('cumulative fractional wear and replenishment retain feasible prefixes',()=
   assert.equal(run('replenish','stockout-period',15,`${receipts},0`,`${wear},.001`),51);
   close(run('replenish','order-gap',0,'1,0,0','.3,.3,.4'),[.7,.4,0]);
 });
+
+test('queue wait thresholds include decimal equality without hiding real excess',()=>{
+  assert.deepEqual(run('queueplan','wait-threshold','0,0,0','.1,.2,.1',.3),[]);
+  assert.deepEqual(run('queueplan','wait-threshold','0,0,0','.1,.2,.1',.299),[3]);
+});

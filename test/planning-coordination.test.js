@@ -82,3 +82,20 @@ test('decimal completion and arrival comparisons agree at inclusive boundaries',
   assert.equal(calc('shiftplan','completed-at',[durations,'299.999']),999);
   assert.equal(calc('shiftplan','active-at',[durations,'299.999']),999);
 });
+
+test('excluding an open interval retains coincident closed endpoints', () => {
+  assert.deepEqual(calc('interval-set','exclude',['[[0,3]]','0','3']),[[0,0],[3,3]]);
+  assert.deepEqual(calc('interval-set','exclude',['[[0,3]]','0','4']),[[0,0]]);
+  assert.deepEqual(calc('interval-set','exclude',['[[0,3]]','-1','3']),[[3,3]]);
+  assert.deepEqual(calc('interval-set','exclude',['[[0,3]]','-1','4']),[]);
+});
+
+test('decimal patrol cycle boundaries agree on phase, position, and state', () => {
+  assert.equal(calc('patrol','phase',['.2','.6']),0);
+  assert.equal(calc('patrol','phase',['.2','-.6']),0);
+  assert.equal(calc('patrol','position',['1','10','.1','.6']),0);
+  assert.equal(calc('patrol','state',['1','10','.1','.6']),'moving');
+  assert.equal(calc('patrol','state',['1','10','.1','.3']),'resting');
+  assert.equal(calc('patrol','state',['1','10','.1','.5999']),'resting');
+  assert.ok(calc('patrol','phase',['.2','.5999'])>.19);
+});

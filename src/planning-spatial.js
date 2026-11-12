@@ -7,7 +7,7 @@ const mulV=(a,s)=>a.map(v=>v*s);
 const dot=(a,b)=>sum(a.map((v,i)=>v*b[i]));
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const norm=a=>Math.hypot(...a);
-function unit(a){const n=norm(a);demand(n>0,'A direction must be nonzero.');return mulV(a,1/n);}
+function unit(a){const n=norm(a);demand(n>0,'A direction must be nonzero.');return a.map(v=>v/n);}
 function one(a){demand(a.length===1,'Supply exactly one point.');return a[0];}
 function pair(a,b,fn){same(a,b);return a.map((v,i)=>fn(v,b[i]));}
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -79,7 +79,7 @@ export const SPATIAL_GROUPS = [
     command("slice-y <cells> <y>", ["points3", "i"], "Extract one horizontal integer layer.", (a,y)=>cells(a).filter(v=>v[1]===y)),
     command("clip-box <cells> <corners>", ["points3", "points3"], "Clip cells to two ordered inclusive cuboid corners.", (a,b)=>{const [lo,hi]=box(b);return cells(a).filter(v=>v.every((n,i)=>n>=lo[i]&&n<=hi[i]));}),
     command("fill-box <corners>", ["points3"], "Enumerate all integer cells between two ordered corners.", a=>{const [lo,hi]=box(a),d=hi.map((v,i)=>v-lo[i]+1);return sequence(d[0]*d[1]*d[2],i=>[lo[0]+i%d[0],lo[1]+wholeFloor(i/d[0])%d[1],lo[2]+wholeFloor(i/(d[0]*d[1]))]);}),
-    command("overlap-fraction <a> <b>", ["points3", "points3"], "Compute intersection over union for occupied sets.", (a,b)=>filterCells(a,b,true).length/boundedCells([...cells(a),...cells(b)]).length),
+    command("overlap-fraction <a> <b>", ["points3", "points3"], "Compute intersection over union for occupied sets.", (a,b)=>{const common=filterCells(a,b,true).length;return common/(cells(a).length+cells(b).length-common);}),
     command("disconnected-count <cells>", ["points3"], "Count cells outside the largest six-neighbor component.", a=>{const c=cells(a);return c.length-Math.max(...components(c).map(v=>v.length));}),
   ] },
   { name: "tunnel", note: "Offline rectangular tunnel takeoffs. Width/height are clear interior cell dimensions, wall thickness is explicit, length counts cross-section slices. Openings and terrain are not observed; these quantities do not execute mining or building.", commands: [
