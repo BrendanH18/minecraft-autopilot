@@ -267,3 +267,40 @@ game state, unchanged input files, and loadable generated routine JSON.
 The full Node suite, syntax checks, and demo smoke cover integration. These
 are simulation, protocol-fixture, and offline checks. Existing packaged Fabric
 and authenticated-handoff acceptance gates remain open until observed passing.
+
+## Batch 8: 200 offline planning and evidence analysis additions
+
+Eight independently callable CLI groups each add 25 commands (200 total):
+
+| Numbers | Group | Numbered command inventory |
+| --- | --- | --- |
+| 1–25 | `itinerary` | [Multi-stop scheduling, distance budgets, and visit alternatives](ITINERARY.md) |
+| 26–50 | `workarea` | [Inclusive block cells, grid coverage, and disjoint work partitions](WORKAREA.md) |
+| 51–75 | `ledger` | [Carried composition, quota, food, and packing comparisons](LEDGER.md) |
+| 76–100 | `depot` | [Stored-stock changes and container evidence comparisons](DEPOT.md) |
+| 101–125 | `journal` | [Transcript run inspection, filters, and line provenance](JOURNAL.md) |
+| 126–150 | `diagnose` | [Recorded outcomes, timing gaps, usage, budgets, and requests](DIAGNOSE.md) |
+| 151–175 | `compare-routines` | [Aligned, sequence, multiset, quota, and policy comparisons](ROUTINE-COMPARE.md) |
+| 176–200 | `select-routine` | [Item, occurrence, spatial, wait, and section extraction](ROUTINE-SELECT.md) |
+
+Each guide numbers its 25 commands locally and documents arguments, examples,
+and limitations. All eight groups run offline without acquiring control or
+contacting a bridge or model. Inputs are never overwritten. Generated routine
+selections preserve original order and pass the existing action protocol and
+1–100-step bounds, but may omit prerequisites; review them before execution.
+
+Workarea uses floored inclusive block cells rather than continuous geometry.
+Route estimates ignore terrain and hazards; visit reordering is a review aid.
+Snapshot comparisons require chronological observations, preserve unknown
+evidence, and do not infer causes. Storage contents are recorded observations,
+not refreshes. Transcript decisions are requested actions, not proof of
+execution, and inter-event gaps are not model inference latency.
+
+Focused tests independently check all 200 behaviors, including invalid inputs,
+missing evidence, dimension changes, empty selections, disjoint cell partitions,
+and unchanged input data. The batch 8 CLI tests plus
+`test/itinerary-workarea.test.js` exercise every command as a real process with
+a nonexistent bridge, check expected results and unchanged files, and validate
+generated routines. The complete Node suite, syntax checks, and demo smoke
+cover integration. These offline and simulated checks do not close packaged
+Fabric or authenticated-handoff acceptance gates.

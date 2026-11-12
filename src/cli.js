@@ -35,6 +35,14 @@ import { registerExpeditionTools } from './expedition-tools.js';
 import { registerBlueprintTools } from './blueprint-tools.js';
 import { registerCheckpointTools } from './snapshot-checks.js';
 import { registerRoutineCompose } from './routine-compose.js';
+import { registerItineraryTools } from './itinerary-tools.js';
+import { registerWorkareaTools } from './workarea-tools.js';
+import { registerLedgerTools } from './ledger-tools.js';
+import { registerDepotTools } from './depot-tools.js';
+import { registerJournalTools } from './journal-tools.js';
+import { registerDiagnoseTools } from './diagnose-tools.js';
+import { registerRoutineCompare } from './routine-compare.js';
+import { registerRoutineSelect } from './routine-select.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -569,6 +577,14 @@ registerExpeditionTools(program, { view });
 registerBlueprintTools(program, { print });
 registerCheckpointTools(program, { print });
 registerRoutineCompose(program, { print });
+registerItineraryTools(program, { print });
+registerWorkareaTools(program, { print });
+registerLedgerTools(program, { print });
+registerDepotTools(program, { print });
+registerJournalTools(program, { print });
+registerDiagnoseTools(program, { print });
+registerRoutineCompare(program, { print });
+registerRoutineSelect(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {

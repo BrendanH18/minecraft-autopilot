@@ -6,6 +6,12 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 200 offline CLI additions for route schedules, discrete work areas, inventory
+  and storage comparisons, transcript inspection and diagnostics, and routine
+  comparison and selection; see [batch 8](docs/IMPROVEMENTS.md#batch-8-200-offline-planning-and-evidence-analysis-additions).
+  Eight groups of 25 have behavioral and real CLI process coverage, without
+  extending the live gameplay acceptance claims.
+
 - 100 CLI additions for read-only expedition budgets, offline construction
   material estimates, saved-snapshot predicates, and validated routine
   composition; see [batch 7](docs/IMPROVEMENTS.md#batch-7-100-expedition-blueprint-checkpoint-and-composition-additions).
