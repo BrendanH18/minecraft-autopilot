@@ -27,6 +27,10 @@ import { registerStockTools } from './stock-tools.js';
 import { registerSceneTools } from './scene-tools.js';
 import { registerGeometryTools } from './geometry-tools.js';
 import { registerRoutineWorkbench } from './routine-workbench.js';
+import { registerTimelineTools } from './timeline-tools.js';
+import { registerTerrainTools } from './terrain-tools.js';
+import { registerLogisticsTools } from './logistics-tools.js';
+import { registerRoutineAudit } from './routine-audit.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -553,6 +557,10 @@ registerStockTools(program, { view });
 registerSceneTools(program, { view });
 registerGeometryTools(program, { print });
 registerRoutineWorkbench(program, { print });
+registerTimelineTools(program, { print });
+registerTerrainTools(program, { view });
+registerLogisticsTools(program, { view });
+registerRoutineAudit(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {

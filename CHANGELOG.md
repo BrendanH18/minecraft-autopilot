@@ -47,3 +47,10 @@ Changes being prepared for the initial experimental release. Acceptance is track
 ### Validation limits
 
 Recorded live tests used development single-player/offline multiplayer. Real Ollama planning and a real MCP agent (Claude Code) were validated with the bot. Authenticated handoff, normal launcher installation, and Fabric recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, seamless transfer, and guaranteed survival are not implemented.
+
+## Batch 6 — logistics, terrain, routine audit, and timelines
+
+- Add 100 CLI planning/reporting commands in four groups of 25, with numbered
+  inventories in `docs/IMPROVEMENTS.md` and focused command documentation.
+- Keep observation reports read-only and offline tools disconnected from gameplay;
+  no bridge protocol changes or new Fabric acceptance claims.
