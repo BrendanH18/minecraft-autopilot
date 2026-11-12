@@ -31,6 +31,10 @@ import { registerTimelineTools } from './timeline-tools.js';
 import { registerTerrainTools } from './terrain-tools.js';
 import { registerLogisticsTools } from './logistics-tools.js';
 import { registerRoutineAudit } from './routine-audit.js';
+import { registerExpeditionTools } from './expedition-tools.js';
+import { registerBlueprintTools } from './blueprint-tools.js';
+import { registerCheckpointTools } from './snapshot-checks.js';
+import { registerRoutineCompose } from './routine-compose.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -561,6 +565,10 @@ registerTimelineTools(program, { print });
 registerTerrainTools(program, { view });
 registerLogisticsTools(program, { view });
 registerRoutineAudit(program, { print });
+registerExpeditionTools(program, { view });
+registerBlueprintTools(program, { print });
+registerCheckpointTools(program, { print });
+registerRoutineCompose(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {

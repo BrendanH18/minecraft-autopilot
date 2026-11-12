@@ -237,3 +237,33 @@ authenticated bridge reports during another controller's lease, offline CLI
 file reports, the full Node suite, syntax checks, and demo smoke. Remote CI also
 builds and verifies the unchanged Fabric package. Packaged Fabric and authenticated
 handoff acceptance gates remain open.
+
+## Batch 7: 100 expedition, blueprint, checkpoint, and composition additions
+
+Four independently callable CLI groups each add 25 commands (100 total):
+
+| Numbers | Group | Command inventory |
+| --- | --- | --- |
+| 1–25 | `expedition` | [Trip, food, collection, hauling, and supplied production budgets](EXPEDITION.md) |
+| 26–50 | `blueprint` | [Block-count material plans for structures and workloads](BLUEPRINT.md) |
+| 51–75 | `checkpoint` | [Saved-observation predicates and data-quality checks](CHECKPOINT.md) |
+| 76–100 | `compose` | [Routine range edits, coordinate transforms, and appended workflows](COMPOSE.md) |
+
+Expedition reads one observation without acquiring a control lease. The other
+groups work offline. Blueprint does not build, expedition does not craft or
+smelt, and compose does not execute routines or overwrite files. All routine
+outputs must pass the existing action protocol and 100-step bound. A checkpoint
+predicate reports `passes: true`, `false`, or `null` for unknown evidence; it
+does not establish current world state or independently verify task execution.
+
+Focused tests independently calculate expected results for all 100 commands,
+including thin structures, missing evidence, cross-dimension homes, invalid
+inputs, immutable inputs, and routine expansion bounds. `test/batch7-cli.test.js`
+executes all 100 commands as real CLI processes: all 25 expedition commands
+cross the authenticated demo bridge during another controller's lease, and
+the other 75 run with a nonexistent bridge. It checks unchanged ownership and
+game state, unchanged input files, and loadable generated routine JSON.
+
+The full Node suite, syntax checks, and demo smoke cover integration. These
+are simulation, protocol-fixture, and offline checks. Existing packaged Fabric
+and authenticated-handoff acceptance gates remain open until observed passing.
