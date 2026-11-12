@@ -6,7 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
-- Ten focused CLI commands, six final-state verification criteria/options, and planner/storage reliability improvements; see [the 30-change inventory](docs/IMPROVEMENTS.md).
+- Ten focused CLI commands, six final-state verification criteria/options, and planner/storage reliability improvements; see [the 30-change inventory](docs/IMPROVEMENTS.md#batch-1-cli-verification-and-planner-improvements).
+- Ten read-only overview/search/snapshot commands, planner dry runs, transcripts, fences, action allow-lists and tuning options, two more criteria, JSON routines, three MCP tools, demo scenarios, and an Ollama doctor check; see [batch 2](docs/IMPROVEMENTS.md#batch-2-overview-commands-planner-controls-routines-and-mcp-tools).
 
 - Fabric 1.21.1 control of the logged-in character through Baritone.
 - Mineflayer server bot with Microsoft device authentication and explicit offline development mode.

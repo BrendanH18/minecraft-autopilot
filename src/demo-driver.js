@@ -1,17 +1,27 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
+export const demoScenarios = ['default', 'hungry', 'hostile', 'stocked'];
+
 /** A simulation for exercising the protocol; deliberately does not claim real gameplay. */
 export class DemoDriver {
-  constructor() {
+  constructor({ scenario = 'default' } = {}) {
+    if (!demoScenarios.includes(scenario)) throw new Error(`Unknown demo scenario: ${scenario}. Use ${demoScenarios.join(', ')}.`);
+    this.scenario = scenario;
     this.player = { name: 'DemoPlayer', uuid: 'demo', health: 20, hunger: 14, dimension: 'minecraft:overworld', position: { x: 0, y: 64, z: 0 } };
     this.inventory = [{ slot: 0, name: 'minecraft:bread', count: 8 }];
     this.home = null;
     this.chest = { name: 'minecraft:chest', x: 3, y: 64, z: 3, items: null };
+    this.threats = [];
     this.stopCount = 0;
+    if (scenario === 'hungry') Object.assign(this.player, { health: 10, hunger: 4 });
+    if (scenario === 'hostile') this.threats.push({ type: 'minecraft:zombie', x: 4, y: 64, z: -3 });
+    if (scenario === 'stocked') Object.assign(this.chest, { items: [{ name: 'minecraft:oak_log', count: 12 }, { name: 'minecraft:cobblestone', count: 5 }], observedAt: Date.now() });
   }
   observe() {
+    const { x, y, z } = this.player.position;
+    const threats = this.threats.map(threat => ({ ...threat, distance: Math.hypot(threat.x - x, threat.y - y, threat.z - z) }));
     return structuredClone({ backend: 'demo', connected: true, paused: false, player: this.player, inventory: this.inventory,
-      home: this.home, threats: [], survival: 'Simulation only', blocks: [{ name: 'minecraft:oak_log', x: 5, y: 64, z: 5 }], containers: [this.chest] });
+      home: this.home, threats, survival: 'Simulation only', blocks: [{ name: 'minecraft:oak_log', x: 5, y: 64, z: 5 }], containers: [this.chest] });
   }
   async execute(action, { signal, onProgress }) {
     signal.throwIfAborted();

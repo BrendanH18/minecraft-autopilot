@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createObjective, parseCollectionCriterion, parseDepositCriterion, parseInventoryCriterion, parseDestinationCriterion } from '../src/objective.js';
+import { createObjective, parseCollectionCriterion, parseDepositCriterion, parseInventoryCriterion, parseDestinationCriterion, parseMaxInventoryCriterion } from '../src/objective.js';
 
 function state() {
   return { connected: true, player: { uuid: 'player-1', dimension: 'minecraft:overworld', health: 20, position: { x: 0, y: 64, z: 0 } },
@@ -182,4 +182,35 @@ test('nonfinite health cannot satisfy any verification criterion', () => {
     const current = state(); current.player.health = health;
     assert.equal(objective.check(current).met, false);
   }
+});
+
+test('maximum held inventory sums stacks and treats a missing inventory as unavailable', () => {
+  assert.deepEqual(parseMaxInventoryCriterion('minecraft:oak_log:0'), { item: 'minecraft:oak_log', count: 0 });
+  for (const input of ['oak_log:2305', 'oak_log', 'oak_log:-1', 'oak_log:1.5', '../oak_log:1']) assert.throws(() => parseMaxInventoryCriterion(input));
+  const objective = createObjective({ maxInventory: { item: 'oak_log', count: 4 } }, state());
+  assert.deepEqual(objective.description.maxInventory, { item: 'minecraft:oak_log', count: 4 });
+  const current = state();
+  assert.equal(objective.check(current).met, false);
+  current.inventory = [{ name: 'minecraft:oak_log', count: 3 }, { name: 'minecraft:oak_log', count: 1 }];
+  assert.equal(objective.check(current).met, true);
+  delete current.inventory;
+  assert.deepEqual(objective.check(current).checks.maxInventory, { item: 'minecraft:oak_log', current: null, maximum: 4, met: false });
+  assert.throws(() => createObjective({ maxInventory: { item: 'oak_log', count: 2305 } }, state()));
+});
+
+test('maximum distance is measured from the starting position and needs a final position', () => {
+  const objective = createObjective({ maxDistance: 5 }, state());
+  assert.deepEqual(objective.description.maxDistance, { start: { x: 0, y: 64, z: 0 }, radius: 5 });
+  const current = state();
+  current.player.position = { x: 3, y: 64, z: 4 };
+  assert.equal(objective.check(current).met, true);
+  current.player.position.y = 65;
+  assert.equal(objective.check(current).met, false);
+  delete current.player.position;
+  assert.equal(objective.check(current).checks.maxDistance.distance, null);
+  assert.equal(objective.check(current).met, false);
+  const unknown = state(); delete unknown.player.position;
+  assert.throws(() => createObjective({ maxDistance: 5 }, unknown), /starting position is unavailable/);
+  for (const maxDistance of [-1, 10_001, NaN]) assert.throws(() => createObjective({ maxDistance }, state()));
+  assert.equal(createObjective({}, state()), null);
 });
