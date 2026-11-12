@@ -132,7 +132,7 @@ export function nearestView(state, block) {
 }
 
 /** Hunger points restored by common vanilla foods; harmful foods are deliberately omitted. */
-export const FOOD_VALUES = { apple: 4, baked_potato: 5, beef: 3, beetroot: 1, beetroot_soup: 6, bread: 5, carrot: 3, chicken: 2, cod: 2,
+export const FOOD_VALUES = { apple: 4, baked_potato: 5, beef: 3, beetroot: 1, beetroot_soup: 6, bread: 5, carrot: 3, cod: 2,
   cooked_beef: 8, cooked_chicken: 6, cooked_cod: 5, cooked_mutton: 6, cooked_porkchop: 8, cooked_rabbit: 5, cooked_salmon: 6, cookie: 2,
   dried_kelp: 1, glow_berries: 2, golden_apple: 4, golden_carrot: 6, honey_bottle: 6, melon_slice: 2, mushroom_stew: 6, mutton: 2,
   porkchop: 3, potato: 1, pumpkin_pie: 8, rabbit: 3, rabbit_stew: 10, salmon: 2, sweet_berries: 2 };

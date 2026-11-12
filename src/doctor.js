@@ -16,7 +16,7 @@ export function localOllamaUrl(value) {
 export async function checkOllama(value, { fetchImpl = fetch, timeoutMs = 3000 } = {}) {
   const url = localOllamaUrl(value);
   try {
-    const response = await fetchImpl(new URL('/api/version', url), { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetchImpl(new URL('/api/version', url), { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return { url: url.origin, reachable: false, error: `Ollama returned HTTP ${response.status}.` };
     const { version } = await response.json();
     if (typeof version !== 'string' || !version || version.length > 100) return { url: url.origin, reachable: false, error: 'Response did not include an Ollama version.' };

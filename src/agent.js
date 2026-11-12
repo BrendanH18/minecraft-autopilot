@@ -82,7 +82,7 @@ export async function listModels({ ollamaUrl = 'http://127.0.0.1:11434', timeout
   const requestTimeout = AbortSignal.timeout(Math.ceil(timeout * 1000));
   let output;
   try {
-    const response = await fetchImpl(endpoint, { signal: signal ? AbortSignal.any([signal, requestTimeout]) : requestTimeout });
+    const response = await fetchImpl(endpoint, { redirect: 'error', signal: signal ? AbortSignal.any([signal, requestTimeout]) : requestTimeout });
     if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
     output = await response.json();
   } catch (error) {
@@ -104,8 +104,8 @@ const numberWords = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 
 const finalView = state => state?.connected && state.player ? { position: state.player.position ?? null, health: state.player.health ?? null, hunger: state.player.hunger ?? null } : null;
 
 async function openTranscript(path) {
-  // Append only; never follow a symlink planted at the path. New files are owner-only.
-  const file = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  // Append only; never follow a symlink planted at the path or block on a FIFO. New files are owner-only.
+  const file = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
   if (!(await file.stat()).isFile()) { await file.close(); throw new Error('The transcript must be a regular file.'); }
   return file;
 }
@@ -197,7 +197,7 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
         let output;
         try {
           const response = await fetchImpl(endpoint, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.any([bounded, requestTimeout]),
+            method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.any([bounded, requestTimeout]),
             body: JSON.stringify({ model, stream: false, format, ...(think !== undefined && { think }), options: { temperature: 0, num_ctx: contextTokens }, messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: JSON.stringify({ goal, initialState, state, criteria: objective?.description, progress: objective?.check(state), history: history.slice(-historyWindow),

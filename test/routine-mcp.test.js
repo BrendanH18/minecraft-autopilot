@@ -327,3 +327,34 @@ test('runRoutine releases its control session after completing', { timeout: 30_0
   assert.equal(harness.observe().mode, 'manual');
   assert.equal(adapter.leaseId, null);
 });
+
+test('eat --until waits for automatic eating between meals instead of failing', { timeout: 30_000 }, async t => {
+  const { driver, run } = await demoBridge(t, { scenario: 'hungry' });
+  patchEating(driver);
+  // The first meal is followed by an automatic meal that keeps the bot busy for a moment.
+  let busyUntil = 0;
+  let autoMeal = false;
+  const observe = driver.observe.bind(driver);
+  driver.isBusy = () => Date.now() < busyUntil;
+  driver.observe = () => {
+    if (driver.player.hunger === 9 && !autoMeal) { autoMeal = true; busyUntil = Date.now() + 1500; }
+    if (autoMeal && !driver.isBusy() && driver.player.hunger === 9) driver.player.hunger = 14;
+    return { ...observe(), recovering: driver.isBusy() };
+  };
+  const result = await run('eat', '--until', '18');
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.json, { status: 'completed', meals: 2, hunger: 19, target: 18 });
+});
+
+test('a forced snapshot replaces a symlink instead of writing through it', { timeout: 30_000 }, async t => {
+  const { directory, run } = await demoBridge(t);
+  const { symlink, writeFile, readFile, lstat } = await import('node:fs/promises');
+  const target = join(directory, 'target.txt');
+  const link = join(directory, 'snap.json');
+  await writeFile(target, 'keep');
+  await symlink(target, link);
+  assert.equal((await run('snapshot', link, '--force')).code, 0);
+  assert.equal(await readFile(target, 'utf8'), 'keep');
+  assert.equal((await lstat(link)).isFile(), true);
+  assert.equal((await lstat(link)).mode & 0o777, 0o600);
+});

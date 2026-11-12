@@ -1,4 +1,5 @@
 import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { normalizeAction } from './protocol.js';
 
 export const MAX_ROUTINE_BYTES = 1024 * 1024;
@@ -25,7 +26,7 @@ export function parseRoutine(text) {
 
 export async function loadRoutine(path) {
   let file;
-  try { file = await open(path, 'r'); } catch (error) { throw new Error(`Cannot read routine file: ${error.message}`); }
+  try { file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK); } catch (error) { throw new Error(`Cannot read routine file: ${error.message}`); }
   try {
     const info = await file.stat();
     if (!info.isFile()) throw new Error('The routine path must be a regular file.');
@@ -43,6 +44,7 @@ export async function runRoutine(adapter, actions, { signal, log = () => {} } = 
   const results = [];
   const report = (status, extra) => ({ status, completed: results.length, total: actions.length, results, ...extra });
   try {
+    signal?.throwIfAborted();
     await adapter.acquire();
     for (const [index, action] of actions.entries()) {
       signal?.throwIfAborted();

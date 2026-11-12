@@ -276,7 +276,7 @@ Minecraft yaw (0 south, 90 west, ±180 north, −90 east) and pitch (negative lo
 coordinate bounds as `goto`.
 
 `food` lists common vanilla foods in the inventory with hunger restored per item and in total, plus
-`missingHunger` (20 minus hunger). Saturation is not included, and harmful or unlisted foods are
+`missingHunger` (20 minus hunger). Saturation is not included, and harmful or risky foods (including raw chicken) and unlisted foods are
 omitted. `free-slots` counts used and free slots of the 36 main slots. With `--item`, it also
 reports `room`: free slots times the stack size plus space in partial stacks. Stack sizes come from a
 short built-in list. Other items assume 64 and report `stackSizeAssumed: true`.

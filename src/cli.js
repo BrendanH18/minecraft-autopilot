@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, Option, InvalidArgumentError } from 'commander';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FabricAdapter } from './fabric-adapter.js';
@@ -13,7 +14,7 @@ import { parseCollectionCriterion, parseDepositCriterion, parseInventoryCriterio
 import { positionSchema, normalizeAction } from './protocol.js';
 import { inventoryView, nearbyView, homeView, storageView, distanceTo, playerPosition, healthView, itemName } from './cli-views.js';
 import { summaryView, jobView, findItemView, storageTotalsView, nearestView, directionView, foodView, freeSlotsView, snapshotView, parseSnapshot, compareView } from './cli-views.js';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const program = new Command();
@@ -110,7 +111,14 @@ program.command('eat').description('Eat supported food from inventory.')
       while (hunger < target) {
         if (meals === 10) throw new Error(`Hunger is ${hunger} after 10 meals, below the target of ${target}. Stopping.`);
         abortController.signal.throwIfAborted();
-        if ((await adapter.observe()).mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player.');
+        const state = await adapter.observe();
+        if (state.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player.');
+        // Automatic eating can run between meals; let it finish and recount before asking for another.
+        if (state.recovering || state.stopping) {
+          await delay(500, undefined, { signal: abortController.signal });
+          hunger = healthView(await adapter.observe()).hunger;
+          continue;
+        }
         log(`Meal ${meals + 1}: hunger ${hunger}/${target}`);
         try { await adapter.execute({ type: 'eat' }, { signal: abortController.signal, onProgress: job => log(job.message) }); }
         catch (error) {
@@ -192,7 +200,9 @@ program.command('snapshot').description('Save the current observation to a priva
     if (!options.force && existsSync(path)) throw new Error(`${path} already exists; pass --force to overwrite it.`);
     return view(state => {
       const snapshot = snapshotView(state);
-      writeFileSync(path, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600, flag: options.force ? 'w' : 'wx' });
+      // Removing first means --force never writes through a symlink or keeps an existing file's permissions.
+      if (options.force) rmSync(path, { force: true });
+      writeFileSync(path, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
       chmodSync(path, 0o600);
       return { file: path, savedAt: snapshot.savedAt };
     });
