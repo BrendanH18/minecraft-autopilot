@@ -204,3 +204,9 @@ add eight groups of 25 offline commands:
 These commands never connect to Minecraft or execute actions. Unknown evidence
 stays unknown; recorded changes do not prove their cause. Use
 `mc-agent GROUP --help` for arguments and the linked guides for examples.
+
+The [500 batch 9 improvements](docs/IMPROVEMENTS.md#batch-9-500-offline-planning-and-evidence-improvements)
+add 20 offline groups for spatial calculations, explicit resource budgets,
+and recorded evidence queries. Each group has 25 commands; run
+`mc-agent GROUP --help` and consult its linked guide for arguments and limits.
+These reports neither execute gameplay nor establish safety or successful actions.

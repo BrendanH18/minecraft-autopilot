@@ -6,6 +6,11 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 500 offline planning and evidence commands across 20 groups: spatial
+  calculations, caller-supplied resource budgets, snapshot trends, routine
+  metrics, and transcript queries; see [batch 9](docs/IMPROVEMENTS.md#batch-9-500-offline-planning-and-evidence-improvements).
+  Live gameplay acceptance gates remain open.
+
 - 200 offline CLI additions for route schedules, discrete work areas, inventory
   and storage comparisons, transcript inspection and diagnostics, and routine
   comparison and selection; see [batch 8](docs/IMPROVEMENTS.md#batch-8-200-offline-planning-and-evidence-analysis-additions).
