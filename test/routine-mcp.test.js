@@ -316,3 +316,14 @@ test('doctor requires the package Node range and checks Ollama only when asked',
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /Ollama must run on localhost/);
 });
+
+test('runRoutine releases its control session after completing', { timeout: 30_000 }, async t => {
+  const { harness, discoveryPath } = await demoBridge(t);
+  const { FabricAdapter } = await import('../src/fabric-adapter.js');
+  const adapter = await FabricAdapter.connect(discoveryPath);
+  t.after(() => adapter.close());
+  const result = await runRoutine(adapter, parseRoutine('[{"type":"set_home"}]'));
+  assert.equal(result.status, 'completed');
+  assert.equal(harness.observe().mode, 'manual');
+  assert.equal(adapter.leaseId, null);
+});

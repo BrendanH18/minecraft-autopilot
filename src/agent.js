@@ -288,8 +288,10 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
           if (++failures >= maxFailures) throw new Error(failureStop);
         }
       }
+      // Observe after the last action so final and verification describe the end state.
+      const finalState = await observe();
       return { status: 'step_limit', reason: `Stopped after ${maxSteps} decisions.`, steps: maxSteps,
-        ...(objective && { verification: objective.check(await observe()) }) };
+        ...(objective && { verification: objective.check(finalState) }) };
     } finally { await adapter.release(); }
   }
 

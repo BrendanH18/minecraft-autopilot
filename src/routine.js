@@ -55,5 +55,5 @@ export async function runRoutine(adapter, actions, { signal, log = () => {} } = 
     const reason = signal?.aborted ? signal.reason?.message || error.message : error.message;
     log(`Stopped at step ${results.length + 1}/${actions.length}: ${reason}`);
     return report(signal?.aborted ? 'cancelled' : 'failed', { failedStep: results.length + 1, error: reason });
-  }
+  } finally { await adapter.release(); }
 }

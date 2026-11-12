@@ -280,3 +280,10 @@ test('agent CLI applies environment defaults, new options, and step-limit exit 2
   assert.equal(bodies.length, 2, 'invalid options never contact the model');
   assert.equal(harness.observe().mode, 'manual');
 });
+
+test('a step limit reports final state observed after the last action', async () => {
+  const adapter = fakeAdapter();
+  const result = await runAgent(adapter, 'Walk', { model: 'test', maxSteps: 1, log() {}, fetchImpl: scripted([{ type: 'goto', x: 7, y: 64, z: 3 }]) });
+  assert.equal(result.status, 'step_limit');
+  assert.deepEqual(result.final.position, { x: 7, y: 64, z: 3 });
+});
