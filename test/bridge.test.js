@@ -106,3 +106,25 @@ test('takeover waits for a previous command’s cancelled native work to settle'
   await adapter.execute({ type: 'set_home' });
   assert.equal(driver.operations.busy, false);
 });
+
+// The simulated driver proves dispatch and verification integration, not real Fabric gameplay.
+test('Fabric-labelled connections dispatch bounded deposits and storage inspection through the bridge', async t => {
+  const { adapter, driver } = await fixture(t);
+  adapter.config.backend = 'fabric';
+  driver.inventory.push({ slot: 1, name: 'minecraft:oak_log', count: 20 });
+  await adapter.execute({ type: 'deposit', item: 'oak_log', count: 8 });
+  let state = await adapter.observe();
+  assert.equal(state.inventory.find(item => item.name === 'minecraft:oak_log').count, 12);
+  assert.deepEqual(state.containers[0].firstSeen, []);
+  assert.deepEqual(state.containers[0].items, [{ name: 'minecraft:oak_log', count: 8 }]);
+  const lastRead = state.containers[0].observedAt;
+  await adapter.execute({ type: 'inspect_storage' });
+  state = await adapter.observe();
+  assert.ok(state.containers[0].observedAt >= lastRead);
+  await assert.rejects(adapter.execute({ type: 'deposit', item: 'oak_log', count: 13 }), /Only 12/);
+  await adapter.execute({ type: 'deposit', item: 'oak_log' });
+  await adapter.release();
+  state = await adapter.observe();
+  assert.equal(state.mode, 'manual');
+  assert.equal(state.containers[0].items[0].count, 20);
+});

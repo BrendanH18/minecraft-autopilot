@@ -31,7 +31,7 @@ Historical bot Ollama acceptance (20 October 2026) and MCP acceptance (27 Octobe
 
 Evaluate these in order of evidence from actual use:
 
-1. Fabric chest deposits, so the primary player-control mode supports gather-and-store.
+1. Accept the new Fabric chest/barrel deposits and storage inspection in packaged gameplay, so the primary player-control mode can reliably support gather-and-store.
 2. Shared behavioral scenarios for Fabric and bot lifecycle transitions, plus better terrain/tool/inventory recovery.
 3. Richer task criteria and storage inspection scoped to the task rather than every container opened in the bot session.
 4. Crafting/building and richer survival or combat, after current actions are reliable.

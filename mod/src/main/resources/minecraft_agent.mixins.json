@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.minecraftagent.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["StoragePacketMixin", "StorageInteractionMixin"],
+  "injectors": { "defaultRequire": 1 }
+}
