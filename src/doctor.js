@@ -64,5 +64,6 @@ export async function inspectPrerequisites({ root = projectRoot, discoveryPath =
           : bridgeValid ? 'Run npm start -- observe to check the selected bridge.'
             : 'Install the three jars from dist/mods/ in a Fabric 1.21.1 profile, then attach its bridge file.';
   return { node: `v${nodeVersion.replace(/^v/, '')}`, nodeRequired, nodeSupported, java: java.version, javac: javac.version, jar: jar.version, jdkReady,
-    modBuilt, bundleReady, bridgeDiscoveryExists, bridgeValid, bridgeFile: resolvedBridge, ...(ollama && { ollama }), next };
+    modBuilt, bundleReady, bridgeDiscoveryExists, bridgeValid, bridgeFile: resolvedBridge, ...(ollama && { ollama }),
+    ready: nodeSupported && jdkReady && bundleReady && bridgeValid && (!ollama || ollama.reachable), next };
 }

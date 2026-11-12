@@ -233,7 +233,7 @@ test('MCP inventory, nearby, and release tools read without control and release 
   };
   const names = (await client.listTools()).tools.map(tool => tool.name);
   for (const name of ['minecraft_inventory', 'minecraft_nearby', 'minecraft_release']) assert.ok(names.includes(name));
-  assert.equal(names.length, 8);
+  assert.equal(names.length, 11);
 
   const owner = '01234567-0123-4123-8123-0123456789ab';
   harness.acquire(owner);
