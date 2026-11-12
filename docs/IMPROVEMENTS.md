@@ -1,6 +1,28 @@
 # Improvement batches
 
-Each batch below is a numbered inventory of thirty small changes and how they were validated.
+Each batch below inventories focused additions and how they were validated.
+
+## Batch 4: 100 planning and reporting additions
+
+Four CLI groups each add 25 documented commands (100 total):
+
+| Numbers | Group | Numbered command inventory |
+| --- | --- | --- |
+| 1–25 | `supplies` | [Inventory and storage](SUPPLIES.md) |
+| 26–50 | `survey` | [Position and nearby observations](SURVEY.md) |
+| 51–75 | `nav` | [Offline coordinates and routes](NAVIGATION.md) |
+| 76–100 | `routine` | [Offline routine tools](ROUTINE-TOOLS.md) |
+
+Local numbering in each inventory runs from 1 to 25. These commands reuse the
+existing observation and action schemas. They do not extend the bridge protocol
+or change the Fabric mod. Storage remains last observed; observations remain
+partial. Offline calculations do not inspect terrain, and generated routines
+need review before execution.
+
+Validation includes behavior and Commander-dispatch tests for all 100 additions,
+an authenticated demo-bridge CLI test for all 50 connected reports, syntax checks,
+the full Node regression suite, and the demo smoke flow. No packaged Fabric or
+authenticated-handoff acceptance gate is claimed passing by these additions.
 
 ## Batch 3: watching, waypoints, planner safety, and routine controls
 

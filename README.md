@@ -25,6 +25,20 @@ Minecraft Autopilot combines a Fabric client mod, a standalone server bot, a CLI
 
 Combat, crafting, building, automatic reconnect transfer, and ordinary mouse/movement takeover are future work. Guard reacts to hunger and health; it does not fight enemies or construct shelter.
 
+## Planning and reports
+
+The CLI also includes [100 focused planning and reporting additions](docs/IMPROVEMENTS.md#batch-4-100-planning-and-reporting-additions):
+
+- [`supplies`](docs/SUPPLIES.md): 25 inventory, food, quota, and last-observed storage reports.
+- [`survey`](docs/SURVEY.md): 25 position, nearby-resource, threat, and observation reports.
+- [`nav`](docs/NAVIGATION.md): 25 offline coordinate and route calculators.
+- [`routine`](docs/ROUTINE-TOOLS.md): 25 offline routine inspection, editing, and generation tools.
+
+`supplies` and `survey` read the connected backend without taking control. `nav`
+and `routine` work without Minecraft or a model. Reports describe partial observations;
+geometry and generated routines do not guarantee safe or successful execution.
+Use `mc-agent <group> --help` to browse the commands.
+
 ## Try it in two minutes
 
 Install [Node.js](https://nodejs.org/) **22 or newer**, then:

@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { normalizeAction, positionSchema } from './protocol.js';
 import { freeSlotsView, MAIN_SLOTS } from './cli-views.js';
 
-const collectible = new Set(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'dirt', 'cobblestone', 'sand']);
+export const COLLECTIBLE_BLOCKS = Object.freeze(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'dirt', 'cobblestone', 'sand']);
+const collectible = new Set(COLLECTIBLE_BLOCKS);
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
 const inventory = z.array(z.object({ name: z.string(), count: z.number().int().nonnegative() }));
 const containers = z.array(z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int(),
