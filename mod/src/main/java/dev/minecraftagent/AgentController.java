@@ -4,6 +4,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.pathing.goals.GoalNear;
+import baritone.api.utils.input.Input;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -394,6 +395,10 @@ public final class AgentController {
 
     boolean playerStorageInteraction() {
         if (storage.agentOpening()) return true;
+        // Navigation opens doors/gates with Baritone's forced use input, not physical player input.
+        // Never exempt a click while an agent container opening is unresolved.
+        if (storage.navigating() && !storage.pendingOpen()
+                && baritone().getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT)) return true;
         boolean pending = storage.pendingOpen();
         if (storage.active() || pending) release("Player interacted with a block or entity. Control returned to the player.");
         // The vanilla server's ordered acknowledgement disambiguates late opening replies.

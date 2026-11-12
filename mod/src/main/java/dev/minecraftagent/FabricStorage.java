@@ -56,6 +56,7 @@ final class FabricStorage {
 
     FabricStorage(MinecraftClient client) { this.client = client; StoragePackets.attach(this); }
     boolean active() { return phase != null; }
+    boolean navigating() { return phase == Phase.APPROACH || phase == Phase.RETURN; }
 
     void begin(String identity, Item item, int amount) {
         this.identity = identity;
