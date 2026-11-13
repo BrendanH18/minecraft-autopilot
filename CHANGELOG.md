@@ -6,6 +6,12 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Constraint screening for all 1,000 typed planners: 1,000 new planner/workflow
+  combinations, bringing the study catalog to 6,000. Check up to 20 explicit
+  criteria per candidate with per-check outcomes and pass/fail totals; see
+  [constraint screening](docs/PLANNING-STUDIES.md#constraint-screening).
+  This is one reusable offline workflow and does not extend gameplay claims.
+
 - Five offline study workflows for each of the 1,000 typed planners: 5,000
   planner/workflow combinations for batch evaluation, baseline comparison,
   parameter sweeps, sensitivity, and ranking. Includes a machine-readable

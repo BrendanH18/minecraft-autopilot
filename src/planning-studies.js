@@ -6,6 +6,7 @@ import { validateRequest, resolvePlanner } from './planning-study-common.js';
 import { runBatch, runCompare } from './planning-study-batch.js';
 import { runSweep, runSensitivity } from './planning-study-parameters.js';
 import { runRank } from './planning-study-rank.js';
+import { runScreen } from './planning-study-screen.js';
 
 export const STUDY_LIMIT_BYTES = 1_000_000;
 export const STUDY_WORKFLOWS = Object.freeze({
@@ -14,6 +15,7 @@ export const STUDY_WORKFLOWS = Object.freeze({
   sweep: runSweep,
   sensitivity: runSensitivity,
   rank: runRank,
+  screen: runScreen,
 });
 const note = 'Offline study of supplied plans only. No world observation, control, or gameplay execution; inherited planner assumptions still apply.';
 
@@ -75,14 +77,15 @@ export async function readStudyRequest(source, { stdin = process.stdin } = {}) {
 }
 
 export function registerPlanningStudies(program, { print }) {
-  const study = program.command('study').description('Batch, compare, vary, and rank the 1,000 offline planners. Requests: inline JSON, @file, or - for stdin.');
-  study.command('catalog [group]').description('List supported planners, argument types, and five workflows per planner.')
+  const study = program.command('study').description('Batch, compare, vary, rank, and screen the 1,000 offline planners. Requests: inline JSON, @file, or - for stdin.');
+  study.command('catalog [group]').description('List supported planners, argument types, and six workflows per planner.')
     .action(group => print(studyCatalog(group)));
   const descriptions = {
     batch: 'Evaluate independent argument rows: {cases:[[args],...]}.',
     compare: 'Compare candidates with a baseline: {baseline:[args],candidates:[[args],...]}.',
     sweep: 'Replace one complete argument: {args:[],index:1,values:[]}.',
     sensitivity: 'Vary arguments one at a time: {args:[],changes:[{index:1,values:[]}]}.',
+    screen: 'Check candidate constraints: {cases:[[]],criteria:[{path:"",measure:"value",op:"gte",value:10}]}.',
     rank: 'Order candidates by a result pointer: {cases:[[]],path:"",direction:"min",measure:"value",limit:10}.',
   };
   for (const workflow of Object.keys(STUDY_WORKFLOWS)) {

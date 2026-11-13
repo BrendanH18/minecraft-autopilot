@@ -1,8 +1,8 @@
 # Offline planning studies
 
-`mc-agent study` adds five workflows to each of the 1,000 batch 10 planners:
-**5,000 newly supported planner/workflow combinations**. These are five reusable
-capabilities, not 5,000 new algorithms. No action is executed and no bridge,
+`mc-agent study` adds six workflows to each of the 1,000 batch 10 planners:
+**6,000 supported planner/workflow combinations**: the original 5,000 plus
+1,000 constraint-screening combinations. These are six reusable capabilities. No action is executed and no bridge,
 model, or Minecraft connection is needed. The original planner's assumptions,
 argument types, and output restrictions still apply.
 
@@ -13,7 +13,7 @@ Run `mc-agent GROUP COMMAND --help` for the original calculation's arguments.
 
 ## Requests and reports
 
-All five commands use this form:
+All six commands use this form:
 
 ```sh
 mc-agent study WORKFLOW GROUP COMMAND 'JSON_REQUEST'
@@ -128,24 +128,56 @@ an optional `limit` (1–100) is applied. Output has `direction`, `path`, `measu
 `case`, `args`, `result`, and `score`. Ranking is limited to supplied candidates
 and one chosen objective; it does not find a global optimum or a safe route.
 
+## Constraint screening
+
+```sh
+mc-agent study screen durability action-budget '{"cases":[[25,3,4],[40,3,4],[25,2,4]],"criteria":[{"op":"gte","value":10},{"op":"lte","value":11}]}'
+mc-agent study screen queueplan parallel-dispatch '{"cases":[["3,2,4",2],["2,2,2",2]],"criteria":[{"path":"/2/finish","op":"lte","value":4}]}'
+```
+
+Screen checks **every supplied criterion** for each candidate. The first example
+returns results 7, 12, and 10; only case 3 passes both bounds. The second accepts
+case 2's finish clock of 4 and rejects case 1's finish clock of 6. Candidates
+remain in source order, including those that fail the criteria.
+
+Supply 1–20 `criteria`, each with `op` and `value`. `path` defaults to `""`
+and uses the same JSON Pointer rules as ranking; `measure` defaults to `"value"`.
+Use `measure:"length"` to check a string's UTF-16 length, array element count,
+or object's own key count. `eq` and `ne` compare scalar values of exactly the
+same type, including null with null. `lt`, `lte`, `gt`, and `gte` compare numbers
+only. Equality is exact; use two numeric bounds when a tolerance is needed.
+Objects and arrays require a scalar path or length measurement.
+
+The report includes normalized `criteria`, `total`, numeric `passed` and `failed`
+counts, and `cases`. Every case contains `case`, `args`, `result`, a boolean
+`passed`, and `checks`. Each check includes its one-based `criterion`, `actual`
+measured value, and boolean `passed`. A case passes only if all checks pass.
+All checks and cases are evaluated; a failed criterion does not hide a later
+missing path, type mismatch, or invalid planner argument. Such errors fail the
+entire request without a partial success report. Unknown fields are rejected.
+
+A valid report exits successfully even when no cases pass: criterion failures
+are data, while malformed requests are errors. Screening tests supplied bounds;
+it does not establish real-world feasibility, safety, or optimality.
+
 ## Inventory and count
 
 Each listed group contains 25 existing planners. Each planner now supports
-`batch`, `compare`, `sweep`, `sensitivity`, and `rank`: **125 combinations per
-group × 40 groups = 5,000**. The original guides enumerate all signatures;
+`batch`, `compare`, `sweep`, `sensitivity`, `rank`, and `screen`: **150 combinations per
+group × 40 groups = 6,000**. The original guides enumerate all signatures;
 `study catalog` provides their exact names and argument types at runtime.
 
 | Original command guide | Groups (25 planners each) | New combinations |
 | --- | --- | --- |
-| [Spatial](PLANNING-SPATIAL.md) | `vector`, `voxel`, `tunnel`, `bridgeplan`, `roofplan`, `facade`, `spiral`, `symmetry`, `landmark`, `district` | 1,250 |
-| [Resources](PLANNING-RESOURCES.md) | `queueplan`, `replenish`, `haul`, `bufferplan`, `batchflow`, `durability`, `harvest`, `blending`, `apportion`, `project-cost` | 1,250 |
-| [Analysis](PLANNING-ANALYSIS.md) | `series`, `distribution`, `association`, `anomaly`, `smooth`, `trend`, `probability`, `experiment`, `scorecard`, `forecast` | 1,250 |
-| [Coordination](PLANNING-COORDINATION.md) | `interval-set`, `shiftplan`, `dependency`, `pathplan`, `pointcloud`, `index-set`, `tiling`, `elevation`, `reach`, `patrol` | 1,250 |
+| [Spatial](PLANNING-SPATIAL.md) | `vector`, `voxel`, `tunnel`, `bridgeplan`, `roofplan`, `facade`, `spiral`, `symmetry`, `landmark`, `district` | 1,500 |
+| [Resources](PLANNING-RESOURCES.md) | `queueplan`, `replenish`, `haul`, `bufferplan`, `batchflow`, `durability`, `harvest`, `blending`, `apportion`, `project-cost` | 1,500 |
+| [Analysis](PLANNING-ANALYSIS.md) | `series`, `distribution`, `association`, `anomaly`, `smooth`, `trend`, `probability`, `experiment`, `scorecard`, `forecast` | 1,500 |
+| [Coordination](PLANNING-COORDINATION.md) | `interval-set`, `shiftplan`, `dependency`, `pathplan`, `pointcloud`, `index-set`, `tiling`, `elevation`, `reach`, `patrol` | 1,500 |
 
-The inventory test exercises all 5,000 combinations with independent expected
+The inventory test exercises all 6,000 combinations with independent expected
 results from the original planner examples, via the study API and Commander.
 Focused tests cover changed arguments, baseline deltas, shape changes, sorted
-candidates, invalid requests, and limits. Real CLI processes check all five
+candidates, invalid requests, and limits. Real CLI processes check all six
 workflows without a bridge and verify atomic failures. These checks establish
 offline behavior and do not close packaged Fabric or authenticated-handoff
 acceptance gates.

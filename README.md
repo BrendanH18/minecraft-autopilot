@@ -52,8 +52,8 @@ geometry and workbench run offline. Plans do not execute actions or guarantee sa
 ### Planning studies
 
 [`study`](docs/PLANNING-STUDIES.md) adds batch evaluation, baseline comparison,
-parameter sweeps, one-at-a-time sensitivity, and candidate ranking to each of
-the 1,000 batch 10 planners: **5,000 planner/workflow combinations** from five
+parameter sweeps, one-at-a-time sensitivity, candidate ranking, and constraint screening to each of
+the 1,000 batch 10 planners: **6,000 planner/workflow combinations** from six
 reusable capabilities. Supply inline JSON, `@request.json`, or stdin. These
 offline studies evaluate supplied plans without taking control of Minecraft.
 
