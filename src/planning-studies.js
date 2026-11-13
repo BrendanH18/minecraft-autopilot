@@ -1,5 +1,5 @@
 import { open } from 'node:fs/promises';
-import { PLANNING_GROUPS } from './planning-tools.js';
+import { ALL_PLANNING_GROUPS } from './planning-tools.js';
 import { demand } from './offline-kit.js';
 import { checked } from './spatial-inputs.js';
 import { validateRequest, resolvePlanner } from './planning-study-common.js';
@@ -7,6 +7,9 @@ import { runBatch, runCompare } from './planning-study-batch.js';
 import { runSweep, runSensitivity } from './planning-study-parameters.js';
 import { runRank } from './planning-study-rank.js';
 import { runScreen } from './planning-study-screen.js';
+import { runFactorial } from './planning-study-factorial.js';
+import { runSummarize } from './planning-study-summarize.js';
+import { runPareto } from './planning-study-pareto.js';
 
 export const STUDY_LIMIT_BYTES = 1_000_000;
 export const STUDY_WORKFLOWS = Object.freeze({
@@ -16,11 +19,14 @@ export const STUDY_WORKFLOWS = Object.freeze({
   sensitivity: runSensitivity,
   rank: runRank,
   screen: runScreen,
+  factorial: runFactorial,
+  summarize: runSummarize,
+  pareto: runPareto,
 });
 const note = 'Offline study of supplied plans only. No world observation, control, or gameplay execution; inherited planner assumptions still apply.';
 
 export function studyCatalog(groupName) {
-  const groups = groupName === undefined ? PLANNING_GROUPS : PLANNING_GROUPS.filter(g => g.name === groupName);
+  const groups = groupName === undefined ? ALL_PLANNING_GROUPS : ALL_PLANNING_GROUPS.filter(g => g.name === groupName);
   demand(groups.length > 0, `Unknown planning group: ${groupName}.`);
   const workflows = Object.keys(STUDY_WORKFLOWS);
   const planners = groups.reduce((total, group) => total + group.commands.length, 0);
@@ -77,8 +83,8 @@ export async function readStudyRequest(source, { stdin = process.stdin } = {}) {
 }
 
 export function registerPlanningStudies(program, { print }) {
-  const study = program.command('study').description('Batch, compare, vary, rank, and screen the 1,000 offline planners. Requests: inline JSON, @file, or - for stdin.');
-  study.command('catalog [group]').description('List supported planners, argument types, and six workflows per planner.')
+  const study = program.command('study').description('Batch, compare, vary, rank, screen, cross, summarize, and trade off the 1,200 typed offline planners. Requests: inline JSON, @file, or - for stdin.');
+  study.command('catalog [group]').description('List supported planners, argument types, and nine workflows per planner.')
     .action(group => print(studyCatalog(group)));
   const descriptions = {
     batch: 'Evaluate independent argument rows: {cases:[[args],...]}.',
@@ -87,6 +93,9 @@ export function registerPlanningStudies(program, { print }) {
     sensitivity: 'Vary arguments one at a time: {args:[],changes:[{index:1,values:[]}]}.',
     screen: 'Check candidate constraints: {cases:[[]],criteria:[{path:"",measure:"value",op:"gte",value:10}]}.',
     rank: 'Order candidates by a result pointer: {cases:[[]],path:"",direction:"min",measure:"value",limit:10}.',
+    factorial: 'Evaluate every combination of replaced arguments: {args:[],axes:[{index:1,values:[]},{index:2,values:[]}]}.',
+    summarize: 'Summarize one result objective across cases: {cases:[[]],path:"",measure:"value"}.',
+    pareto: 'Find non-dominated candidates: {cases:[[]],objectives:[{path:"",direction:"min",measure:"value"}]}.',
   };
   for (const workflow of Object.keys(STUDY_WORKFLOWS)) {
     study.command(`${workflow} <group> <command> <request>`).description(descriptions[workflow])

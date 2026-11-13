@@ -52,13 +52,15 @@ geometry and workbench run offline. Plans do not execute actions or guarantee sa
 ### Planning studies
 
 [`study`](docs/PLANNING-STUDIES.md) adds batch evaluation, baseline comparison,
-parameter sweeps, one-at-a-time sensitivity, candidate ranking, and constraint screening to each of
-the 1,000 batch 10 planners: **6,000 planner/workflow combinations** from six
+parameter sweeps, one-at-a-time sensitivity, candidate ranking, constraint
+screening, factorial grids, result summaries, and Pareto fronts to each of the
+1,200 typed planners: **10,800 planner/workflow combinations** from nine
 reusable capabilities. Supply inline JSON, `@request.json`, or stdin. These
 offline studies evaluate supplied plans without taking control of Minecraft.
 
 ```sh
 mc-agent study sweep durability action-budget '{"args":[25,3,4],"index":2,"values":[1,2,3]}'
+mc-agent study factorial durability action-budget '{"args":[25,3,4],"axes":[{"index":1,"values":[25,40]},{"index":2,"values":[2,3]}]}'
 mc-agent study catalog
 ```
 
@@ -232,3 +234,12 @@ add 40 groups of 25 offline tools for
 [route and schedule coordination](docs/PLANNING-COORDINATION.md).
 They calculate from supplied data and print JSON; they never execute gameplay.
 Use `mc-agent GROUP --help` for arguments and each guide for assumptions.
+
+The [batch 13 additions](docs/IMPROVEMENTS.md#batch-13-200-planners-and-three-study-workflows)
+add 200 more typed planners in eight groups of 25:
+[structures](docs/PLANNING-STRUCTURES.md) (`stairplan`, `roundplan`, `rampart`,
+`warehouse`) and [operations](docs/PLANNING-OPERATIONS.md) (`stripmine`, `herd`,
+`signalplan`, `linkplan`). Together with three new study workflows they make
+5,000 new callable entries: the 200 commands plus 4,800 planner/workflow
+combinations. Every rate, size, and delay is a supplied assumption; nothing
+here encodes game rules or executes gameplay.

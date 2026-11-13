@@ -6,6 +6,15 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 200 offline planners in eight new groups (`stairplan`, `roundplan`,
+  `rampart`, `warehouse`, `stripmine`, `herd`, `signalplan`, `linkplan`) and
+  three study workflows for every typed planner (`factorial`, `summarize`,
+  `pareto`): 5,000 new callable entries, made of the 200 commands plus 4,800
+  planner/workflow combinations, with the study catalog growing from 6,000 to
+  10,800; see [batch 13](docs/IMPROVEMENTS.md#batch-13-200-planners-and-three-study-workflows).
+  These are supplied-data calculations and three reusable workflows, not 5,000
+  algorithms, and they do not extend gameplay claims.
+
 - Constraint screening for all 1,000 typed planners: 1,000 new planner/workflow
   combinations, bringing the study catalog to 6,000. Check up to 20 explicit
   criteria per candidate with per-check outcomes and pass/fail totals; see

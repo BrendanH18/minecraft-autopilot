@@ -20,6 +20,11 @@ export function select(result, tokens) {
   return selected;
 }
 
+// Scores compare only within one scalar type; null is its own type.
+export const scalarType = value => value === null ? 'null' : typeof value;
+// Numbers numerically, strings by code unit, false before true; nulls are equal.
+export const ascending = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+
 export function score(value, measure) {
   if (measure === 'length') {
     demand(typeof value === 'string' || value !== null && typeof value === 'object', 'Length requires a string, array, or object.');

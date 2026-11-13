@@ -1,8 +1,7 @@
 import { demand } from './offline-kit.js';
 import { allowedKeys, cases, evaluate, validateRequest } from './planning-study-common.js';
-import { pointerTokens, select, score } from './planning-study-selection.js';
+import { pointerTokens, select, score, scalarType } from './planning-study-selection.js';
 
-const scalarType = value => value === null ? 'null' : typeof value;
 const operators = Object.freeze({
   eq: (actual, expected) => actual === expected,
   ne: (actual, expected) => actual !== expected,

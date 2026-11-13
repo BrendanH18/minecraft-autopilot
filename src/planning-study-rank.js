@@ -1,7 +1,7 @@
 import { demand } from './offline-kit.js';
 import { allowedKeys, cases, evaluate, validateRequest } from './planning-study-common.js';
 
-import { pointerTokens, select, score } from './planning-study-selection.js';
+import { pointerTokens, select, score, scalarType, ascending } from './planning-study-selection.js';
 
 export function runRank(group, command, request) {
   validateRequest(request);
@@ -16,12 +16,8 @@ export function runRank(group, command, request) {
     const result = evaluate(group, command, args);
     return { case: index + 1, args: [...args], result, score: score(select(result, tokens), measure) };
   });
-  const scoreType = value => value === null ? 'null' : typeof value;
-  demand(candidates.every(candidate => scoreType(candidate.score) === scoreType(candidates[0].score)), 'Ranking scores must all have the same scalar type; null only ties null.');
-  candidates.sort((a, b) => {
-    const order = a.score < b.score ? -1 : a.score > b.score ? 1 : 0;
-    return order * (direction === 'min' ? 1 : -1) || a.case - b.case;
-  });
+  demand(candidates.every(candidate => scalarType(candidate.score) === scalarType(candidates[0].score)), 'Ranking scores must all have the same scalar type; null only ties null.');
+  candidates.sort((a, b) => ascending(a.score, b.score) * (direction === 'min' ? 1 : -1) || a.case - b.case);
   return {
     direction, path, measure, total: candidates.length,
     ranked: candidates.slice(0, limit).map((candidate, index) => ({ rank: index + 1, ...candidate })),

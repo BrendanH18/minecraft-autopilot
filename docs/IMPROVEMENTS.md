@@ -465,3 +465,42 @@ planner examples. Focused tests cover mixed pass/fail outcomes, numeric bounds,
 scalar types, nested paths, lengths, and atomic validation errors. Real CLI
 processes cover inline JSON, file, and stdin requests. Packaged Fabric and
 authenticated-handoff acceptance gates remain open.
+
+## Batch 13: 200 planners and three study workflows
+
+Eight new groups add exactly 25 typed planners each, and three new study
+workflows apply to every typed planner. The count is **200 new commands plus
+4,800 new planner/workflow combinations = 5,000 new callable entries**; the
+study catalog grows from 6,000 to 10,800. This is 200 new calculations and
+three reusable capabilities, not 5,000 distinct algorithms or gameplay actions.
+
+| Numbers | Addition | Count | Guide |
+| --- | --- | --- | --- |
+| 1–25 | `stairplan` planners | 25 | [Structures](PLANNING-STRUCTURES.md#stairplan) |
+| 26–50 | `roundplan` planners | 25 | [Structures](PLANNING-STRUCTURES.md#roundplan) |
+| 51–75 | `rampart` planners | 25 | [Structures](PLANNING-STRUCTURES.md#rampart) |
+| 76–100 | `warehouse` planners | 25 | [Structures](PLANNING-STRUCTURES.md#warehouse) |
+| 101–125 | `stripmine` planners | 25 | [Operations](PLANNING-OPERATIONS.md#stripmine) |
+| 126–150 | `herd` planners | 25 | [Operations](PLANNING-OPERATIONS.md#herd) |
+| 151–175 | `signalplan` planners | 25 | [Operations](PLANNING-OPERATIONS.md#signalplan) |
+| 176–200 | `linkplan` planners | 25 | [Operations](PLANNING-OPERATIONS.md#linkplan) |
+| 201–1,400 | The six earlier study workflows on the 200 new planners | 1,200 | [Planning studies](PLANNING-STUDIES.md) |
+| 1,401–2,600 | `study factorial` on all 1,200 typed planners | 1,200 | [Factorial grids](PLANNING-STUDIES.md#factorial-grids) |
+| 2,601–3,800 | `study summarize` on all 1,200 typed planners | 1,200 | [Result summaries](PLANNING-STUDIES.md#result-summaries) |
+| 3,801–5,000 | `study pareto` on all 1,200 typed planners | 1,200 | [Pareto fronts](PLANNING-STUDIES.md#pareto-fronts) |
+
+The structure planners cover stairs, ladders and ramps; cell counts for round
+builds; battlements, towers and moats; and storage-hall layout. The operations
+planners cover branch-mining layouts, herd growth and pens, signal lines and
+clocks, and travel between two scaled coordinate frames. Each guide lists every
+signature with its ordered input types and a conventions paragraph. All inputs
+are caller-supplied assumptions: no group encodes stack sizes, tick rates,
+growth times, signal ranges, or any other game rule, and none inspects a world.
+
+`study factorial` evaluates every combination of replacement values for
+several arguments, `study summarize` reports the distinct values and numeric
+statistics of one result objective across candidates, and `study pareto`
+separates non-dominated candidates from dominated ones across several
+objectives. Like the earlier workflows they accept inline JSON, `@file`, or
+stdin, are limited to 100 cases, and fail atomically. They examine only the
+supplied candidates and do not establish optimality, safety, or feasibility.
