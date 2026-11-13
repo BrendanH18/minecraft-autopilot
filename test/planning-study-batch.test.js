@@ -65,6 +65,14 @@ test('requests enforce JSON, byte, nesting and aggregate CSV entry bounds', () =
     { large: 'x'.repeat(1_000_001) }, { many: Array(11).fill(Array(1000).fill('1').join(',')) }]) {
     assert.throws(() => validateRequest(request));
   }
+  // JSON arrays are dense: holes and extra array properties are refused before
+  // any JSON.stringify, so a huge sparse array fails fast instead of expanding.
+  const extra = [['1', '2', '3']]; extra.note = 'x';
+  for (const request of [{ cases: [, ['1', '2', '3']] }, { cases: [['1', , '3']] }, { cases: Array(2) },
+    { cases: Array(1e9) }, { cases: extra }]) {
+    assert.throws(() => validateRequest(request), /JSON values only/);
+  }
+  assert.throws(() => runBatch('replenish', 'inventory-position', { cases: [['10', '5', '3'], , ['2', '0', '4']] }), /JSON values only/);
   let deep = 0;
   for (let i = 0; i < 25; i++) deep = [deep];
   assert.throws(() => validateRequest({ deep }), /depth/);

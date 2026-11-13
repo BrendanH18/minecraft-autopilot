@@ -1,7 +1,8 @@
 import { demand } from './offline-kit.js';
 import { evaluate, changesBetween, validateRequest, allowedKeys } from './planning-study-common.js';
 
-function replacements(args, index, values) {
+// Shared by sweep, sensitivity, and factorial: one validated row per value.
+export function replacements(args, index, values) {
   demand(Number.isSafeInteger(index) && index >= 1 && index <= args.length,
     'Replacement indexes must be one-based argument positions.');
   demand(Array.isArray(values) && values.length >= 1 && values.length <= 100,

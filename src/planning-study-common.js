@@ -1,7 +1,7 @@
-import { PLANNING_GROUPS } from './planning-tools.js';
+import { ALL_PLANNING_GROUPS } from './planning-tools.js';
 import { calculateOffline, demand } from './offline-kit.js';
 
-const groups = new Map(PLANNING_GROUPS.map(group => [group.name, group]));
+const groups = new Map(ALL_PLANNING_GROUPS.map(group => [group.name, group]));
 const MAX_BYTES = 1_000_000;
 const MAX_NODES = 10_000;
 
@@ -43,6 +43,13 @@ export function validateRequest(request) {
       demand(!ancestors.has(value), 'Request must not contain cycles.');
       demand(Array.isArray(value) || [Object.prototype, null].includes(Object.getPrototypeOf(value)),
         'Request must contain JSON values only.');
+      // JSON arrays are dense. Object.values skips holes in a sparse JavaScript
+      // array, so check the own keys before visiting, and before any stringify.
+      if (Array.isArray(value)) {
+        const keys = Object.keys(value);
+        demand(keys.length === value.length && keys.every((key, index) => key === String(index)),
+          'Request must contain JSON values only.');
+      }
       ancestors.add(value);
       for (const child of Object.values(value)) visit(child, depth + 1);
       ancestors.delete(value);
