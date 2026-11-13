@@ -417,3 +417,32 @@ real CLI processes check every group's help and a representative result with
 a nonexistent bridge. Full Node regressions, syntax checks, demo smoke, and
 remote CI cover integration. These offline and simulated checks leave packaged
 Fabric and authenticated-handoff acceptance gates open.
+
+## Batch 11: 5,000 offline planner/workflow combinations
+
+Five reusable workflows now apply to every one of the 1,000 batch 10 planners:
+batch evaluation, baseline comparison, parameter sweeps, one-at-a-time
+sensitivity, and candidate ranking. This counts **5 × 1,000 = 5,000 newly
+supported combinations**, not 5,000 distinct algorithms or gameplay actions.
+
+The [planning studies guide](PLANNING-STUDIES.md) documents requests, examples,
+result deltas, ranking objectives, bounds, and all 40 supported groups.
+`mc-agent study catalog` prints the exact inventory and argument signatures.
+Requests accept inline JSON, `@file`, or stdin. Invalid candidates fail the
+whole request before any success report is printed. Existing planner
+assumptions and numerical limits remain in force.
+
+| Workflow | New combinations | Behavior |
+| --- | --- | --- |
+| `study batch` | 1,000 | Evaluate independent full argument rows together. |
+| `study compare` | 1,000 | Compare candidate results with one baseline using JSON-pointer deltas. |
+| `study sweep` | 1,000 | Replace one complete scalar, CSV, or JSON-string argument with supplied alternatives. |
+| `study sensitivity` | 1,000 | Vary multiple argument positions independently against an unchanged baseline. |
+| `study rank` | 1,000 | Sort supplied candidates by one result objective, with stable ties and optional top limits. |
+
+All 5,000 combinations have API and Commander coverage against independent
+worked examples. Focused tests prove varying inputs, nested differences,
+rank ordering, request limits, and failure behavior; real CLI processes cover
+every workflow without a bridge. Full Node regressions, syntax checks, and
+demo smoke cover integration. These offline studies leave the packaged
+Fabric and authenticated-handoff acceptance gates open.

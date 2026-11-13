@@ -6,6 +6,13 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Five offline study workflows for each of the 1,000 typed planners: 5,000
+  planner/workflow combinations for batch evaluation, baseline comparison,
+  parameter sweeps, sensitivity, and ranking. Includes a machine-readable
+  catalog, bounded JSON/file/stdin requests, and atomic failure reporting;
+  see [planning studies](docs/PLANNING-STUDIES.md). These are reusable workflows,
+  not 5,000 new algorithms, and leave live gameplay acceptance gates open.
+
 - 1,000 offline planning and analysis commands in 40 groups of 25, covering
   spatial layouts, resource budgets, measurement statistics, dependency
   graphs, routes, schedules, and patrol estimates; see
