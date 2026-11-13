@@ -38,8 +38,11 @@ function stripStackedCoverage(width, gap, height, verticalGap, sideReveal, verti
 }
 function stripBranchesInTime(budget, dig, firstTrip, step) {
   const each = dig + firstTrip;
-  let high = wholeFloor(budget / each), low = 0;
-  demand(high <= Number.MAX_SAFE_INTEGER, 'The budget allows too many branches; use coarser time units.');
+  const bound = wholeFloor(budget / each);
+  demand(bound <= Number.MAX_SAFE_INTEGER, 'The budget allows too many branches; use coarser time units.');
+  // A large quotient can sit just below the true count, so the search reaches two
+  // past it and the roundoff-tolerant fit test decides every candidate.
+  let high = Math.min(bound + 2, Number.MAX_SAFE_INTEGER), low = 0;
   const cost = n => n * each + step * n * (n - 1) / 2;
   while (low < high) { const middle = low + Math.ceil((high - low) / 2); if (stripFits(cost(middle), budget)) low = middle; else high = middle - 1; }
   return low;

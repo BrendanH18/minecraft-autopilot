@@ -8,14 +8,14 @@ const command = (signature, types, description, run) => ({ signature, types, des
 // stairplan helpers. A count derived from a real quotient stays within the
 // kit's scalar range so a tiny divisor fails with a clear message.
 const stairCount = value => { demand(value <= 1e6, 'Computed counts are limited to 1,000,000.'); return value; };
-// Round down a quotient of a difference of inputs, whose subtraction roundoff
-// scales with the inputs rather than the quotient and can leave the floor one
-// unit off. The roundoff-tolerant limit test fits(n) settles that one unit: the
+// Shared by stairplan and warehouse. Round down a quotient of a difference of
+// inputs, whose subtraction roundoff scales with the inputs rather than the
+// quotient and can leave the floor one unit off. The roundoff-tolerant limit test fits(n) settles that one unit: the
 // count rises by one when the quotient lies within a half below the next whole
 // number and that number fits, and falls by one when the floor does not fit.
 // Moving by at most one unit keeps a divisor below the inputs' roundoff from
 // inventing counts. fits(0) is known to pass.
-function stairFloor(quotient, fits) {
+function fitFloor(quotient, fits) {
   const n = wholeFloor(quotient);
   if (n > 0 && !fits(n)) return n - 1;
   return quotient > n + 0.5 && fits(n + 1) ? n + 1 : n;
@@ -68,7 +68,9 @@ function rampartMerlons(length, merlon, crenel) {
 }
 const rampartDegrees = radians => radians * 180 / Math.PI;
 // Cells in one course of a rectangular ring wall `thickness` cells thick.
-const rampartRing = (width, depth, thickness) => width * depth - (width - 2 * thickness) * (depth - 2 * thickness);
+// Equal to width * depth minus the inner rectangle, without the large products
+// that lose whole cells above 2^53.
+const rampartRing = (width, depth, thickness) => 2 * thickness * (width + depth - 2 * thickness);
 
 // warehouse helpers. Halls are double-loaded aisles of bays and levels; walking
 // inputs are whole, so every distance is an exact multiple of one half.
@@ -150,7 +152,7 @@ export const STRUCTURE_GROUPS = [
     }),
     command("clear-steps <ceiling-height> <headroom> <rise>", ["p", "q", "p"], "Count the steps from the bottom whose tread surface still has at least headroom below a flat ceiling at ceiling-height above the lower floor, as (ceiling-height minus headroom) divided by rise, rounded down.", (ceiling, headroom, rise) => {
       demand(headroom <= ceiling, 'Headroom must not exceed the ceiling height.');
-      return stairCount(stairFloor((ceiling - headroom) / rise, k => budgetFits(k * rise + headroom, ceiling)));
+      return stairCount(fitFloor((ceiling - headroom) / rise, k => budgetFits(k * rise + headroom, ceiling)));
     }),
     command("step-surface <risers> <rise> <run> <width>", ["s", "p", "p", "p"], "Measure the faces of one flight, returning {treadArea, riserArea} where treadArea is (risers minus one) times run times width and riserArea is risers times rise times width.", (risers, rise, run, width) => {
       return { treadArea: (risers - 1) * run * width, riserArea: risers * rise * width };
@@ -169,14 +171,14 @@ export const STRUCTURE_GROUPS = [
     command("lane-count <overall-width> <lane-width> <rail-width> <rails>", ["p", "p", "q", "c"], "Count the walking lanes that fit side by side between rails, returning {clearWidth, lanes, spareWidth} where clearWidth is overall-width minus rails times rail-width, lanes is clearWidth divided by lane-width rounded down, and spareWidth is clearWidth minus lanes times lane-width.", (overall, lane, railWidth, rails) => {
       const railTotal = rails * railWidth, clearWidth = stairGap(overall, railTotal);
       demand(clearWidth >= 0, 'Rails are wider than the stair.');
-      const lanes = stairCount(stairFloor(clearWidth / lane, n => budgetFits(n * lane + railTotal, overall)));
+      const lanes = stairCount(fitFloor(clearWidth / lane, n => budgetFits(n * lane + railTotal, overall)));
       // Spare width is roundoff, hence 0, when lanes and rails fill overall-width.
       const used = lanes * lane + railTotal, filled = budgetFits(used, overall) && budgetFits(overall, used);
       return { clearWidth, lanes, spareWidth: filled ? 0 : Math.max(0, clearWidth - lanes * lane) };
     }),
     command("ladder-rungs <height> <rung-spacing> <first-rung-height>", ["p", "p", "q"], "Count ladder rungs placed at first-rung-height and at every rung-spacing above it up to and including height, returning {rungs, topRungHeight} where topRungHeight is first-rung-height plus (rungs minus one) times rung-spacing.", (height, spacing, first) => {
       demand(first <= height, 'The first rung is above the ladder top.');
-      const rungs = stairCount(stairFloor((height - first) / spacing, j => budgetFits(first + j * spacing, height)) + 1);
+      const rungs = stairCount(fitFloor((height - first) / spacing, j => budgetFits(first + j * spacing, height)) + 1);
       return { rungs, topRungHeight: first + (rungs - 1) * spacing };
     }),
     command("ladder-sections <height> <maximum-climb> <overlap>", ["s", "s", "c"], "Break a ladder climb into sections of maximum-climb with the remainder on top and a rest platform between consecutive sections, returning {sections, platforms, topSection, ladderLength} where sections is height divided by maximum-climb rounded up, platforms is sections minus one, topSection is the height of the last section, and ladderLength is height plus platforms times overlap.", (height, maximum, overlap) => {
@@ -491,14 +493,18 @@ export const STRUCTURE_GROUPS = [
     }),
     command("levels-under-ceiling <clear-height> <first-level-height> <container-height> <level-gap>", ["p", "q", "p", "q"], "Count the container levels under clear-height when level 1 stands on first-level-height and each level stands container-height plus level-gap above the one below, so level k fits when first-level-height plus (k minus 1) times (container-height plus level-gap) plus container-height is at most clear-height, giving 0 when level 1 does not fit.", (clear, first, height, gap) => {
       if (!budgetFits(first + height, clear)) return 0;
-      return warehouseCount(wholeFloor(Math.max(0, clear - first - height) / (height + gap)) + 1);
+      const step = height + gap;
+      return warehouseCount(fitFloor(Math.max(0, clear - first - height) / step, k => budgetFits(first + k * step + height, clear)) + 1);
     }),
     command("container-wall <wall-length> <container-width> <levels> <opening-starts> <opening-widths>", ["p", "p", "s", "L", "P"], "Line a wall with container columns around openings, where the i-th opening starts at the i-th opening-starts distance from the wall start and is the i-th opening-widths wide, returning {segmentColumns, columns, containers} where segmentColumns lists each clear segment from the wall start (before the first opening, between neighbors, after the last) divided by container-width rounded down, columns is their sum, and containers is columns times levels; openings must be in increasing order, must not overlap, and must end within the wall.", (length, width, levels, starts, widths) => {
       same(starts, widths);
       starts.forEach((start, i) => demand(i === 0 || budgetFits(starts[i - 1] + widths[i - 1], start), 'Openings must be in increasing order and must not overlap.'));
       demand(budgetFits(starts.at(-1) + widths.at(-1), length), 'Openings must end within the wall.');
       const edges = [0, ...starts.flatMap((start, i) => [start, start + widths[i]]), length];
-      const segmentColumns = sequence(starts.length + 1, i => warehouseCount(wholeFloor(Math.max(0, warehouseGap(edges[2 * i + 1], edges[2 * i])) / width)));
+      const segmentColumns = sequence(starts.length + 1, i => {
+        const [from, to] = [edges[2 * i], edges[2 * i + 1]];
+        return warehouseCount(fitFloor(Math.max(0, warehouseGap(to, from)) / width, n => budgetFits(from + n * width, to)));
+      });
       const columns = sum(segmentColumns);
       return { segmentColumns, columns, containers: columns * levels };
     }),

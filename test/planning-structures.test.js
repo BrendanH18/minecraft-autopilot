@@ -723,3 +723,27 @@ test('rampart: roundoff tolerance, rounding direction, and discriminating sizes'
   assert.ok(Math.abs(horseshoe.radius - 2.6) < 1e-12 && horseshoe.angleDegrees > 180);
   assert.ok(Math.abs(horseshoe.angleDegrees - 4 * Math.atan(5) * 180 / Math.PI) < 1e-9);
 });
+
+test('warehouse: exact fits survive the roundoff of subtracting large offsets', () => {
+  // Level k fits when 64 + (k - 1) × 0.1 + 0.1 <= 64.3, so three levels fit
+  // exactly, although 64.3 - 64 is slightly below 0.3 in floating point.
+  assert.equal(calculation('warehouse', 'levels-under-ceiling', ['64.3', '64', '0.1', '0']), 3);
+  assert.equal(calculation('warehouse', 'levels-under-ceiling', ['64.29', '64', '0.1', '0']), 2);
+  assert.equal(calculation('warehouse', 'levels-under-ceiling', ['1000.3', '1000', '0.1', '0']), 3);
+  // The clear segment after an opening from 0 to 64 runs from 64 to 64.3: three
+  // 0.1-wide columns, each two levels high.
+  assert.deepEqual(calculation('warehouse', 'container-wall', ['64.3', '0.1', '2', '0', '64']),
+    { segmentColumns: [0, 3], columns: 3, containers: 6 });
+  assert.deepEqual(calculation('warehouse', 'container-wall', ['64.29', '0.1', '2', '0', '64']),
+    { segmentColumns: [0, 2], columns: 2, containers: 4 });
+});
+
+test('rampart: concentric-rings stays exact for rings beyond 2^53 square cells', () => {
+  // Ring k has outer size 1,000,000 + 2k × (1,000,000 + 1) and is one cell thick,
+  // so it holds 2 × (2 × size - 2) cells: exact integers worked by hand.
+  const plan = calculation('rampart', 'concentric-rings', ['1000000', '1000000', '1', '1000000', '1000']);
+  assert.equal(plan.ringCells[0], 3999996);
+  assert.deepEqual(plan.ringCells.slice(-3), [7980007972, 7988007980, 7996007988]);
+  assert.equal(plan.outerWidth, 1999001998);
+  assert.equal(plan.outerDepth, 1999001998);
+});

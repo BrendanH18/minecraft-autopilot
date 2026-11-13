@@ -727,3 +727,10 @@ test('linkplan: tie rules, unequal list lengths, and roundoff in whole counts', 
   // 0.4 - 0.1 is 0.30000000000000004, still within a radius of 0.3.
   assert.deepEqual(run('coverage-check', '[[0.4,0]]', '[[0.1,0]]', '1', '0.3'), { covered: [1], uncovered: [] });
 });
+
+test('stripmine: branches-in-time finds the last branch when the quotient is large', () => {
+  // 18442.049526 / 0.000003 is exactly 6,147,349,842, but the floating-point
+  // quotient lies just below it; the fit test must still admit that branch.
+  assert.equal(calculation('stripmine', 'branches-in-time', ['18442.049526', '0.000003', '0', '0']), 6147349842);
+  assert.equal(calculation('stripmine', 'branches-in-time', ['18442.049525', '0.000003', '0', '0']), 6147349841);
+});
