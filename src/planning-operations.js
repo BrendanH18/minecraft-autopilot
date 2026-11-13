@@ -241,12 +241,15 @@ const linkTidy = value => typeof value === 'number' ? (value === 0 ? 0 : value)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, linkTidy(v)])) : value;
 const linkCommand = (signature, types, description, run) => command(signature, types, description, (...args) => linkTidy(run(...args)));
 const linkRows = (rows, count, label) => demand(rows.length === count, `${label} must have exactly ${count} ${count === 1 ? 'row' : 'rows'}.`);
-const linkImage = ([x, z], scale) => [x / scale, z / scale];
+// A scale too small for the coordinates overflows to Infinity, which would drop
+// candidates or hubs silently, so every scaled value must stay finite.
+const linkFinite = value => { demand(Number.isFinite(value), 'Scaled coordinates and distances must be finite; use a larger scale.'); return value; };
+const linkImage = ([x, z], scale) => [linkFinite(x / scale), linkFinite(z / scale)];
 const linkCell = (point, scale) => linkImage(point, scale).map(wholeFloor);
 const linkFloor = point => point.map(wholeFloor);
-const linkHypot = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const linkHypot = (a, b) => linkFinite(Math.hypot(a[0] - b[0], a[1] - b[1]));
 // Compact distance between two wide points: wide Euclidean distance divided by scale.
-const linkCompactDistance = (a, b, scale) => linkHypot(a, b) / scale;
+const linkCompactDistance = (a, b, scale) => linkFinite(linkHypot(a, b) / scale);
 // Chebyshev distance between two whole cells.
 const linkCellGap = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
 // Lowest index at the smallest value, scanning candidates in index order; -1 when none qualify.

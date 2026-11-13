@@ -734,3 +734,13 @@ test('stripmine: branches-in-time finds the last branch when the quotient is lar
   assert.equal(calculation('stripmine', 'branches-in-time', ['18442.049526', '0.000003', '0', '0']), 6147349842);
   assert.equal(calculation('stripmine', 'branches-in-time', ['18442.049525', '0.000003', '0', '0']), 6147349841);
 });
+
+test('linkplan: a scale too small for the coordinates fails instead of dropping candidates', () => {
+  // 1,000,000 / 1e-303 overflows to Infinity, so no compact distance is finite.
+  assert.throws(() => calculation('linkplan', 'spanning-network', ['[[0,0],[1000000,0],[0,1000000]]', '1e-303']), /must be finite/);
+  assert.throws(() => calculation('linkplan', 'hub-assign', ['[[1000000,0]]', '[[0,0],[5,5]]', '1e-303']), /must be finite/);
+  assert.throws(() => calculation('linkplan', 'to-compact', ['[[1000000,0]]', '1e-303']), /must be finite/);
+  // At an ordinary scale the same points connect: legs of 125,000 compact blocks
+  // to each corner, joined through the first point.
+  assert.deepEqual(calculation('linkplan', 'spanning-network', ['[[0,0],[1000000,0],[0,1000000]]', '8']).total, 250000);
+});
