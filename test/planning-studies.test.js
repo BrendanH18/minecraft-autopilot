@@ -22,31 +22,37 @@ function close(actual, expected) {
   } else assert.equal(actual, expected);
 }
 
-test('batch 11 inventories exactly 5,000 new planner/workflow combinations', async () => {
+test('study inventory includes 1,000 new screen combinations and 6,000 total', async () => {
   const catalog = studyCatalog();
   assert.equal(catalog.planners, 1000);
-  assert.equal(catalog.combinations, 5000);
-  assert.deepEqual(catalog.workflows, ['batch', 'compare', 'sweep', 'sensitivity', 'rank']);
+  assert.equal(catalog.combinations, 6000);
+  assert.deepEqual(catalog.workflows, ['batch', 'compare', 'sweep', 'sensitivity', 'rank', 'screen']);
   assert.equal(catalog.groups.length, 40);
   assert.equal(examples.length, 1000);
   const keys = catalog.groups.flatMap(g => g.commands.flatMap(c => catalog.workflows.map(w => `${w}/${g.name}/${c.command}`)));
-  assert.equal(new Set(keys).size, 5000);
+  assert.equal(new Set(keys).size, 6000);
   const docs = await readFile(new URL('../docs/PLANNING-STUDIES.md', import.meta.url), 'utf8');
   for (const group of PLANNING_GROUPS) {
     assert.ok(docs.includes(`\`${group.name}\``), group.name);
-    assert.equal(studyCatalog(group.name).combinations, 125);
+    assert.equal(studyCatalog(group.name).combinations, 150);
   }
   assert.throws(() => studyCatalog('not-a-planner'));
 });
 
-// Each of the 5,000 combinations is checked against the independent worked
+// Each of the 6,000 combinations is checked against the independent worked
 // examples from batch 10, through both the API and Commander argument parsing.
 // Reusing a baseline here tests identity invariants; focused workflow tests
 // separately exercise changing inputs, rankings, and nested deltas.
 for (const [group, command, args, expected] of examples) {
-  test(`all five study workflows: ${group} ${command}`, async () => {
+  test(`all six study workflows: ${group} ${command}`, async () => {
     const before = JSON.stringify(args);
+    const criteria = typeof expected === 'number'
+      ? [{ op: 'gte', value: expected - 1e-9 * Math.max(1, Math.abs(expected)) },
+        { op: 'lte', value: expected + 1e-9 * Math.max(1, Math.abs(expected)) }]
+      : [{ op: 'eq', measure: expected !== null && typeof expected === 'object' ? 'length' : 'value',
+        value: expected !== null && typeof expected === 'object' ? Object.keys(expected).length : expected }];
     const requests = {
+      screen: { cases: [args], criteria },
       batch: { cases: [args] },
       compare: { baseline: args, candidates: [args] },
       sweep: { args, index: 1, values: [args[0]] },
@@ -60,6 +66,11 @@ for (const [group, command, args, expected] of examples) {
       const report = calculateStudy(workflow, group, command, requests[workflow]);
       const rows = report.cases ?? report.candidates ?? report.ranked;
       close(rows[0].result, expected);
+      if (workflow === 'screen') {
+        assert.equal(report.passed, 1);
+        assert.equal(report.failed, 0);
+        assert.ok(report.cases[0].checks.every(check => check.passed));
+      }
       if (report.baseline) close(report.baseline.result, expected);
       if (workflow === 'compare' || workflow === 'sensitivity') assert.deepEqual(rows[0].changes, []);
       if (workflow === 'rank') assert.deepEqual(report.ranked.map(row => row.case), [1, 2]);
@@ -106,6 +117,7 @@ test('study rejects unknown names, invalid requests, oversized output and unsafe
 test('real CLI runs each workflow without a bridge and errors have no partial report', () => {
   const call = (args, input) => spawnSync(process.execPath, ['src/cli.js', '--bridge', '.runtime/missing-study.json', 'study', ...args], { encoding: 'utf8', input });
   const requests = {
+    screen: { cases: [[5, 2, 1], [8, 2, 1]], criteria: [{ op: 'gte', value: 3 }] },
     batch: { cases: [[5, 2, 1], [8, 2, 1]] },
     compare: { baseline: [5, 2, 1], candidates: [[8, 2, 1]] },
     sweep: { args: [5, 2, 1], index: 1, values: [5, 8] },
@@ -119,7 +131,7 @@ test('real CLI runs each workflow without a bridge and errors have no partial re
   }
   const catalog = call(['catalog']);
   assert.equal(catalog.status, 0, catalog.stderr);
-  assert.equal(JSON.parse(catalog.stdout).combinations, 5000);
+  assert.equal(JSON.parse(catalog.stdout).combinations, 6000);
   const help = call(['--help']);
   for (const workflow of Object.keys(STUDY_WORKFLOWS)) assert.ok(help.stdout.includes(workflow));
   const invalid = call(['batch', 'durability', 'action-budget', '{"cases":[[5,2,1],[-1,2,1]]}']);

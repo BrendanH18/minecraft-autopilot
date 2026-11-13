@@ -446,3 +446,22 @@ rank ordering, request limits, and failure behavior; real CLI processes cover
 every workflow without a bridge. Full Node regressions, syntax checks, and
 demo smoke cover integration. These offline studies leave the packaged
 Fabric and authenticated-handoff acceptance gates open.
+
+## Batch 12: 1,000 constraint-screening combinations
+
+`study screen` adds explicit constraint checks to all 1,000 batch 10 planners:
+**one new workflow × 40 groups × 25 planners = 1,000 new combinations**.
+This is one reusable capability, with all planner signatures discoverable in
+`study catalog`, which now reports 6,000 total study combinations.
+
+Users can check up to 20 scalar or length criteria against each candidate and
+see every measured value, pass/fail outcome, and aggregate count. Numeric bounds,
+exact scalar equality, nested JSON Pointers, and ordered per-case diagnostics
+support reviewing supplied plans without connecting to Minecraft. See
+[constraint screening](PLANNING-STUDIES.md#constraint-screening) for the contract.
+
+All 1,000 new combinations have API and Commander coverage against independent
+planner examples. Focused tests cover mixed pass/fail outcomes, numeric bounds,
+scalar types, nested paths, lengths, and atomic validation errors. Real CLI
+processes cover inline JSON, file, and stdin requests. Packaged Fabric and
+authenticated-handoff acceptance gates remain open.
