@@ -49,6 +49,19 @@ A further [100 additions](docs/IMPROVEMENTS.md#batch-5-100-stock-spatial-geometr
 Each group has 25 commands. Stock and scene read observations without taking control;
 geometry and workbench run offline. Plans do not execute actions or guarantee safety.
 
+### Planning studies
+
+[`study`](docs/PLANNING-STUDIES.md) adds batch evaluation, baseline comparison,
+parameter sweeps, one-at-a-time sensitivity, and candidate ranking to each of
+the 1,000 batch 10 planners: **5,000 planner/workflow combinations** from five
+reusable capabilities. Supply inline JSON, `@request.json`, or stdin. These
+offline studies evaluate supplied plans without taking control of Minecraft.
+
+```sh
+mc-agent study sweep durability action-budget '{"args":[25,3,4],"index":2,"values":[1,2,3]}'
+mc-agent study catalog
+```
+
 ## Try it in two minutes
 
 Install [Node.js](https://nodejs.org/) **22 or newer**, then:
