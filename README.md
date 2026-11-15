@@ -64,6 +64,14 @@ mc-agent study factorial durability action-budget '{"args":[25,3,4],"axes":[{"in
 mc-agent study catalog
 ```
 
+## Release acceptance tooling
+
+v0.1 ships only after live checks pass. Three tools make those sessions faster and easier to audit; none of them marks a release gate as passed:
+
+- [`acceptance`](docs/ACCEPTANCE.md) records live sessions for each open [release gate](docs/RELEASE.md): the commit, worktree state, `dist/BUILD.json`, archive checksum, backend and configuration, step observations, and result. It prints Markdown for the validation record and reports which sessions are eligible evidence.
+- [`npm run acceptance:bot`](docs/LIVE-ACCEPTANCE.md) runs scripted bot recovery and storage scenarios against a local vanilla 1.21.1 server, checking results with independent server `data get` reads. It needs Java 21 and the cached server jar; try `npm run acceptance:bot -- --dry-run --all` first.
+- [Lifecycle scenarios](docs/LIFECYCLE-SCENARIOS.md) define one table of takeover, stop, expiry, death, and dimension-change expectations. Tests run it against the demo driver and the bot driver on a mocked bot, and it generates the manual Fabric checklist.
+
 ## Try it in two minutes
 
 Install [Node.js](https://nodejs.org/) **22 or newer**, then:

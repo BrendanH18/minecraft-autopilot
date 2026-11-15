@@ -181,6 +181,8 @@ These are behaviors found during live testing that the code depends on:
 
 ## Live test environment
 
+[`npm run acceptance:bot`](LIVE-ACCEPTANCE.md) automates this recipe for the bot recovery and storage checks (roadmap step 4). It needs `--accept-eula`, writes results under `.runtime/live-acceptance/`, and its results become evidence only after review. Record sessions with [`mc-agent acceptance`](ACCEPTANCE.md).
+
 This setup uses the vanilla server jar that Loom caches during the build. Running a server requires accepting the [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
 ```sh
