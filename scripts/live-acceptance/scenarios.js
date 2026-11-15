@@ -215,6 +215,8 @@ async function runStore(ctx, plan, variant) {
     result = await ctx.step(`agent with real model ${ctx.options.model}`, () => ctx.agent({ goal, criteria, model: ctx.options.model, fetchImpl }));
     ctx.note('removalDuringInference', fetchImpl.fired());
     ctx.check('items were removed during a model inference after a completed deposit', fetchImpl.fired(), {});
+    ctx.check('the deposit stored 8 before the removal, so a stale +8 existed', (storedBeforeRemoval?.[LOG] || 0) - (before.chest[LOG] || 0) >= 8,
+      { beforeRemoval: storedBeforeRemoval, baseline: before.chest });
   } else {
     const before3 = variant === 'stale' ? removeStored : variant === 'blocked' ? blockLid : null;
     result = await ctx.step('agent with scripted planner (no model): collect 8 → deposit 8 → home → done', () =>

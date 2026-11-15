@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, utimes } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -15,7 +15,7 @@ import {
 const COMMIT = 'a'.repeat(40);
 const cleanGit = (commit = COMMIT, porcelain = '') => args => args[0] === 'rev-parse' ? { status: 0, stdout: `${commit}\n` } : { status: 0, stdout: porcelain };
 const clock = (start = Date.parse('2026-11-14T10:00:00Z')) => { let tick = 0; return () => new Date(start + 1000 * tick++); };
-const VERIFIED = { commit: COMMIT, dirty: false, node: 'v22.12.0', build: { sourceCommit: COMMIT, sourceModified: false, version: '0.1.0', commitMatches: true, clean: true }, archive: { name: ARCHIVE_NAME, sha256: 'b'.repeat(64), recorded: 'b'.repeat(64), matches: true } };
+const VERIFIED = { commit: COMMIT, dirty: false, node: 'v22.12.0', build: { sourceCommit: COMMIT, sourceModified: false, version: '0.1.0', commitMatches: true, clean: true }, archive: { name: ARCHIVE_NAME, sha256: 'b'.repeat(64), recorded: 'b'.repeat(64), matches: true, predatesBuild: false } };
 
 function releaseBoxes() {
   return readFile(join(projectRoot, 'docs/RELEASE.md'), 'utf8').then(text => {
@@ -97,6 +97,13 @@ test('provenance records nulls and warnings for missing dist, and verifies BUILD
   assert.equal(mismatched.provenance.dirty, true); assert.equal(mismatched.provenance.archive.matches, false);
   assert.equal(mismatched.provenance.build.commitMatches, false); assert.equal(mismatched.provenance.build.clean, false);
   assert.equal(provenanceProblems({ provenance: mismatched.provenance }).length, 4);
+  // Packaging rewrote BUILD.json, then failed before the archive and its checksum: the older pair still matches.
+  const interrupted = await distRoot(t);
+  await utimes(join(interrupted, 'dist/ARCHIVE_SHA256SUMS'), new Date('2026-11-01T00:00:00Z'), new Date('2026-11-01T00:00:00Z'));
+  const stale = await collectProvenance({ root: interrupted, git: cleanGit() });
+  assert.equal(stale.provenance.archive.matches, true); assert.equal(stale.provenance.archive.predatesBuild, true);
+  assert.ok(stale.warnings.some(text => /packaging did not finish/.test(text)));
+  assert.deepEqual(provenanceProblems({ provenance: stale.provenance }), ['archive predates BUILD.json; packaging did not finish']);
   const noGit = await collectProvenance({ root: await distRoot(t, { sums: null, build: '{not json' }), git: () => ({ status: 128, stdout: '' }) });
   assert.equal(noGit.provenance.commit, null); assert.equal(noGit.provenance.dirty, null); assert.equal(noGit.provenance.build, null);
   assert.equal(noGit.provenance.archive.recorded, null);

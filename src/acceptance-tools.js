@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { open, readFile } from 'node:fs/promises';
+import { open, readFile, stat } from 'node:fs/promises';
 import { createReadStream, constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -24,7 +24,7 @@ const sessionSchema = z.object({
   provenance: z.object({
     commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(), dirty: z.boolean().nullable(), node: z.string().max(64),
     build: z.object({ sourceCommit: z.string().max(64).nullable(), sourceModified: z.boolean().nullable(), version: z.string().max(64).nullable(), commitMatches: z.boolean(), clean: z.boolean() }).strict().nullable(),
-    archive: z.object({ name: z.string().max(200), sha256: z.string().regex(/^[0-9a-f]{64}$/), recorded: z.string().regex(/^[0-9a-f]{64}$/).nullable(), matches: z.boolean() }).strict().nullable(),
+    archive: z.object({ name: z.string().max(200), sha256: z.string().regex(/^[0-9a-f]{64}$/), recorded: z.string().regex(/^[0-9a-f]{64}$/).nullable(), matches: z.boolean(), predatesBuild: z.boolean() }).strict().nullable(),
   }).strict(),
   warnings: z.array(z.string().max(500)).max(20),
   steps: z.array(z.object({ step: z.number().int().min(1).max(50), result: z.enum(['pass', 'fail']), note: note.nullable(), at: time }).strict()).max(500),
@@ -109,7 +109,12 @@ export async function collectProvenance({ root = projectRoot, git = defaultGit, 
     const sums = await readOptional(join(root, 'dist/ARCHIVE_SHA256SUMS'));
     const entry = sums?.split('\n').map(text => text.trim().split(/\s+\*?/)).find(([, name]) => name === ARCHIVE_NAME);
     const recorded = entry && /^[0-9a-f]{64}$/.test(entry[0]) ? entry[0] : null;
-    archive = { name: ARCHIVE_NAME, sha256, recorded, matches: recorded === sha256 };
+    // Packaging writes BUILD.json, then the archive, then ARCHIVE_SHA256SUMS. A BUILD.json newer than the checksum
+    // file means packaging stopped part-way, so a matching older archive may not be the build BUILD.json describes.
+    const modified = async name => (await stat(join(root, 'dist', name)).catch(() => null))?.mtimeMs ?? null;
+    const [buildAt, sumsAt] = [await modified('BUILD.json'), await modified('ARCHIVE_SHA256SUMS')];
+    archive = { name: ARCHIVE_NAME, sha256, recorded, matches: recorded === sha256, predatesBuild: buildAt !== null && sumsAt !== null && buildAt > sumsAt };
+    if (archive.predatesBuild) warnings.push(`dist/BUILD.json is newer than dist/ARCHIVE_SHA256SUMS; packaging did not finish, so ${ARCHIVE_NAME} may be an older build.`);
     if (!recorded) warnings.push(`dist/ARCHIVE_SHA256SUMS has no checksum for ${ARCHIVE_NAME}.`);
     else if (!archive.matches) warnings.push(`dist/${ARCHIVE_NAME} does not match dist/ARCHIVE_SHA256SUMS.`);
   } catch (error) {
@@ -192,6 +197,7 @@ export function provenanceProblems({ provenance: p }) {
   }
   if (!p.archive) problems.push('archive checksum missing');
   else if (!p.archive.matches) problems.push('archive checksum not verified against ARCHIVE_SHA256SUMS');
+  else if (p.archive.predatesBuild) problems.push('archive predates BUILD.json; packaging did not finish');
   return problems;
 }
 
