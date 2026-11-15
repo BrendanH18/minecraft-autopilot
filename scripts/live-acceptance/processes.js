@@ -80,11 +80,14 @@ function track(child) {
 }
 
 /** Waits for a child to exit, escalating stop → SIGTERM → SIGKILL. */
-async function settle(child, exited, steps) {
+export async function settle(child, exited, steps) {
   for (const [action, ms] of steps) {
     if (child.exitCode !== null || child.signalCode !== null) return;
     action();
-    if (await Promise.race([exited.then(() => true), delay(ms, false)])) return;
+    // Cancel the losing timer so a prompt exit does not keep the runner alive until the escalation deadline.
+    const timer = new AbortController();
+    try { if (await Promise.race([exited.then(() => true), delay(ms, false, { signal: timer.signal })])) return; }
+    finally { timer.abort(); }
   }
 }
 

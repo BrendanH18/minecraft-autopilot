@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseSnbt, parseDataReply, stripLogPrefix, itemCount, itemTotals, toPosition } from '../scripts/live-acceptance/nbt-parse.js';
 import { ServerConsole, REPLIES, CommandError } from '../scripts/live-acceptance/console.js';
 import { scenarios, scenarioIds, laneOrigin, scriptedPlanner, interceptInference, depositCompleted } from '../scripts/live-acceptance/scenarios.js';
-import { preflight, javaVersion, serverProperties } from '../scripts/live-acceptance/processes.js';
+import { preflight, javaVersion, serverProperties, settle } from '../scripts/live-acceptance/processes.js';
 import { parseOptions, buildPlan, formatPlan, runAcceptance, runScenario, main, WORLD_SETUP } from '../scripts/live-bot-acceptance.js';
 
 const LOG_PREFIX = '[12:34:56] [Server thread/INFO]: ';
@@ -488,4 +488,14 @@ test('main prints the dry-run plan without starting anything and refuses without
   assert.equal(await main(['--all', '--server-jar', '/nonexistent/server.jar'], refused), 1);
   assert.match(warned.join('\n'), /--accept-eula.*DEVELOPMENT\.md/s);
   assert.equal(started, false);
+});
+
+test('settle cancels its escalation timer once the child exits', async () => {
+  const timers = () => process.getActiveResourcesInfo().filter(name => name === 'Timeout').length;
+  const before = timers();
+  const child = { exitCode: null, signalCode: null };
+  let signals = 0;
+  await settle(child, Promise.resolve({ code: 0 }), [[() => { signals++; }, 60_000]]);
+  assert.equal(signals, 1);
+  assert.equal(timers(), before, 'no 60 s timer left keeping the process alive');
 });
