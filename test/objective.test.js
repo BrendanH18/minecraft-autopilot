@@ -257,6 +257,18 @@ test('a deposit after a merge with unread storage does not adopt that storage as
   assert.match(check.checks.deposit.error, /merged with other known storage/);
 });
 
+test('a deposit into storage that split before the task does not count the other half as a gain', () => {
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, { ...state(), containers: [] }, { scopedStorage: true });
+  // Both halves of a double chest opened earlier keep its source ID after splitting; only one receives the deposit.
+  const half = (x, items) => ({ name: 'minecraft:chest', x, y: 64, z: 0, items, sources: [{ id: 'double', items: logs(0) }] });
+  const current = { ...state(), containers: [half(1, logs(7)), half(2, logs(64))] };
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(6) }, current);
+  const check = objective.check(current, { storageRefreshed: true });
+  assert.equal(check.met, false);
+  assert.match(check.checks.deposit.error, /already split/);
+});
+
 test('a replacement chest at a tracked coordinate gets its own baseline from its first deposit', () => {
   const logs = count => [{ name: 'minecraft:oak_log', count }];
   const record = (items, id) => ({ name: 'minecraft:chest', x: 1, y: 64, z: 0, items, sources: [{ id, items: logs(0) }] });

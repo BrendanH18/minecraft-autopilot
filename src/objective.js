@@ -145,12 +145,15 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
         // A tracked inventory merged with other known storage holds stock whose starting amount this task never read.
         const tracked = new Set(scope.flatMap(entry => entry.sources));
         const foreign = current?.some(container => realSources(container).some(id => !tracked.has(id)));
+        // Another inventory already split from the receiving one shares its history, but its starting stock was never read.
+        const split = scope.some(entry => entry.split);
         const contents = current && current.reduce((total, container) => total + (container.items ? held(container.items, deposit.item) : 0), 0);
         stored = contents === null ? null : contents - scope.reduce((total, entry) => total + held(entry.before, deposit.item), 0);
         checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count,
           evidence: storageRefreshed ? 'refreshed' : 'last_observed', containers: scope.map(({ x, y, z }) => ({ x, y, z })),
-          met: stored !== null && !foreign && stored >= deposit.count,
-          ...(foreign && { error: 'Storage this task deposited into merged with other known storage whose starting contents were not read during the task.' }) };
+          met: stored !== null && !foreign && !split && stored >= deposit.count,
+          ...(foreign && { error: 'Storage this task deposited into merged with other known storage whose starting contents were not read during the task.' }),
+          ...(split && !foreign && { error: 'Storage this task deposited into had already split from other known storage whose starting contents were not read during the task.' }) };
       } else if (deposit) {
         const current = samePlayer ? containers.parse(state.containers || []).filter(container => container.items) : null;
         const seen = new Set();
@@ -228,14 +231,16 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
     trackDeposit(reported, state) {
       if (!deposit || !scopedStorage) return;
       const entry = depositedContainer.parse(reported);
-      const record = scopedContainers.safeParse(state?.containers || []).data?.find(container => positions(container).includes(key(entry))
+      const recorded = scopedContainers.safeParse(state?.containers || []).data || [];
+      const record = recorded.find(container => positions(container).includes(key(entry))
         && (!entry.name || !container.name || entry.name === container.name));
       const sources = record ? realSources(record) : [];
       // Source IDs tell a replacement chest at the same coordinate apart; coordinates decide only when either side lacks them.
       const known = scope.find(existing => existing.sources.length && sources.length ? sources.some(id => existing.sources.includes(id))
         : key(existing) === key(entry) && (!existing.name || !entry.name || existing.name === entry.name));
       // A later deposit never adopts sources: one merged in after the first deposit has no task baseline and stays foreign.
-      if (!known) scope.push({ name: entry.name, x: entry.x, y: entry.y, z: entry.z, sources, before: entry.before.map(item => ({ ...item })) });
+      const split = record && recorded.some(other => key(other) !== key(record) && realSources(other).some(id => sources.includes(id)));
+      if (!known) scope.push({ name: entry.name, x: entry.x, y: entry.y, z: entry.z, sources, before: entry.before.map(item => ({ ...item })), ...(split && { split: true }) });
     },
     /** Positions a final inspection must reopen: each tracked container and every current inventory descended from one. */
     storageTargets(state) {
