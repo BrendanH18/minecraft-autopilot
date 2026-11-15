@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createObjective } from './objective.js';
-import { normalizeAction } from './protocol.js';
+import { MAX_INSPECT_CONTAINERS, normalizeAction } from './protocol.js';
 
 const decisionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('done'), reason: z.string().max(1000) }).strict(),
@@ -47,7 +47,7 @@ const systemPrompt = `You control a Minecraft Java player through a local harnes
 Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, inspect_storage, deposit(item,count), wait(seconds), done(reason).
 collect adds count items to the existing inventory. Supported blocks: oak_log, birch_log, spruce_log, jungle_log, acacia_log, dark_oak_log, cherry_log, mangrove_log, dirt, cobblestone, sand.
 deposit walks to the nearest chest or barrel within 16 blocks and stores the item there; omit count to store all of it. inspect_storage refreshes previously known storage contents without depositing; use it only when state.containers is an array. containers lists nearby storage and the contents last seen inside (items is null until opened).
-Use observations and the initial inventory to verify the requested quantity. When collection and deposit criteria name the same item, collection counts the net increase across inventory and storage. Storage is reopened automatically before final deposit verification; return near all previously opened containers before answering done. Never repeat a full collection quota after partial progress.
+Use observations and the initial inventory to verify the requested quantity. When collection and deposit criteria name the same item, collection counts the net increase across inventory and storage. Storage is reopened automatically before final deposit verification; stay within 16 blocks of the storage you deposited into (on other backends, all previously opened storage) before answering done. Never repeat a full collection quota after partial progress.
 Save a home only if the user requested it or the goal needs it. set_home is refused when a home was saved before the task; only the player can move it.
 Nearby blocks and threats are partial observations of loaded chunks. Do not invent locations or capabilities.
 Prioritize eating and returning to saved shelter when health is low. A saved home is a waypoint, not a guarantee of safety.
@@ -99,6 +99,9 @@ export async function listModels({ ollamaUrl = 'http://127.0.0.1:11434', timeout
   return parsed.data.models.map(model => ({ name: model.name, bytes: model.size ?? null, size: model.size === undefined ? null : readable(model.size), modifiedAt: model.modified_at ?? null }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+// Backends whose deposits report their container and whose inspect_storage accepts a containers list.
+const SCOPED_STORAGE_BACKENDS = new Set(['mineflayer', 'demo']);
 
 const numberWords = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
 const finalView = state => state?.connected && state.player ? { position: state.player.position ?? null, health: state.player.health ?? null, hunger: state.player.hunger ?? null } : null;
@@ -183,7 +186,10 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
     const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
     bounded.throwIfAborted();
     let initialState = await observe();
-    let objective = createObjective(criteria, initialState);
+    // The server bot and demo verify only containers this task deposited into, each against its contents read just before the
+    // task's first deposit there; other backends refresh and count every previously opened container.
+    const scopedStorage = !!criteria.deposit && SCOPED_STORAGE_BACKENDS.has(initialState.backend);
+    let objective = createObjective(criteria, initialState, { scopedStorage });
     let start = null;
     if (fence !== undefined) {
       const position = initialState.player?.position;
@@ -213,12 +219,20 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
       return { status: 'health_stop', reason: `Health ${health} is below the stop threshold of ${stopBelowHealth}; stopped for you to take over.`, steps,
         ...(objective && { verification: objective.check(state) }) };
     };
+    // A completed deposit that names no container may have stored items verification cannot attribute.
+    let unattributedDeposit = false;
+    const trackDeposit = async (container, completed) => {
+      if (!scopedStorage) return;
+      if (!container) { if (completed) unattributedDeposit = true; return; }
+      try { objective.trackDeposit(container, await observe()); }
+      catch { unattributedDeposit = true; }
+    };
     const reject = async (step, action, reason, extra) => {
       history.push({ action, rejected: reason, ...extra });
       await note('rejection', { step, action, reason });
     };
     try {
-      if (criteria.deposit) {
+      if (criteria.deposit && !scopedStorage) {
         // Baseline known containers from live reads, not contents cached before this task.
         while (true) {
           bounded.throwIfAborted();
@@ -297,10 +311,19 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
         if (decision.type === 'done') {
           let verification;
           let inspectionError;
+          let inspected = null;
           if (criteria.deposit) {
             try {
               // Reopen storage before claiming success; other players may have changed it during inference.
-              await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
+              if (!scopedStorage) await adapter.execute({ type: 'inspect_storage' }, { signal: bounded, onProgress: job => log(job.message) });
+              else {
+                if (unattributedDeposit) throw new Error('A deposit did not report which container it used, so task storage cannot be verified.');
+                const targets = objective.storageTargets(currentState);
+                for (let index = 0; index < targets.length; index += MAX_INSPECT_CONTAINERS) {
+                  await adapter.execute({ type: 'inspect_storage', containers: targets.slice(index, index + MAX_INSPECT_CONTAINERS) }, { signal: bounded, onProgress: job => log(job.message) });
+                }
+                inspected = new Set(targets.map(({ x, y, z }) => `${x},${y},${z}`));
+              }
             } catch (error) {
               bounded.throwIfAborted();
               if ((await observe()).mode !== 'agent' || adapter.leaseError) throw error;
@@ -311,6 +334,10 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
             if (currentState.mode !== 'agent' || adapter.leaseError) throw new Error('Control returned to the player during storage verification.');
             const hurtVerifying = healthStop(currentState, step + 1);
             if (hurtVerifying) return hurtVerifying;
+            // Storage that became part of the task's inventories during the reads was not itself reopened.
+            if (inspected && !inspectionError && objective.storageTargets(currentState).some(({ x, y, z }) => !inspected.has(`${x},${y},${z}`))) {
+              inspectionError = 'Task storage changed during verification, so not all of it was refreshed.';
+            }
           }
           verification = objective?.check(currentState, { storageRefreshed: !!criteria.deposit && !inspectionError });
           if (inspectionError) {
@@ -347,13 +374,17 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
           }
           actionCounts[decision.type] = (actionCounts[decision.type] ?? 0) + 1;
           const result = await adapter.execute(decision, { signal: bounded, onProgress: job => log(job.message) });
+          if (decision.type === 'deposit') await trackDeposit(result?.container, result?.status !== 'failed' && result?.status !== 'cancelled');
           if (result?.status === 'failed' || result?.status === 'cancelled') throw new Error(result.message || `Action ${result.status}.`);
-          history.push({ action: decision, result }); failures = 0;
+          // The pre-deposit contents serve verification only; keep them out of the model's context.
+          history.push({ action: decision, result: result?.container ? { ...result, container: (({ before, ...where }) => where)(result.container) } : result }); failures = 0;
           await note('result', { step: step + 1, action: decision, status: result?.status ?? null, message: result?.message ?? null });
           completed = { action: JSON.stringify(normalizeAction(decision)), before: footprint(currentState) };
         } catch (error) {
           bounded.throwIfAborted();
           if ((await observe()).mode !== 'agent' || adapter.leaseError) throw error;
+          // A failed deposit may have moved some items before it stopped.
+          if (decision.type === 'deposit') await trackDeposit(error.container, false);
           history.push({ action: decision, error: error.message });
           await note('error', { step: step + 1, action: decision, error: error.message });
           log(`Action failed: ${error.message}`);

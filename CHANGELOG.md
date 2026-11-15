@@ -6,6 +6,24 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Task-scoped storage verification on the server bot and demo. Deposits report
+  the container they used and its live contents just before the transfer; with
+  `--verify-deposit`, the agent counts only those containers against those
+  baselines and reopens only them before accepting `done`. A container opened
+  earlier elsewhere in the session no longer fails a correct task. Stale,
+  blocked, merged-with-unread, or unattributed storage still fails closed.
+  `inspect_storage` accepts an optional `containers` list (1–16 positions;
+  `inspect-storage --container x,y,z`); Fabric ignores it and keeps refreshing
+  every known container. See [usage](docs/USAGE.md).
+
+- Collection stops promptly when the inventory is full (server bot and demo).
+  Instead of breaking blocks whose drops cannot be picked up until the 180 s
+  mining deadline, collection fails with `Inventory full; collected N of M
+  <block>.`, keeps its progress, and still makes the bounded return attempt.
+  A new `inventory-full-collect` [lifecycle scenario](docs/LIFECYCLE-SCENARIOS.md)
+  covers both backends; Fabric detection is not implemented yet. The demo now
+  respects 64-item stacks, so the `full` scenario refuses further collection.
+
 - v0.1 acceptance tooling. `mc-agent acceptance` (`list`, `show`, `start`,
   `step`, `finish`, `sessions`, `report`, `status`) records live release-gate
   sessions with commit, worktree, build and archive provenance, and reports

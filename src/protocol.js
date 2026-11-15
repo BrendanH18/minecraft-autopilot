@@ -6,6 +6,15 @@ export const positionSchema = z.object({
   z: z.number().finite().min(-29_999_984).max(29_999_984),
 }).strict();
 
+/** The most containers one scoped inspect_storage may name. */
+export const MAX_INSPECT_CONTAINERS = 16;
+/** A container's block coordinates. */
+export const containerPositionSchema = z.object({
+  x: z.number().int().min(-29_999_984).max(29_999_984),
+  y: z.number().int().min(-64).max(320),
+  z: z.number().int().min(-29_999_984).max(29_999_984),
+}).strict();
+
 export const actionSchema = z.discriminatedUnion('type', [
   positionSchema.extend({ type: z.literal('goto') }),
   z.object({ type: z.literal('home') }).strict(),
@@ -16,7 +25,11 @@ export const actionSchema = z.discriminatedUnion('type', [
     count: z.number().int().min(1).max(64),
   }).strict(),
   z.object({ type: z.literal('eat') }).strict(),
-  z.object({ type: z.literal('inspect_storage') }).strict(),
+  z.object({
+    type: z.literal('inspect_storage'),
+    // Omitted reopens every container known this session; a list reopens only those integer block positions.
+    containers: z.array(containerPositionSchema).min(1).max(MAX_INSPECT_CONTAINERS).optional(),
+  }).strict(),
   z.object({
     type: z.literal('deposit'),
     item: z.string().regex(/^(?:minecraft:)?[a-z0-9_]+$/).max(100),

@@ -14,6 +14,16 @@ const SAFE_FOOD = new Set(['bread', 'apple', 'golden_carrot', 'carrot', 'baked_p
 const CONTAINERS = new Set(['chest', 'trapped_chest', 'barrel']);
 const CLOCKWISE = { north: 'east', east: 'south', south: 'west', west: 'north' };
 const OFFSETS = { north: [0, 0, -1], east: [1, 0, 0], south: [0, 0, 1], west: [-1, 0, 0] };
+// Contents of an open container window, one entry per item name.
+function windowContents(window) {
+  const items = {};
+  for (const item of window.containerItems()) items[`minecraft:${item.name}`] = (items[`minecraft:${item.name}`] || 0) + item.count;
+  return Object.entries(items).map(([name, count]) => ({ name, count }));
+}
+// A deposit that reached an open window reports where it went, even when it fails, so items moved before the failure are attributable.
+// A new error, so abort reasons shared with later actions never carry this container.
+const withContainer = (error, container) => container && error instanceof Error && !error.container
+  ? Object.assign(new Error(error.message, { cause: error }), { container }) : error;
 const HOSTILES = new Set(['zombie', 'husk', 'drowned', 'skeleton', 'stray', 'wither_skeleton', 'creeper', 'spider', 'cave_spider', 'endermite', 'silverfish', 'witch', 'pillager', 'vindicator', 'evoker', 'ravager', 'guardian', 'elder_guardian', 'blaze', 'ghast', 'magma_cube', 'slime', 'phantom', 'warden']);
 
 export class MineflayerDriver {
@@ -230,9 +240,7 @@ export class MineflayerDriver {
   }
 
   recordContainer(position, name, window) {
-    const items = {};
-    for (const item of window.containerItems()) items[`minecraft:${item.name}`] = (items[`minecraft:${item.name}`] || 0) + item.count;
-    const contents = Object.entries(items).map(([itemName, count]) => ({ name: itemName, count }));
+    const contents = windowContents(window);
     const known = this.normalizeContainers();
     position = this.containerPosition(position);
     const previous = known[position.toString()];
@@ -311,14 +319,15 @@ export class MineflayerDriver {
     };
     const guard = setInterval(() => { check().catch(error => local.abort(error)); }, 250);
     try {
-      return { message: await this.perform(action, { signal: combined, onProgress, collectionTimeoutMs }) || 'Completed.' };
+      const outcome = await this.perform(action, { signal: combined, onProgress, collectionTimeoutMs });
+      return typeof outcome === 'object' && outcome ? outcome : { message: outcome || 'Completed.' };
     } catch (error) {
       if (interruptedForFood && !scopedSignal.aborted) {
         clearInterval(guard);
         await eatingTask;
         this.survival = 'Ate food; replan from current state';
         // Restart from the current inventory/position without duplicating a collection quota.
-        throw new Error('Interrupted to eat. Food consumed; replan from fresh state.');
+        throw withContainer(new Error('Interrupted to eat. Food consumed; replan from fresh state.'), error?.container);
       }
       if (interruptedForSurvival && !scopedSignal.aborted) {
         clearInterval(guard);
@@ -329,7 +338,7 @@ export class MineflayerDriver {
           const retreatSignal = AbortSignal.any([scopedSignal, AbortSignal.timeout(60_000)]);
           await this.goTo(home, retreatSignal, action.type === 'collect' ? this.collectMovements : this.movements).catch(retreatError => { if (scopedSignal.aborted) throw scopedSignal.reason; this.survival = `Retreat failed: ${retreatError.message}`; });
         } else this.survival = 'Low health; no saved shelter';
-        throw new Error('Action interrupted for survival. Check health and shelter before continuing.');
+        throw withContainer(new Error('Action interrupted for survival. Check health and shelter before continuing.'), error?.container);
       }
       // timers/promises rejects with a generic AbortError; report why control ended (e.g. death) instead.
       throw scopedSignal.aborted ? scopedSignal.reason : error;
@@ -421,7 +430,7 @@ export class MineflayerDriver {
       case 'goto': await this.goTo(action, signal); return;
       case 'eat': await this.eat(signal); return;
       case 'deposit': return this.deposit(action, signal);
-      case 'inspect_storage': return this.inspectStorage(signal);
+      case 'inspect_storage': return this.inspectStorage(signal, action.containers);
       case 'wait': await delay(action.seconds * 1000, undefined, { signal }); return;
       case 'collect': {
         const name = action.block.replace('minecraft:', '');
@@ -435,6 +444,15 @@ export class MineflayerDriver {
         requireTool();
         const count = () => this.bot.inventory.items().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0);
         const target = count() + action.count;
+        // Pickups only land in the 36 main slots (items() and emptySlotCount() exclude armor, offhand, and crafting);
+        // a partial stack of the target with room still counts as space.
+        const stackSize = this.bot.registry.itemsByName[name]?.stackSize ?? 64;
+        const hasRoom = () => {
+          const items = this.bot.inventory.items();
+          const empty = typeof this.bot.inventory.emptySlotCount === 'function' ? this.bot.inventory.emptySlotCount() : 36 - items.length;
+          return empty > 0 || items.some(item => item.name === name && item.count < (item.stackSize ?? stackSize));
+        };
+        const inventoryFull = () => new Error(`Inventory full; collected ${Math.max(0, count() - target + action.count)} of ${action.count} ${name}.`);
         const start = this.bot.entity.position.clone();
         const failed = new Set();
         // Blocks whose path took too long to plan; retried with the full planning budget once quicker ones run out.
@@ -447,6 +465,7 @@ export class MineflayerDriver {
           while (count() < target) {
             miningSignal.throwIfAborted();
             requireTool();
+            if (!hasRoom()) throw inventoryFull();
             const positions = this.bot.findBlocks({ matching: blockId, maxDistance: 48, count: 64 });
             positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
             const candidates = positions.filter(pos => !failed.has(pos.toString()));
@@ -462,9 +481,12 @@ export class MineflayerDriver {
               const tool = this.bot.pathfinder.bestHarvestTool(block);
               if (tool) await this.abortable(() => this.bot.equip(tool, 'hand'), step);
               if (!this.bot.canDigBlock(block)) { failed.add(position.toString()); continue; }
+              // Items picked up on the way can take the last slot; never break a block whose drop cannot be kept.
+              if (!hasRoom()) continue;
               const before = count();
               await this.abortable(() => this.bot.dig(block), step);
-              await this.pickUpDrop(position, () => count() > before, step);
+              // A drop the inventory cannot take is not worth walking to; the next pass reports the full inventory.
+              if (hasRoom()) await this.pickUpDrop(position, () => count() > before, step);
               onProgress(`Inventory: ${count()}/${target}`);
             } catch (error) {
               miningSignal.throwIfAborted();
@@ -487,10 +509,12 @@ export class MineflayerDriver {
     }
   }
 
-  async reachContainer(position, signal) {
+  async reachContainer(position, signal, scoped = false) {
     const block = this.bot.blockAt(position);
     if (!block || !CONTAINERS.has(block.name)) throw new Error(`The container at ${position.x} ${position.y} ${position.z} is gone.`);
-    if (this.bot.entity.position.distanceTo(position) > 16) throw new Error('Storage inspection requires all previously opened containers to be within 16 blocks. Return near storage before finishing.');
+    if (this.bot.entity.position.distanceTo(position) > 16) throw new Error(scoped
+      ? `Storage inspection requires the requested containers to be within 16 blocks; the ${block.name} at ${position.x} ${position.y} ${position.z} is farther. Return near it before finishing.`
+      : 'Storage inspection requires all previously opened containers to be within 16 blocks. Return near storage before finishing.');
     // Open from wherever the chest is in reach; a walk to an adjacent block can fail beside furniture and walls.
     const inReach = () => this.bot.entity.position.offset(0, 1.62, 0).distanceTo(position.offset(0.5, 0.5, 0.5)) <= 4;
     // The pathfinder can give up planning ("Took to long to decide path") after walking most of the way; judge by reach.
@@ -506,14 +530,30 @@ export class MineflayerDriver {
     return current;
   }
 
-  async inspectStorage(signal) {
+  // A requested position names a known record by its key or any current member, so either half of a double chest selects it once.
+  requestedContainers(known, requested) {
+    const records = new Map();
+    for (const { x, y, z } of requested) {
+      const record = Object.values(known).find(candidate => [candidate, ...(candidate.members || [])].some(at => at.x === x && at.y === y && at.z === z));
+      if (!record) {
+        const block = this.bot.blockAt(new Vec3(x, y, z));
+        if (block && !CONTAINERS.has(block.name)) throw new Error(`There is no chest or barrel at ${x} ${y} ${z}.`);
+        throw new Error(`The container at ${x} ${y} ${z} has not been opened in this session, so it has no contents to refresh.`);
+      }
+      records.set(`${record.x},${record.y},${record.z}`, record);
+    }
+    return [...records.values()];
+  }
+
+  async inspectStorage(signal, requested) {
     // Never substitute cached contents when a required container is gone, blocked, or out of reach.
-    const records = Object.values(this.normalizeContainers());
+    const known = this.normalizeContainers();
+    const records = requested ? this.requestedContainers(known, requested) : Object.values(known);
     const start = this.bot.entity.position.clone();
     for (const record of records) {
       signal.throwIfAborted();
       const position = new Vec3(record.x, record.y, record.z);
-      const block = await this.reachContainer(position, signal);
+      const block = await this.reachContainer(position, signal, !!requested);
       await this.abortable(async () => {
         const window = await this.openContainer(block);
         try { signal.throwIfAborted(); this.recordContainer(position, block.name, window); }
@@ -522,7 +562,7 @@ export class MineflayerDriver {
     }
     // Inspection must not silently invalidate a completed return-home task.
     if (start.distanceTo(this.bot.entity.position) > 2) await this.goTo(start, signal);
-    return 'Refreshed previously opened storage from the server.';
+    return requested ? 'Refreshed the requested storage from the server.' : 'Refreshed previously opened storage from the server.';
   }
 
   async deposit(action, signal) {
@@ -540,11 +580,14 @@ export class MineflayerDriver {
     const block = await this.reachContainer(position, signal);
     let depositError;
     let deposited = 0;
+    // Set once the window opens: where items went and that container's live contents just before this deposit.
+    let container;
     // Count from the container: after a failed click, leftovers sit on the cursor until the window closes.
     const stored = window => window.containerItems().filter(item => item.type === type).reduce((sum, item) => sum + item.count, 0);
     await this.abortable(async () => {
       const window = await this.openContainer(block);
       const initial = stored(window);
+      container = { name: `minecraft:${block.name}`, x: position.x, y: position.y, z: position.z, before: windowContents(window) };
       try {
         this.recordContainer(position, block.name, window);
         // Move one stack per click sequence so handoff stops the transfer between stacks (16 for pearls, 1 for tools).
@@ -559,11 +602,11 @@ export class MineflayerDriver {
         this.recordContainer(position, block.name, window);
         window.close();
       }
-    }, signal);
+    }, signal).catch(error => { throw withContainer(error, container); });
     const where = `${block.name} at ${position.x} ${position.y} ${position.z}`;
-    if (depositError?.message === 'destination full') throw new Error(`The ${where} is full; deposited ${deposited} of ${amount} ${name}.`);
-    if (depositError) throw depositError;
-    return `Deposited ${deposited} ${name} into the ${where}.`;
+    if (depositError?.message === 'destination full') throw withContainer(new Error(`The ${where} is full; deposited ${deposited} of ${amount} ${name}.`), container);
+    if (depositError) throw withContainer(depositError, container);
+    return { message: `Deposited ${deposited} ${name} into the ${where}.`, container };
   }
 
   close() {

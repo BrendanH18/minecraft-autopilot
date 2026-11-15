@@ -17,6 +17,7 @@ export const TRANSITIONS = deep({
   death: 'The player dies.',
   dimension: 'The world, player, or dimension changes under the session.',
   'takeover-while-stopping': 'Control is taken back and a new session is requested before the interrupted native work has settled.',
+  'inventory-full': 'The inventory runs out of room for the collection target: no empty main slot and no partial stack of it with space.',
 });
 
 export const ACTIVITIES = deep({
@@ -47,6 +48,7 @@ const M = {
   f8: 'Control returned to the player with (F8|the takeover binding)',
   menu: 'game menu was opened',
   storageScreen: 'Storage screen was closed or replaced',
+  inventoryFull: 'Inventory full; collected \\d+ of \\d+ \\w+\\.',
 };
 const NEW_SESSION = { lease: 'new' };
 const released = (message, halts, extra = {}) => ({ mode: 'manual', job: message ? { status: 'cancelled', message } : null, halts, stoppingWindow: false, next: NEW_SESSION, ...extra });
@@ -55,6 +57,7 @@ const FABRIC_ONLY = reason => ({ automated: [], manual: ['fabric'], gaps: { demo
 const NO_INPUT = 'No in-game player input on this backend; `stop` scenarios cover its takeover path.';
 const NO_RECOVERY = 'DemoDriver collection has no mining phase or return trip to interrupt.';
 const NO_WORLD = 'DemoDriver is always connected to one fixed world and has no identity(); the Harness check is covered by mineflayer.';
+const NO_FULL_FABRIC = 'Not implemented on Fabric yet: its collection keeps breaking blocks whose drops cannot be picked up until the 180 s mining deadline. Check by hand once Fabric detects a full inventory.';
 const NO_STOPPING_EAT = 'Fabric ends eating on the client thread during release, so eating leaves no stopping window to take over into.';
 
 const SCENARIOS = [
@@ -169,6 +172,11 @@ const SCENARIOS = [
     fabric: { setup: 'Use a server with noticeable latency (e.g. a remote server); run `mc-agent deposit oak_log` with a chest nearby.',
       action: 'Run `mc-agent stop` immediately after the agent clicks the chest, then immediately start `mc-agent goto` nearby.',
       expected: 'If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.', observe: '`mc-agent job` in a loop (`mc-agent watch`); chest `Items` reads.' } },
+
+  // Failures that end a job without releasing control.
+  { id: 'inventory-full-collect', title: 'Inventory fills while mining for a collection quota', transition: 'inventory-full', interrupts: 'collect',
+    automated: ['demo', 'mineflayer'], manual: [], gaps: { fabric: NO_FULL_FABRIC },
+    expect: { mode: 'agent', job: { status: 'failed', message: M.inventoryFull }, halts: ['mining'], stoppingWindow: false, next: { lease: 'same' } } },
 ];
 
 export const LIFECYCLE_SCENARIOS = deep(SCENARIOS);

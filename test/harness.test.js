@@ -99,3 +99,26 @@ test('dimension changes release an idle session and pending native work prevents
   busy = false;
   harness.acquire(randomUUID());
 });
+
+test('deposit jobs report their container, including a failed deposit that may have moved items', async t => {
+  const driver = new DemoDriver();
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID(); harness.acquire(owner);
+  driver.inventory.push({ slot: 1, name: 'minecraft:oak_log', count: 4 });
+  harness.start(owner, { type: 'deposit', item: 'oak_log', count: 3 });
+  await harness.task;
+  const chest = { name: 'minecraft:chest', x: 3, y: 64, z: 3 };
+  assert.deepEqual(harness.observe().job.container, { ...chest, before: [] });
+  const execute = driver.execute;
+  driver.execute = async () => { throw Object.assign(new Error('The chest at 3 64 3 is full; deposited 0 of 1 oak_log.'), { container: { ...chest, before: [{ name: 'minecraft:oak_log', count: 3, extra: true }] } }); };
+  harness.start(owner, { type: 'deposit', item: 'oak_log', count: 1 });
+  await harness.task;
+  const job = harness.observe().job;
+  assert.equal(job.status, 'failed');
+  assert.deepEqual(job.container, { ...chest, before: [{ name: 'minecraft:oak_log', count: 3 }] });
+  driver.execute = execute;
+  harness.start(owner, { type: 'eat' });
+  await harness.task;
+  assert.equal('container' in harness.observe().job, false);
+});

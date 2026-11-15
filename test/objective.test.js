@@ -214,3 +214,58 @@ test('maximum distance is measured from the starting position and needs a final 
   for (const maxDistance of [-1, 10_001, NaN]) assert.throws(() => createObjective({ maxDistance }, state()));
   assert.equal(createObjective({}, state()), null);
 });
+
+test('task-scoped deposit verification counts only tracked containers against their pre-deposit contents', () => {
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const record = (x, items, id, name = 'minecraft:chest') => ({ name, x, y: 64, z: 0, items, sources: [{ id, items: logs(0) }], members: [{ x, y: 64, z: 0 }] });
+  // Cached contents opened before the task are never a baseline: the far barrel and the chest's stale 30 are ignored.
+  const initial = { ...state(), containers: [record(1, logs(30), 'chest'), record(100, logs(50), 'far', 'minecraft:barrel')] };
+  const objective = createObjective({ collect: { block: 'oak_log', count: 8 }, deposit: { item: 'oak_log', count: 8 } }, initial, { scopedStorage: true });
+  assert.deepEqual(objective.check(initial).checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 0, requiredAdditional: 8, evidence: 'last_observed', containers: [], met: false });
+  const current = { ...state(), inventory: logs(10), containers: [record(1, logs(30), 'chest'), record(100, logs(500), 'far', 'minecraft:barrel')] };
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(22) }, current);
+  // A second deposit into the same chest keeps the first baseline.
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(26) }, current);
+  assert.deepEqual(objective.storageTargets(current), [{ x: 1, y: 64, z: 0 }]);
+  let check = objective.check(current, { storageRefreshed: true });
+  assert.deepEqual(check.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, evidence: 'refreshed', containers: [{ x: 1, y: 64, z: 0 }], met: true });
+  assert.equal(check.checks.inventory.met, true);
+  current.containers[0].items = logs(29);
+  assert.equal(objective.check(current).met, false, 'a refreshed shortfall in the tracked chest is not met');
+  // The tracked inventory, rekeyed by a merge with a newly placed chest, is still found by its source.
+  current.containers = [{ ...record(0, logs(30), 'chest'), members: [{ x: 0, y: 64, z: 0 }, { x: 1, y: 64, z: 0 }] }];
+  assert.deepEqual(objective.storageTargets(current), [{ x: 1, y: 64, z: 0 }, { x: 0, y: 64, z: 0 }]);
+  assert.equal(objective.check(current).checks.deposit.storedAdditional, 8);
+  // Merged with other known storage, its old stock has no task baseline, so it fails closed.
+  current.containers[0].sources.push({ id: 'other', items: logs(40) });
+  current.containers[0].items = logs(70);
+  check = objective.check(current);
+  assert.equal(check.met, false);
+  assert.match(check.checks.deposit.error, /merged with other known storage/);
+});
+
+test('a deposit after a merge with unread storage does not adopt that storage as task baseline', () => {
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, { ...state(), containers: [] }, { scopedStorage: true });
+  const chest = (items, ids) => ({ name: 'minecraft:chest', x: 1, y: 64, z: 0, items, sources: ids.map(id => ({ id, items: logs(0) })), members: [{ x: 1, y: 64, z: 0 }, { x: 2, y: 64, z: 0 }] });
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(0) }, { ...state(), containers: [chest(logs(1), ['a'])] });
+  // A neighbouring chest holding 64 old logs merges with it; one more log is deposited into the double chest.
+  const current = { ...state(), containers: [chest(logs(66), ['a', 'b'])] };
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(65) }, current);
+  const check = objective.check(current, { storageRefreshed: true });
+  assert.equal(check.met, false);
+  assert.match(check.checks.deposit.error, /merged with other known storage/);
+});
+
+test('a replacement chest at a tracked coordinate gets its own baseline from its first deposit', () => {
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const record = (items, id) => ({ name: 'minecraft:chest', x: 1, y: 64, z: 0, items, sources: [{ id, items: logs(0) }] });
+  const objective = createObjective({ deposit: { item: 'oak_log', count: 8 } }, { ...state(), containers: [] }, { scopedStorage: true });
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(0) }, { ...state(), containers: [record(logs(8), 'old')] });
+  // The first chest is broken and a full one placed in its place; the bot deposits one more log into it.
+  const current = { ...state(), containers: [record(logs(65), 'new')] };
+  objective.trackDeposit({ name: 'minecraft:chest', x: 1, y: 64, z: 0, before: logs(64) }, current);
+  assert.equal(objective.check(current).checks.deposit.storedAdditional, 1);
+  assert.equal(objective.check(current).met, false);
+  assert.throws(() => objective.trackDeposit({ x: 1, y: 64, z: 0 }, current), 'a report without its prior contents is rejected');
+});

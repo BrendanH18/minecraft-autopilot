@@ -17,7 +17,7 @@ Every scenario assigns each backend exactly once: `automated` (run by `node --te
 - **demo**: the `DemoDriver` simulation. It has one fixed, always-connected world, so disconnects, dimension changes, and collection recovery are gaps.
 - **mineflayer**: the real `MineflayerDriver` on a mocked bot (EventEmitter, minecraft-data 1.21.1, Vec3) whose pathfinder walks one block per tick, whose digging, equipping, and container openings stay pending like real server replies, and which emits mineflayer's `death`, `end`, and `game` events.
 
-The rigs interrupt at exact milestones (first step, dig, equip, first stack, return trip) and use an injected clock for lease expiry. Death, disconnect, dimension changes, and expiry are detected by the Harness's own tick, as they would be live. Every automated case asserts the shared expectation strictly. Mark a newly found mismatch as a `todo` in the test's `KNOWN` table until the source is fixed.
+The rigs interrupt at exact milestones (first step, dig, equip, first stack, return trip) and use an injected clock for lease expiry. Death, disconnect, dimension changes, and expiry are detected by the Harness's own tick, as they would be live. The `inventory-full-collect` row is a failure rather than a handoff: the rigs fill the inventory mid-collection, and the job must fail on its own (no collection deadline is shortened) while the session keeps control. Every automated case asserts the shared expectation strictly. Mark a newly found mismatch as a `todo` in the test's `KNOWN` table until the source is fixed.
 
 The table first exposed `death-goto`, `dimension-goto`, and `disconnect-collect` on mineflayer: the driver aborted on the bot event before the Harness tick, so the job ended `failed` with the driver's raw reason. The Harness now runs its lifecycle check when an action fails, so these end `cancelled` with the shared message on every backend.
 
@@ -164,5 +164,6 @@ Fabric needs a person at the keyboard. Use the packaged mod in a normal launcher
 Not run on Fabric:
 
 - `takeover-while-stopping-eat`: Fabric ends eating on the client thread during release, so eating leaves no stopping window to take over into.
+- `inventory-full-collect`: Not implemented on Fabric yet: its collection keeps breaking blocks whose drops cannot be picked up until the 180 s mining deadline. Check by hand once Fabric detects a full inventory.
 
 <!-- fabric-checklist:end -->
