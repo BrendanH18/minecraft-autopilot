@@ -4,6 +4,13 @@ import { assertPlayable, normalizeAction } from './protocol.js';
 const COLLECT_RETURN_MS = 60_000;
 const COLLECT_MARGIN_MS = 15_000;
 
+// A deposit names the container it used and that container's contents just before the deposit, so a planner can scope verification to it.
+function reportContainer(job, container) {
+  if (!container) return;
+  const { name, x, y, z, before } = container;
+  job.container = { name, x, y, z, before: before.map(item => ({ name: item.name, count: item.count })) };
+}
+
 /** Shared bridge lifecycle for the server bot and deterministic demo. */
 export class Harness {
   constructor(driver, { now = Date.now, leaseMs = 8000, jobTimeoutMs = 180_000 } = {}) {
@@ -81,6 +88,7 @@ export class Harness {
     }).then(result => {
       if (controller.signal.aborted || job.status !== 'running') return;
       job.status = 'completed'; job.message = result?.message || 'Completed.';
+      reportContainer(job, result?.container);
     }).catch(error => {
       // A driver may abort on death, disconnect, or a world change before the periodic tick notices; let the
       // tick release first so these end as cancelled sessions on every backend.
@@ -88,6 +96,7 @@ export class Harness {
       if (job.status === 'running') {
         job.status = controller.signal.aborted && controller.signal.reason?.message !== 'Action timed out.' ? 'cancelled' : 'failed';
         job.message = controller.signal.aborted ? controller.signal.reason?.message || error.message : error.message;
+        reportContainer(job, error?.container);
       }
     }).finally(() => {
       clearTimeout(deadline);

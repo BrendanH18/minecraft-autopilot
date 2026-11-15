@@ -387,7 +387,13 @@ waypoint.command('goto').description('Walk to a saved waypoint like goto; refuse
     } finally { await adapter.close(); }
   });
 program.command('inspect-storage').description('Open known storage to refresh observed contents (server bot and demo); takes control.')
-  .action(() => perform({ type: 'inspect_storage' }));
+  .option('--container <x,y,z>', 'reopen only this previously opened container (repeatable, up to 16); default: every known container', (value, list = []) => {
+    const parts = value.split(',');
+    if (parts.length !== 3 || parts.some(part => !/^\s*-?\d+\s*$/.test(part))) throw new InvalidArgumentError('Use integer block coordinates x,y,z, for example 3,64,-2.');
+    const [x, y, z] = parts.map(Number);
+    return [...list, { x, y, z }];
+  })
+  .action(options => perform(normalizeAction({ type: 'inspect_storage', ...(options.container && { containers: options.container }) })));
 program.command('wait').description('Stay under agent control for 1–3600 seconds with local survival behavior.')
   .argument('<seconds>', 'duration in seconds', positiveNumber)
   .action(seconds => perform(normalizeAction({ type: 'wait', seconds })));

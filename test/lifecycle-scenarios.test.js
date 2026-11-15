@@ -28,7 +28,7 @@ async function until(condition, what, timeoutMs = 5000) {
 const RIGS = {
   demo: {
     activities: new Set(['idle', 'goto', 'collect', 'eat', 'deposit', 'wait']),
-    transitions: new Set(['stop', 'cancel', 'expiry', 'death', 'takeover-while-stopping']),
+    transitions: new Set(['stop', 'cancel', 'expiry', 'death', 'takeover-while-stopping', 'inventory-full']),
     create(t) {
       let clock = 0;
       const driver = new DemoDriver();
@@ -48,7 +48,14 @@ const RIGS = {
           if (activity === 'deposit') { start({ type: 'deposit', item: 'oak_log' }); await microtasks(); }
           if (activity === 'wait') { start({ type: 'wait', seconds: 10 }); await microtasks(); }
         },
-        trigger: { death() { driver.player.health = 0; } },
+        trigger: {
+          death() { driver.player.health = 0; },
+          // Top up the log stack and fill every other main slot while the collection is under way.
+          inventoryFull() {
+            driver.inventory.find(item => item.name === 'minecraft:oak_log').count = 64;
+            for (let slot = 2; slot < 36; slot++) driver.inventory.push({ slot, name: 'minecraft:cobblestone', count: 64 });
+          },
+        },
         observables: () => ({
           movement: JSON.stringify(driver.player.position), mining: count('minecraft:oak_log'),
           consumption: `${count('minecraft:bread')}/${driver.player.hunger}`, deposit: JSON.stringify(driver.chest.items),
@@ -60,7 +67,7 @@ const RIGS = {
   },
   mineflayer: {
     activities: new Set(['idle', 'goto', 'collect', 'collect-recovery', 'eat', 'deposit', 'wait']),
-    transitions: new Set(['stop', 'cancel', 'expiry', 'death', 'disconnect', 'dimension', 'takeover-while-stopping']),
+    transitions: new Set(['stop', 'cancel', 'expiry', 'death', 'disconnect', 'dimension', 'takeover-while-stopping', 'inventory-full']),
     create(t, scenario) {
       let clock = 0;
       const activity = scenario.interrupts;
@@ -72,7 +79,7 @@ const RIGS = {
       const log = { steps: 0, trips: [], digs: 0, consumed: 0, batches: 0, equips: 0 };
       const replies = []; // Native replies (equip, a container opening) the server has not sent yet.
       const later = value => new Promise(resolve => replies.push(() => resolve(value)));
-      let movements, walking = null, digging = null;
+      let movements, walking = null, digging = null, dug = null, full = false;
       // Milestones let the test interrupt at an exact point instead of guessing with timers.
       const reached = new EventEmitter();
       const milestone = name => once(reached, name, { signal: AbortSignal.timeout(5000) });
@@ -108,8 +115,16 @@ const RIGS = {
         registry, entity: { position: new Vec3(0, 64, 0) }, entities: {},
         username: 'Scenario', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
         health: 20, food: activity === 'eat' ? 18 : 20,
-        inventory: { items: () => Object.entries(held).filter(([, count]) => count > 0)
-          .map(([name, count], index) => ({ name, count, slot: 36 + index, type: registry.itemsByName[name].id })) },
+        inventory: {
+          items() {
+            const stacks = Object.entries(held).filter(([, count]) => count > 0)
+              .map(([name, count], index) => ({ name, count, slot: 36 + index, type: registry.itemsByName[name].id }));
+            // Full: cobblestone stacks take every other main slot, so nothing of the target fits.
+            while (full && stacks.length < 36) stacks.push({ name: 'cobblestone', count: 64, slot: stacks.length - 3, type: registry.itemsByName.cobblestone.id });
+            return stacks;
+          },
+          emptySlotCount() { return 36 - this.items().length; },
+        },
         pathfinder: {
           thinkTimeout: 5000, bestHarvestTool: () => null, goto: walk,
           setMovements(value) { movements = value; },
@@ -120,7 +135,7 @@ const RIGS = {
           : position.equals(chest) ? { type: ids.chest, name: 'chest', position, boundingBox: 'block', getProperties: () => ({ facing: 'west', type: 'single' }) }
             : { type: 0, name: 'air', position, boundingBox: 'empty' }),
         canDigBlock: () => true,
-        dig: () => { log.digs++; reached.emit('dig'); return new Promise((_, reject) => { digging = reject; }); },
+        dig: () => { log.digs++; reached.emit('dig'); return new Promise((resolve, reject) => { digging = reject; dug = resolve; }); },
         stopDigging() { digging?.(new Error('Digging aborted')); digging = null; },
         equip: () => { log.equips++; reached.emit('equip'); return later(); },
         consume: async () => { log.consumed++; held.bread--; bot.food = 20; },
@@ -149,6 +164,8 @@ const RIGS = {
           death() { bot.health = 0; bot.emit('death'); },
           disconnect() { bot.emit('end', 'socketClosed'); },
           dimension() { bot.game.dimension = 'the_nether'; bot.emit('game'); },
+          // The block breaks, but its drop finds no room: the rest of the inventory filled during the dig.
+          inventoryFull() { full = true; dug?.(); digging = dug = null; },
         },
         observables: () => ({
           movement: `${bot.entity.position}/${log.steps}/${log.trips.length}`,
@@ -176,6 +193,8 @@ const TRIGGERS = {
   death: rig => { rig.trigger.death(); return harnessNotices(rig); },
   disconnect: rig => { rig.trigger.disconnect(); return harnessNotices(rig); },
   dimension: rig => { rig.trigger.dimension(); return harnessNotices(rig); },
+  // No collection deadline is shortened here, so the job must end promptly on its own.
+  'inventory-full': rig => { rig.trigger.inventoryFull(); return until(() => rig.harness.job?.status !== 'running', 'collection to stop on the full inventory'); },
 };
 
 function refusedAsStopping(rig) {

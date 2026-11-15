@@ -257,7 +257,8 @@ test('agent verifies a deposit through the real simulated bridge', async t => {
   const result = await runAgent(adapter, 'Store eight logs in the chest', { model: 'test', log() {},
     criteria: { deposit: { item: 'oak_log', count: 8 } }, fetchImpl: async () => reply(decisions.shift()) });
   assert.equal(result.status, 'criteria_met');
-  assert.deepEqual(result.verification.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, evidence: 'refreshed', met: true });
+  assert.deepEqual(result.verification.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, evidence: 'refreshed',
+    containers: [{ x: 3, y: 64, z: 3 }], met: true });
   assert.deepEqual(driver.chest.items, [{ name: 'minecraft:oak_log', count: 12 }]);
 });
 
@@ -518,4 +519,137 @@ test('partially cached split storage cannot count old stock as a deposit after b
   assert.equal(result.status, 'criteria_unmet');
   assert.equal(result.verification.checks.deposit.storedAdditional, 0);
   assert.equal(inspections, 4, 'baseline and three final checks all refresh both known inventories');
+});
+
+// A server-bot-like bridge: a chest whose cached contents are stale and an unrelated barrel opened earlier, 100 blocks away.
+function scopedStorageAdapter({ backend = 'mineflayer' } = {}) {
+  const adapter = verifiableAdapter();
+  const logs = count => [{ name: 'minecraft:oak_log', count }];
+  const record = (name, x, id, items) => ({ name, x, y: 64, z: 0, items, sources: [{ id, items }], members: [{ x, y: 64, z: 0 }] });
+  adapter.state.backend = backend;
+  adapter.state.containers = [record('minecraft:barrel', 100, 'far', logs(50)), record('minecraft:chest', 1, 'near', logs(30)), record('minecraft:chest', 2, 'spare', logs(3))];
+  adapter.world = { 100: 50, 1: 22, 2: 3 };
+  adapter.capacity = { 1: Infinity, 2: Infinity };
+  adapter.inspections = [];
+  adapter.execute = async function (action) {
+    this.actions.push(action);
+    const containers = this.state.containers;
+    if (action.type === 'inspect_storage') {
+      this.inspections.push(action.containers ?? 'all');
+      const requested = action.containers ? containers.filter(container => action.containers.some(({ x }) => x === container.x)) : containers;
+      if (requested.some(container => container.x === 100)) throw new Error('Storage inspection requires all previously opened containers to be within 16 blocks. Return near storage before finishing.');
+      if (this.blocked) throw new Error('The container did not open; something may be blocking its lid.');
+      for (const container of requested) container.items = logs(this.world[container.x]);
+      return { status: 'completed', message: 'Refreshed.' };
+    }
+    if (action.type === 'deposit') {
+      const x = this.nextChest ?? 1;
+      const container = containers.find(candidate => candidate.x === x);
+      const before = logs(this.world[x]);
+      const moved = Math.min(action.count, this.capacity[x]);
+      this.capacity[x] -= moved;
+      this.world[x] += moved;
+      this.state.inventory[0].count -= moved;
+      container.items = logs(this.world[x]);
+      const reported = this.unreported ? {} : { container: { name: container.name, x, y: 64, z: 0, before } };
+      if (moved < action.count) throw Object.assign(new Error(`The chest at ${x} 64 0 is full; deposited ${moved} of ${action.count} oak_log.`), reported);
+      return { status: 'completed', message: `Deposited ${moved}.`, ...reported };
+    }
+    return { status: 'completed' };
+  };
+  return adapter;
+}
+
+test('a distant unrelated container opened earlier no longer fails a task-scoped deposit check', async () => {
+  const adapter = scopedStorageAdapter();
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, { type: 'done', reason: 'Stored.' }];
+  const inputs = [];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async (url, request) => { inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content)); return reply(decisions.shift()); } });
+  assert.equal(result.status, 'criteria_met');
+  // The stale cached 30 is not a baseline; the chest held 22 when the deposit opened it.
+  assert.deepEqual(result.verification.checks.deposit, { item: 'minecraft:oak_log', storedAdditional: 8, requiredAdditional: 8, evidence: 'refreshed',
+    containers: [{ x: 1, y: 64, z: 0 }], met: true });
+  assert.deepEqual(adapter.inspections, [[{ x: 1, y: 64, z: 0 }]], 'no starting inspection; the final one names only the chest used');
+  assert.deepEqual(inputs[1].history[0].result.container, { name: 'minecraft:chest', x: 1, y: 64, z: 0 }, 'pre-deposit contents stay out of the prompt');
+});
+
+test('task-scoped final inspection still rejects stale success after another player removes the deposit', async () => {
+  const adapter = scopedStorageAdapter();
+  let replies = 0;
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => {
+      // During inference the deposited logs are taken; the bot's cached chest still shows 30.
+      if (++replies === 2) adapter.world[1] = 22;
+      return reply(replies === 1 ? { type: 'deposit', item: 'oak_log', count: 8 } : { type: 'done', reason: 'Stored.' });
+    } });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.equal(result.verification.checks.deposit.storedAdditional, 0);
+  assert.equal(result.verification.checks.deposit.evidence, 'refreshed');
+  assert.deepEqual(adapter.inspections, Array.from({ length: 3 }, () => [{ x: 1, y: 64, z: 0 }]));
+});
+
+test('a blocked task container fails scoped verification instead of using its cached contents', async () => {
+  const adapter = scopedStorageAdapter();
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, ...Array.from({ length: 3 }, () => ({ type: 'done', reason: 'Stored.' }))];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => { if (decisions.length === 3) adapter.blocked = true; return reply(decisions.shift()); } });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.equal(result.verification.checks.deposit.evidence, 'last_observed');
+  assert.match(result.verification.checks.deposit.error, /did not open/);
+});
+
+test('a partial failed deposit stays attributed, and every task container is inspected together', async () => {
+  const adapter = scopedStorageAdapter();
+  adapter.capacity[1] = 5;
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, { type: 'deposit', item: 'oak_log', count: 3 }, { type: 'done', reason: 'Stored.' }];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => { if (decisions.length === 2) adapter.nextChest = 2; return reply(decisions.shift()); } });
+  assert.equal(result.status, 'criteria_met');
+  assert.equal(result.verification.checks.deposit.storedAdditional, 8);
+  assert.deepEqual(adapter.inspections, [[{ x: 1, y: 64, z: 0 }, { x: 2, y: 64, z: 0 }]]);
+});
+
+test('a completed deposit that names no container cannot be verified on a scoped backend', async () => {
+  const adapter = scopedStorageAdapter();
+  adapter.unreported = true;
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, ...Array.from({ length: 3 }, () => ({ type: 'done', reason: 'Stored.' }))];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_unmet');
+  assert.match(result.verification.checks.deposit.error, /did not report which container/);
+  assert.deepEqual(adapter.inspections, []);
+});
+
+test('backends without scoped storage keep refreshing every known container, unchanged', async () => {
+  const adapter = scopedStorageAdapter({ backend: 'fabric' });
+  adapter.state.containers.shift();
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, { type: 'done', reason: 'Stored.' }];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply(decisions.shift()) });
+  assert.equal(result.status, 'criteria_met');
+  assert.deepEqual(adapter.inspections, ['all', 'all']);
+  assert.equal('containers' in result.verification.checks.deposit, false);
+});
+
+test('a scoped demo bridge rejects unknown and unopened storage and reports its deposit container', async t => {
+  const directory = await testDirectory(t, 'scoped-demo-');
+  const driver = new DemoDriver();
+  const bridge = await startBridge(new Harness(driver), { discoveryPath: join(directory, 'bridge.json') });
+  const adapter = await FabricAdapter.connect(join(directory, 'bridge.json'));
+  t.after(async () => { await adapter.close(); await bridge.close(); });
+  const chest = { x: 3, y: 64, z: 3 };
+  await assert.rejects(adapter.execute({ type: 'inspect_storage', containers: [chest] }), /has not been opened/);
+  await adapter.execute({ type: 'collect', block: 'oak_log', count: 2 });
+  const deposit = await adapter.execute({ type: 'deposit', item: 'oak_log' });
+  assert.deepEqual(deposit.container, { name: 'minecraft:chest', ...chest, before: [] });
+  await assert.rejects(adapter.execute({ type: 'inspect_storage', containers: [{ x: 0, y: 64, z: 0 }] }), /no chest or barrel at 0 64 0/);
+  assert.equal((await adapter.execute({ type: 'inspect_storage', containers: [chest] })).message, 'Inspected the requested demo storage.');
+  assert.equal((await adapter.execute({ type: 'inspect_storage' })).message, 'Inspected demo storage.');
+  // A failed deposit's container reaches the client error, since items may have moved before the failure.
+  driver.execute = async () => { throw Object.assign(new Error('The chest at 3 64 3 is full; deposited 1 of 2 oak_log.'), { container: { name: 'minecraft:chest', ...chest, before: [] } }); };
+  await assert.rejects(adapter.execute({ type: 'deposit', item: 'oak_log', count: 1 }), error => {
+    assert.deepEqual(error.container, { name: 'minecraft:chest', ...chest, before: [] });
+    return true;
+  });
 });

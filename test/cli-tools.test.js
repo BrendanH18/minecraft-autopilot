@@ -69,10 +69,14 @@ test('all ten CLI tools run against the real demo bridge; observation preserves 
   assert.ok(driver.chest.observedAt);
   assert.equal((await run('wait', '1')).status, 'completed');
   assert.equal(harness.observe().mode, 'manual');
-  for (const args of [['wait', '0'], ['wait', '3601'], ['blocks', '--radius', '0'], ['threats', '--limit', '1.2'], ['distance', '0', '321', '0'], ['inventory', '--item', '../bread']]) {
+  // The demo chest has not been opened, so a scoped inspection of it fails; malformed positions fail before connecting.
+  for (const args of [['wait', '0'], ['wait', '3601'], ['blocks', '--radius', '0'], ['threats', '--limit', '1.2'], ['distance', '0', '321', '0'], ['inventory', '--item', '../bread'],
+    ['inspect-storage', '--container', '3,64,3'], ['inspect-storage', '--container', '3,64'], ['inspect-storage', '--container', '3.5,64,3']]) {
     await assert.rejects(run(...args));
     assert.equal(harness.observe().mode, 'manual');
   }
+  driver.chest.items = [];
+  assert.equal((await run('inspect-storage', '--container', '3,64,3')).message, 'Inspected the requested demo storage.');
 });
 
 

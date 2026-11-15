@@ -159,12 +159,16 @@ test('the full demo scenario fills every slot and refuses new items until a stac
   assert.deepEqual(state.inventory.map(stack => stack.slot), Array.from({ length: 36 }, (_, index) => index));
   assert.deepEqual(freeSlotsView(state), { slots: 36, used: 36, free: 0 });
   const options = { signal: new AbortController().signal, onProgress: () => {} };
-  await assert.rejects(driver.execute({ type: 'collect', block: 'minecraft:oak_log', count: 1 }, options), /Inventory is full\./);
-  await driver.execute({ type: 'collect', block: 'minecraft:cobblestone', count: 1 }, options);
+  await assert.rejects(driver.execute({ type: 'collect', block: 'minecraft:oak_log', count: 1 }, options), /^Error: Inventory full; collected 0 of 1 oak_log\.$/);
+  // Full stacks have no room either; only a partial stack of the target or an empty slot counts as space.
+  await assert.rejects(driver.execute({ type: 'collect', block: 'minecraft:cobblestone', count: 1 }, options), /^Error: Inventory full; collected 0 of 1 cobblestone\.$/);
   await driver.execute({ type: 'deposit', item: 'minecraft:sand' }, options);
   assert.equal(freeSlotsView(driver.observe()).free, 5);
   await driver.execute({ type: 'collect', block: 'minecraft:oak_log', count: 2 }, options);
   assert.deepEqual(driver.observe().inventory.at(-1), { slot: 31, name: 'minecraft:oak_log', count: 2 });
+  // Collection tops up the partial stack, then fills the free slots, and keeps that progress when it runs out of room.
+  await assert.rejects(driver.execute({ type: 'collect', block: 'minecraft:oak_log', count: 400 }, options), /^Error: Inventory full; collected 318 of 400 oak_log\.$/);
+  assert.deepEqual(driver.observe().inventory.slice(31).map(stack => [stack.slot, stack.count]), [[31, 64], [32, 64], [33, 64], [34, 64], [35, 64]]);
 
   const standard = new DemoDriver();
   await standard.execute({ type: 'collect', block: 'minecraft:oak_log', count: 1 }, options);

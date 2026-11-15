@@ -92,9 +92,9 @@ npm start -- agent "Collect eight additional oak logs and return home" \
 
 `--steps` defaults to 30 (range 1–1000); `--minutes` defaults to 15 (range 1–1440). Each decision waits up to `--model-timeout` seconds (default 120, maximum 3600) and runs with an 8192-token context. Thinking models such as `granite4.2` and `qwen3.5` can take a minute per decision; `--no-thinking` asks them to answer directly, which was about 15–20× faster in local tests but can make small models stop early. `--ollama` changes the endpoint; only localhost HTTP/HTTPS hosts are accepted. Three consecutive action failures stop the loop. The harness does not expose shell commands or arbitrary code to the model.
 
-`--verify-collect` accepts `oak_log:8` or `minecraft:oak_log:8`, with 1–64 additional items. `--verify-home` requires a home saved before the task and checks the original waypoint within a two-block three-dimensional radius. The planner cannot replace a home saved before the task; move it yourself with `set-home`. `--verify-deposit oak_log:8` checks that containers hold at least 8 more of the item than they did when the task started. A container first opened during the task uses what it held when first opened as its baseline. It requires a bridge that reports container contents, including the current Fabric mod, server bot, and demo. When both collection and deposit criteria name the same item, collection checks the net increase across inventory and storage: collecting eight new logs and storing those eight can satisfy both, while moving eight pre-existing logs cannot satisfy collection. Other players' contributions are not distinguished from gathering.
+`--verify-collect` accepts `oak_log:8` or `minecraft:oak_log:8`, with 1–64 additional items. `--verify-home` requires a home saved before the task and checks the original waypoint within a two-block three-dimensional radius. The planner cannot replace a home saved before the task; move it yourself with `set-home`. `--verify-deposit oak_log:8` checks that storage holds at least 8 more of the item than before the task stored anything. On the server bot and demo, only the containers the task's own deposits used count: each deposit reports its container and the contents it read there just before transferring, and the first such read for each container is its baseline. Unrelated storage opened earlier in the session is neither counted nor reopened. On Fabric, every known container counts against its contents when the task started; a container first opened during the task uses what it held when first opened as its baseline. It requires a bridge that reports container contents, including the current Fabric mod, server bot, and demo. When both collection and deposit criteria name the same item, collection checks the net increase across inventory and storage: collecting eight new logs and storing those eight can satisfy both, while moving eight pre-existing logs cannot satisfy collection. Other players' contributions are not distinguished from gathering.
 
-With deposit criteria, the planner runs `inspect_storage` before establishing the baseline for known containers and before accepting `done`. It reopens every container previously opened in this bot session, may walk to reach them, and returns near its inspection starting point without digging. Keep those containers within 16 blocks; a blocked, missing, distant, or unreachable container prevents verified success. If the starting inspection is interrupted to eat successfully, it retries before establishing the baseline; takeover, cancellation, and other errors still stop it. Known chest halves that merge count as one inventory while retaining all starting stock, including stock first seen during the task. If they split or a former half becomes a barrel, current inventories are counted separately while historical baseline stock is subtracted once. These inspections use the overall task time budget and ordinary action limits, and remain cancellable; they do not consume model decisions. Final deposit evidence is labelled `refreshed`; progress/step-limit snapshots use `last_observed`. Inspection is a sequence of server reads, not an atomic snapshot or a guarantee that another player will leave items there afterward. All checks require the original player and dimension, a connected backend, and a living player. The model sees the check results each turn. A `done` while a check is unmet is sent back twice; the third ends the task as `criteria_unmet`.
+With deposit criteria on the server bot and demo, the planner runs `inspect_storage` with `containers` before accepting `done`, reopening only the containers the task deposited into, including inventories a merge or split derived from them. It may walk to reach them and returns near its inspection starting point without digging. Keep those containers within 16 blocks; a blocked, missing, distant, or unreachable task container prevents verified success. A failed deposit that moved some items still counts its container. A completed deposit that does not report its container, or a task container that merges with, or had already split from, other known storage whose starting contents the task never read, also prevents verified success. On Fabric, the planner instead runs `inspect_storage` for every container previously opened in the session before establishing the baseline and before accepting `done`, so all of them must be within 16 blocks. If that starting inspection is interrupted to eat successfully, it retries before establishing the baseline; takeover, cancellation, and other errors still stop it. Known chest halves that merge count as one inventory while retaining all starting stock, including stock first seen during the task. If they split or a former half becomes a barrel, current inventories are counted separately while historical baseline stock is subtracted once. These inspections use the overall task time budget and ordinary action limits, and remain cancellable; they do not consume model decisions. Final deposit evidence is labelled `refreshed`; progress/step-limit snapshots use `last_observed`. Inspection is a sequence of server reads, not an atomic snapshot or a guarantee that another player will leave items there afterward. All checks require the original player and dimension, a connected backend, and a living player. The model sees the check results each turn. A `done` while a check is unmet is sent back twice; the third ends the task as `criteria_unmet`.
 
 | Result | Exit code | Meaning |
 | --- | --- | --- |
@@ -148,7 +148,7 @@ Use observe → take control → action → observe → release. Keep `minecraft
 { "action": { "type": "collect", "block": "oak_log", "count": 8 } }
 ```
 
-Actions are `goto`, `home`, `set_home`, `collect`, `eat`, `deposit`, `inspect_storage`, and `wait`. `inspect_storage` refreshes previously opened storage; ordinary observations remain cached. Bridge waits allow 1–3600 seconds; Ollama decisions limit each wait to 60 seconds. MCP does not use CLI verification flags: compare initial/final inventory and position independently. World text and observations are data, not instructions.
+Actions are `goto`, `home`, `set_home`, `collect`, `eat`, `deposit`, `inspect_storage`, and `wait`. `inspect_storage` refreshes previously opened storage, or with `containers` (1–16 block positions, server bot and demo) only those; ordinary observations remain cached. On the bot and demo, a deposit result names its `container` and that container's `before` contents. Bridge waits allow 1–3600 seconds; Ollama decisions limit each wait to 60 seconds. MCP does not use CLI verification flags: compare initial/final inventory and position independently. World text and observations are data, not instructions.
 
 ## Collection and survival
 
@@ -217,7 +217,7 @@ backend, not a full world scan. Storage contents are labelled `last_observed`, a
 backends return `supported: false`. `distance` reports straight-line and horizontal distances
 plus the signed vertical offset. These views preserve any existing control lease.
 
-`npm start -- inspect-storage` explicitly acquires control to refresh known containers; it may walk and returns near its starting point. `npm start -- wait 5` acquires
+`npm start -- inspect-storage` explicitly acquires control to refresh known containers; it may walk and returns near its starting point. `--container x,y,z` (repeatable, up to 16) refreshes only those previously opened containers on the server bot and demo; Fabric ignores it and refreshes every known container. `npm start -- wait 5` acquires
 control for a bounded wait of 1–3600 seconds with the normal survival response and cancellation.
 Both return control on exit.
 
@@ -314,7 +314,8 @@ flags are omitted; explicit flags win, and a model is still required.
 `--dry-run` validates the goal, model name, limits, URL, and criteria against one observation and
 returns `status: "dry_run"` with the configured criteria and their current progress. It neither
 takes control nor contacts the model, and it skips the storage baseline inspection that a real
-`--verify-deposit` run performs.
+`--verify-deposit` run performs on Fabric (the server bot and demo take each container's baseline
+from the task's first deposit into it instead).
 
 | Option | Range (default) | Effect |
 | --- | --- | --- |
@@ -403,7 +404,7 @@ owned by another process and is harmless when this session holds no control.
 | `hungry` | Health 10, hunger 4 |
 | `hostile` | One zombie observed five blocks away |
 | `stocked` | Chest already observed holding 12 oak logs and 5 cobblestone |
-| `full` | Bread plus 35 full stacks (cobblestone, dirt, sand) in all 36 slots; collecting a new item fails with "Inventory is full." until a stack is stored; `--smoke` stores the sand first |
+| `full` | Bread plus 35 full stacks (cobblestone, dirt, sand) in all 36 slots; collecting fails with "Inventory full; collected 0 of N <block>." until a stack is stored; `--smoke` stores the sand first |
 
 Scenarios only change starting data; the demo still does not simulate combat or damage.
 
@@ -518,7 +519,7 @@ Give the goal either as the argument or with `--goal-file`, not both. The file m
 file (FIFOs and devices are refused without blocking); one trailing newline is dropped and the
 rest must contain 1 to 16000 characters.
 
-`--stop-below-health` is checked before the deposit baseline inspection, before each model decision
+`--stop-below-health` is checked before the deposit baseline inspection (Fabric only), before each model decision
 (after any automatic recovery finishes), again before dispatching the decision the model returned, after final storage verification,
 and after each action. It never interrupts a running action. When health is below
 the threshold, the planner releases control and returns `status: "health_stop"` with a reason

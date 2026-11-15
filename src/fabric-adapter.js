@@ -112,7 +112,8 @@ export class FabricAdapter {
         if (job?.id !== started.id) throw new Error('Action was interrupted by another controller.');
         if (JSON.stringify(job) !== previous) { onProgress(job); previous = JSON.stringify(job); }
         if (terminalStatuses.has(job.status)) {
-          if (job.status !== 'completed') throw new Error(job.message || `Action ${job.status}`);
+          // A failed deposit may already have moved items; keep the container it reported.
+          if (job.status !== 'completed') throw Object.assign(new Error(job.message || `Action ${job.status}`), job.container && { container: job.container });
           return job;
         }
         if (state.mode !== 'agent') throw new Error('Control was returned to the player.');

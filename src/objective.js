@@ -6,8 +6,13 @@ export const COLLECTIBLE_BLOCKS = Object.freeze(['oak_log', 'birch_log', 'spruce
 const collectible = new Set(COLLECTIBLE_BLOCKS);
 const point = z.object({ x: z.number().finite(), y: z.number().finite(), z: z.number().finite() });
 const inventory = z.array(z.object({ name: z.string(), count: z.number().int().nonnegative() }));
-const containers = z.array(z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int(),
-  items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).min(1).optional() }));
+const blockPosition = z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int() });
+const container = blockPosition.extend({ items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).min(1).optional() });
+const containers = z.array(container);
+// Task-scoped verification also matches by block name and current members (the bot and demo report both).
+const scopedContainers = z.array(container.extend({ name: z.string().optional(), members: z.array(blockPosition).optional() }));
+// What a server-bot or demo deposit reports: the container it used and that container's live contents just before the deposit.
+const depositedContainer = blockPosition.extend({ name: z.string().optional(), before: inventory });
 const criteriaSchema = z.object({
   collect: z.object({ block: z.string(), count: z.number().int().min(1).max(64) }).strict().optional(),
   deposit: z.object({ item: z.string(), count: z.number().int().min(1).max(2304) }).strict().optional(),
@@ -56,8 +61,12 @@ export function parseDestinationCriterion(value) {
   return criteriaSchema.shape.destination.parse({ x, y, z, radius });
 }
 
-/** Checks explicit criteria only; free-form goal text is never parsed as a contract. */
-export function createObjective(criteria, initialState) {
+/**
+ * Checks explicit criteria only; free-form goal text is never parsed as a contract.
+ * With scopedStorage, deposit criteria count only containers recorded with trackDeposit, each against its contents just
+ * before the task's first deposit into it, so unrelated storage opened earlier in the session is neither counted nor reopened.
+ */
+export function createObjective(criteria, initialState, { scopedStorage = false } = {}) {
   const parsed = criteriaSchema.parse(criteria);
   if (parsed.homeRadius !== undefined && !parsed.returnHome) throw new Error('homeRadius requires returnHome.');
   if (!parsed.collect && !parsed.deposit && !parsed.returnHome && parsed.minHealth === undefined && parsed.minHunger === undefined && !parsed.destination && !parsed.inventory && parsed.maxThreats === undefined
@@ -82,8 +91,24 @@ export function createObjective(criteria, initialState) {
   const discoveredSources = new Map();
   const key = container => `${container.x},${container.y},${container.z}`;
   const sources = container => container.sources ?? [{ id: key(container), items: container.firstSeen ?? container.items }];
-  if (deposit) {
-    if (!Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs a bridge that reports storage.');
+  // Task-scoped storage: [{ name, x, y, z, sources: [id], before }], in first-deposit order.
+  const scope = [];
+  const realSources = container => (container.sources || []).map(source => source.id);
+  const positions = container => [container, ...(container.members || [])].map(key);
+  // Bot records keep source IDs across chest merges and splits; a backend without them (the demo) matches by coordinate and block.
+  const tracks = (entry, container) => entry.sources.length
+    ? realSources(container).some(id => entry.sources.includes(id))
+    : positions(container).includes(key(entry)) && (!entry.name || !container.name || entry.name === container.name);
+  const taskContainers = list => {
+    const seen = new Set();
+    return list.filter(container => {
+      if (seen.has(key(container)) || !scope.some(entry => tracks(entry, container))) return false;
+      seen.add(key(container));
+      return true;
+    });
+  };
+  if (deposit && !Array.isArray(initialState.containers)) throw new Error('This backend does not report container contents; --verify-deposit needs a bridge that reports storage.');
+  if (deposit && !scopedStorage) {
     // Contents known before the task are the baseline; a container first opened during the task uses what it held then.
     const seenInitial = new Set();
     initialStored = containers.parse(initialState.containers).filter(container => {
@@ -115,7 +140,21 @@ export function createObjective(criteria, initialState) {
       const samePlayer = state.connected === true && state.player?.uuid === player.uuid && state.player?.dimension === player.dimension && Number.isFinite(state.player.health) && state.player.health > 0;
       const checks = {};
       let stored = null;
-      if (deposit) {
+      if (deposit && scopedStorage) {
+        const current = samePlayer ? taskContainers(scopedContainers.parse(state.containers || [])) : null;
+        // A tracked inventory merged with other known storage holds stock whose starting amount this task never read.
+        const tracked = new Set(scope.flatMap(entry => entry.sources));
+        const foreign = current?.some(container => realSources(container).some(id => !tracked.has(id)));
+        // Another inventory already split from the receiving one shares its history, but its starting stock was never read.
+        const split = scope.some(entry => entry.split);
+        const contents = current && current.reduce((total, container) => total + (container.items ? held(container.items, deposit.item) : 0), 0);
+        stored = contents === null ? null : contents - scope.reduce((total, entry) => total + held(entry.before, deposit.item), 0);
+        checks.deposit = { item: deposit.item, storedAdditional: stored, requiredAdditional: deposit.count,
+          evidence: storageRefreshed ? 'refreshed' : 'last_observed', containers: scope.map(({ x, y, z }) => ({ x, y, z })),
+          met: stored !== null && !foreign && !split && stored >= deposit.count,
+          ...(foreign && { error: 'Storage this task deposited into merged with other known storage whose starting contents were not read during the task.' }),
+          ...(split && !foreign && { error: 'Storage this task deposited into had already split from other known storage whose starting contents were not read during the task.' }) };
+      } else if (deposit) {
         const current = samePlayer ? containers.parse(state.containers || []).filter(container => container.items) : null;
         const seen = new Set();
         const contents = current && current.reduce((total, container) => {
@@ -187,6 +226,27 @@ export function createObjective(criteria, initialState) {
         checks.healthLoss = { initial: initialHealth, current, loss, maximum: parsed.maxHealthLoss, met: current !== null && current >= initialHealth - parsed.maxHealthLoss };
       }
       return { met: samePlayer && Object.values(checks).every(check => check.met), samePlayer, checks };
+    },
+    /** Records the container a deposit reported; only the first deposit into a container sets its baseline. */
+    trackDeposit(reported, state) {
+      if (!deposit || !scopedStorage) return;
+      const entry = depositedContainer.parse(reported);
+      const recorded = scopedContainers.safeParse(state?.containers || []).data || [];
+      const record = recorded.find(container => positions(container).includes(key(entry))
+        && (!entry.name || !container.name || entry.name === container.name));
+      const sources = record ? realSources(record) : [];
+      // Source IDs tell a replacement chest at the same coordinate apart; coordinates decide only when either side lacks them.
+      const known = scope.find(existing => existing.sources.length && sources.length ? sources.some(id => existing.sources.includes(id))
+        : key(existing) === key(entry) && (!existing.name || !entry.name || existing.name === entry.name));
+      // A later deposit never adopts sources: one merged in after the first deposit has no task baseline and stays foreign.
+      const split = record && recorded.some(other => key(other) !== key(record) && realSources(other).some(id => sources.includes(id)));
+      if (!known) scope.push({ name: entry.name, x: entry.x, y: entry.y, z: entry.z, sources, before: entry.before.map(item => ({ ...item })), ...(split && { split: true }) });
+    },
+    /** Positions a final inspection must reopen: each tracked container and every current inventory descended from one. */
+    storageTargets(state) {
+      const targets = new Map(scope.map(({ x, y, z }) => [key({ x, y, z }), { x, y, z }]));
+      for (const { x, y, z } of taskContainers(scopedContainers.safeParse(state?.containers || []).data || [])) targets.set(key({ x, y, z }), { x, y, z });
+      return [...targets.values()];
     },
   };
 }

@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { setImmediate } from 'node:timers/promises';
 import minecraftData from 'minecraft-data';
 import { Vec3 } from 'vec3';
+import windowLoader from 'prismarine-windows';
+import itemLoader from 'prismarine-item';
 import { MineflayerDriver } from '../src/mineflayer-driver.js';
 import { Harness } from '../src/harness.js';
 import { createObjective } from '../src/objective.js';
@@ -119,7 +121,8 @@ test('collection walks back to its start, digging out of a pit only as a fallbac
   assert.equal(movements, driver.movements);
 });
 
-function collectionFixture(t, { cannotReturn = false, cancelOnDig = false, material = 'sand', withPickaxe = false, breakPickaxe = false } = {}) {
+// `held` starts a partial stack of the material; `filler` full stone stacks occupy other main slots.
+function collectionFixture(t, { cannotReturn = false, cancelOnDig = false, material = 'sand', withPickaxe = false, breakPickaxe = false, held = 0, filler = 0 } = {}) {
   const bot = new EventEmitter();
   const registry = minecraftData('1.21.1');
   const position = new Vec3(3, 63, 0);
@@ -129,11 +132,13 @@ function collectionFixture(t, { cannotReturn = false, cancelOnDig = false, mater
   let toolBroken = false;
   const pickaxe = { name: 'stone_pickaxe', type: registry.itemsByName.stone_pickaxe.id, count: 1, slot: 37 };
   const trips = [];
+  const digs = [];
+  const stone = Array.from({ length: filler }, (_, index) => ({ name: 'stone', count: 64, slot: 9 + index }));
   Object.assign(bot, {
     registry, entity: { position: new Vec3(0, 64, 0) }, entities: {},
     username: 'Test', player: { uuid: randomUUID() }, game: { dimension: 'overworld' },
     health: 20, food: 20,
-    inventory: { items: () => [...(collected ? [{ name: material, count: collected, slot: 36 }] : []), ...(withPickaxe && !toolBroken ? [pickaxe] : [])] },
+    inventory: { items: () => [...(held + collected ? [{ name: material, count: held + collected, slot: 36 }] : []), ...(withPickaxe && !toolBroken ? [pickaxe] : []), ...stone] },
     pathfinder: {
       setMovements(value) { movements = value; }, setGoal() {}, bestHarvestTool: () => withPickaxe && !toolBroken ? pickaxe : null,
       goto: async goal => {
@@ -146,6 +151,7 @@ function collectionFixture(t, { cannotReturn = false, cancelOnDig = false, mater
     blockAt: () => ({ type: registry.blocksByName[material].id, name: material }),
     canDigBlock: () => true,
     dig: async () => {
+      digs.push(bot.entity.position.clone());
       collected++;
       if (breakPickaxe) toolBroken = true;
       if (cancelOnDig) controller.abort(new Error('Player took control.'));
@@ -155,7 +161,7 @@ function collectionFixture(t, { cannotReturn = false, cancelOnDig = false, mater
   });
   const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
   t.after(() => driver.close());
-  return { driver, bot, controller, trips, movements: () => movements };
+  return { driver, bot, controller, trips, digs, movements: () => movements };
 }
 
 test('partial collection returns from the pit but still reports the unmet quota', async t => {
@@ -308,6 +314,63 @@ test('a broken pickaxe stops partial cobblestone collection and returns from the
   }), /pickaxe.*Inventory: 1\/2.*Returned to the starting point/);
   assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
   assert.equal(bot.inventory.items().find(item => item.name === 'cobblestone').count, 1);
+});
+
+// The 180 s mining deadline is left in place: these must end on their own, well inside the test timeout.
+test('a collection that fills the inventory stops mining promptly and still returns from the pit', { timeout: 5000 }, async t => {
+  // 35 stone stacks plus 63 sand leave room for exactly one more sand.
+  const { driver, bot, controller, trips, digs } = collectionFixture(t, { held: 63, filler: 35 });
+  const progress = [];
+  await assert.rejects(driver.execute({ type: 'collect', block: 'sand', count: 2 }, {
+    signal: controller.signal, onProgress: message => progress.push(message),
+  }), /^Error: Inventory full; collected 1 of 2 sand\. Inventory: 64\/65\. Returned to the starting point\.$/);
+  assert.equal(digs.length, 1);
+  assert.ok(progress.includes('Collection failed; returning to where collection started.'));
+  assert.deepEqual(trips.slice(-2), [{ y: 64, canDig: false }, { y: 64, canDig: true }]);
+  assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
+});
+
+test('a full inventory breaks no block and walks nowhere', { timeout: 5000 }, async t => {
+  const { driver, controller, trips, digs } = collectionFixture(t, { held: 64, filler: 35 });
+  await assert.rejects(driver.execute({ type: 'collect', block: 'sand', count: 1 }, {
+    signal: controller.signal, onProgress() {},
+  }), /^Error: Inventory full; collected 0 of 1 sand\. Inventory: 64\/65\. Returned to the starting point\.$/);
+  assert.equal(digs.length, 0);
+  assert.equal(trips.length, 0);
+});
+
+test('a partial stack of the target with room keeps collection going in an otherwise full inventory', { timeout: 5000 }, async t => {
+  const { driver, controller, digs } = collectionFixture(t, { held: 10, filler: 35 });
+  const result = await driver.execute({ type: 'collect', block: 'sand', count: 1 }, { signal: controller.signal, onProgress() {} });
+  assert.equal(result.message, 'Collected requested items and returned to the starting point.');
+  assert.equal(digs.length, 1);
+});
+
+test('handoff on the dig that fills the inventory still skips recovery', { timeout: 5000 }, async t => {
+  const { driver, controller, trips, digs } = collectionFixture(t, { held: 63, filler: 35, cancelOnDig: true });
+  await assert.rejects(driver.execute({ type: 'collect', block: 'sand', count: 2 }, {
+    signal: controller.signal, onProgress() {},
+  }), /^Error: Player took control\.$/);
+  assert.equal(digs.length, 1);
+  assert.ok(trips.every(trip => trip.y !== 64));
+  assert.equal(driver.activeAction, false);
+});
+
+test('room is judged on the 36 main slots of a real inventory window, never armor or offhand', { timeout: 5000 }, async t => {
+  const { driver, bot, controller, digs } = collectionFixture(t);
+  const Item = itemLoader('1.21.1');
+  const inventory = windowLoader('1.21.1').createWindow(0, 'minecraft:inventory', 'Inventory');
+  const sand = bot.registry.itemsByName.sand.id;
+  for (let slot = 9; slot < 45; slot++) inventory.updateSlot(slot, slot === 36 ? new Item(sand, 63) : new Item(bot.registry.itemsByName.stone.id, 64));
+  bot.inventory = inventory;
+  bot.dig = async () => { digs.push(bot.entity.position.clone()); inventory.updateSlot(36, new Item(sand, inventory.slots[36].count + 1)); };
+  // Armor, offhand, and crafting slots stay empty but cannot take a pickup.
+  assert.ok([0, 1, 2, 3, 4, 5, 6, 7, 8, 45].every(slot => inventory.slots[slot] === null));
+  const options = { signal: controller.signal, onProgress() {} };
+  await driver.execute({ type: 'collect', block: 'sand', count: 1 }, options);
+  assert.equal(inventory.slots[36].count, 64);
+  await assert.rejects(driver.execute({ type: 'collect', block: 'sand', count: 1 }, options), /^Error: Inventory full; collected 0 of 1 sand\./);
+  assert.equal(digs.length, 1);
 });
 
 function depositFixture(t, { held = 20, capacity = Infinity, stored = 5, onDeposit = () => {}, start = new Vec3(10, 64, 0), item = 'oak_log' } = {}) {
@@ -657,6 +720,59 @@ test('a barrel at a former chest-half coordinate is inspected and counted as sep
   assert.deepEqual(current.containers.map(container => container.members.length), [1, 1]);
   assert.equal(objective.check(current).checks.deposit.storedAdditional, 8);
   assert.equal(objective.check(current).met, true);
+});
+
+test('a deposit names its container and the live contents read just before it, including when the chest fills', async t => {
+  const { driver } = depositFixture(t, { capacity: 15, start: new Vec3(0.5, 64, -1.5) });
+  const signal = new AbortController().signal;
+  const result = await driver.execute({ type: 'deposit', item: 'oak_log', count: 4 }, { signal, onProgress() {} });
+  assert.deepEqual(result.container, { name: 'minecraft:chest', x: 2, y: 64, z: -1, before: [{ name: 'minecraft:oak_log', count: 5 }] });
+  await assert.rejects(driver.execute({ type: 'deposit', item: 'oak_log', count: 16 }, { signal, onProgress() {} }), error => {
+    assert.match(error.message, /is full; deposited 6 of 16/);
+    assert.deepEqual(error.container, { name: 'minecraft:chest', x: 2, y: 64, z: -1, before: [{ name: 'minecraft:oak_log', count: 9 }] });
+    return true;
+  });
+});
+
+test('scoped storage inspection reopens only the requested chest, so a distant unrelated container cannot fail it', async t => {
+  const { driver, halves, contents, windows } = depositFixture(t);
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  // A barrel opened earlier in the session, 40 blocks away.
+  halves['50,64,0'] = 'barrel';
+  driver.recordContainer(new Vec3(50, 64, 0), 'barrel', { containerItems: () => [] });
+  driver.bot.entity.position = new Vec3(10, 64, 0);
+  await assert.rejects(driver.execute({ type: 'inspect_storage' }, { signal, onProgress() {} }), /all previously opened containers to be within 16 blocks/);
+  contents.oak_log = 5; // Another player takes the deposited logs.
+  driver.bot.entity.position = new Vec3(10, 64, 0);
+  const opened = windows.length;
+  // Either half of the double chest selects the one shared inventory.
+  const result = await driver.execute({ type: 'inspect_storage', containers: [{ x: 2, y: 64, z: 0 }, { x: 2, y: 64, z: -1 }] }, { signal, onProgress() {} });
+  assert.equal(result.message, 'Refreshed the requested storage from the server.');
+  assert.equal(windows.length, opened + 1);
+  const chest = driver.observe().containers.find(container => container.x === 2);
+  assert.deepEqual(chest.items, [{ name: 'minecraft:oak_log', count: 5 }]);
+  assert.ok(driver.bot.entity.position.distanceTo(new Vec3(10, 64, 0)) <= 2);
+  await assert.rejects(driver.execute({ type: 'inspect_storage', containers: [{ x: 50, y: 64, z: 0 }] }, { signal, onProgress() {} }),
+    /requested containers to be within 16 blocks; the barrel at 50 64 0 is farther/);
+});
+
+test('scoped storage inspection refuses unknown positions and never substitutes cached contents', async t => {
+  const { driver, halves } = depositFixture(t, { start: new Vec3(0.5, 64, -1.5) });
+  const signal = new AbortController().signal;
+  await driver.execute({ type: 'deposit', item: 'oak_log', count: 8 }, { signal, onProgress() {} });
+  const cached = driver.observe().containers[0];
+  halves['4,64,4'] = 'barrel';
+  await assert.rejects(driver.execute({ type: 'inspect_storage', containers: [{ x: 4, y: 64, z: 4 }] }, { signal, onProgress() {} }), /4 64 4 has not been opened in this session/);
+  const blockAt = driver.bot.blockAt;
+  driver.bot.blockAt = position => position.x === 0 && position.y === 64 && position.z === 0 ? { name: 'stone', position } : blockAt(position);
+  await assert.rejects(driver.execute({ type: 'inspect_storage', containers: [{ x: 0, y: 64, z: 0 }] }, { signal, onProgress() {} }), /no chest or barrel at 0 64 0/);
+  driver.bot.blockAt = blockAt;
+  // A requested chest whose lid is blocked fails rather than reporting its last contents.
+  driver.bot.openContainer = () => new Promise(() => {});
+  driver.containerTimeoutMs = 20;
+  await assert.rejects(driver.execute({ type: 'inspect_storage', containers: [{ x: 2, y: 64, z: -1 }] }, { signal, onProgress() {} }), /did not open/);
+  assert.deepEqual(driver.observe().containers.find(container => container.x === 2), cached);
 });
 
 test('real bot observation includes threat coordinates usable by spatial scene queries', async t => {
