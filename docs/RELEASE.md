@@ -15,6 +15,8 @@ The CI workflow is configured, but its remote execution on the final release com
 
 ## Live checks required before shipping
 
+Record each session with [`mc-agent acceptance`](ACCEPTANCE.md). The [bot scenario runner](LIVE-ACCEPTANCE.md) and the [Fabric lifecycle checklist](LIFECYCLE-SCENARIOS.md) cover several of these boxes. Tools never tick a box; a person reviews the evidence first.
+
 - [ ] Install the packaged jars in a normal Fabric launcher profile, enter a real world, attach the CLI, and observe the existing character.
 - [ ] Run collection with partial progress and recovery from a pit on the latest Fabric and bot code. Verify an unreachable return is reported as failed and inventory progress remains observable. *(Bot: partial progress with a return and an unreachable home both verified on 20 October 2026. Fabric and an actual pit are still pending.)*
 - [x] Run a real installed Ollama model with `--verify-collect oak_log:8 --verify-home`. Record the model name/version, initial inventory, result, and final manual control. *(`qwen3.5:4b-mlx` with the Mineflayer bot, 20 October 2026; see [DEVELOPMENT.md](DEVELOPMENT.md#validation).)*

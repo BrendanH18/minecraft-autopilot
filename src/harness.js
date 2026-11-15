@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { assertPlayable, normalizeAction } from './protocol.js';
 
+const COLLECT_RETURN_MS = 60_000;
+const COLLECT_MARGIN_MS = 15_000;
+
 /** Shared bridge lifecycle for the server bot and deterministic demo. */
 export class Harness {
   constructor(driver, { now = Date.now, leaseMs = 8000, jobTimeoutMs = 180_000 } = {}) {
@@ -63,7 +66,9 @@ export class Harness {
     this.job = job;
     const controller = new AbortController();
     this.abortController = controller;
-    const deadline = setTimeout(() => controller.abort(new Error('Action timed out.')), parsed.type === 'wait' ? parsed.seconds * 1000 + 5000 : this.jobTimeoutMs + (parsed.type === 'collect' ? 60_000 : 0));
+    // Collection mines until jobTimeoutMs, then drivers allow up to 60 s to return; the margin keeps the job
+    // deadline from cutting off a full-length return and its inventory progress report.
+    const deadline = setTimeout(() => controller.abort(new Error('Action timed out.')), parsed.type === 'wait' ? parsed.seconds * 1000 + 5000 : this.jobTimeoutMs + (parsed.type === 'collect' ? COLLECT_RETURN_MS + COLLECT_MARGIN_MS : 0));
     deadline.unref();
     this.task = Promise.resolve().then(() => {
       controller.signal.throwIfAborted();
@@ -77,6 +82,9 @@ export class Harness {
       if (controller.signal.aborted || job.status !== 'running') return;
       job.status = 'completed'; job.message = result?.message || 'Completed.';
     }).catch(error => {
+      // A driver may abort on death, disconnect, or a world change before the periodic tick notices; let the
+      // tick release first so these end as cancelled sessions on every backend.
+      this.tick();
       if (job.status === 'running') {
         job.status = controller.signal.aborted && controller.signal.reason?.message !== 'Action timed out.' ? 'cancelled' : 'failed';
         job.message = controller.signal.aborted ? controller.signal.reason?.message || error.message : error.message;

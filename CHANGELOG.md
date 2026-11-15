@@ -6,6 +6,18 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- v0.1 acceptance tooling. `mc-agent acceptance` (`list`, `show`, `start`,
+  `step`, `finish`, `sessions`, `report`, `status`) records live release-gate
+  sessions with commit, worktree, build and archive provenance, and reports
+  which sessions are eligible evidence. It never edits the release checklist.
+  `npm run acceptance:bot` runs scripted bot recovery and storage scenarios
+  against a local vanilla server with independent `data get` checks; it has
+  not yet been run against a real server. A shared lifecycle scenario table is
+  tested against the demo driver and the bot driver on a mocked bot, and generates the Fabric manual
+  checklist; see [acceptance](docs/ACCEPTANCE.md),
+  [live bot acceptance](docs/LIVE-ACCEPTANCE.md), and
+  [lifecycle scenarios](docs/LIFECYCLE-SCENARIOS.md).
+
 - 200 offline planners in eight new groups (`stairplan`, `roundplan`,
   `rampart`, `warehouse`, `stripmine`, `herd`, `signalplan`, `linkplan`) and
   three study workflows for every typed planner (`factorial`, `summarize`,
@@ -73,6 +85,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Fixed
 
+- Give bot collection a 15 s margin past its 60 s return budget, so a full-length return after a mining timeout reports its inventory progress instead of "Action timed out."
+- End bot jobs interrupted by death, disconnect, or a world/dimension change as `cancelled` with the shared lifecycle message, matching the demo and Fabric, instead of `failed` with the driver's raw reason.
 - Check Fabric action/retreat deadlines before eating and back off failed consumption, with isolated timing-policy regression tests.
 - Reserve bot collection recovery time after a mining timeout while preserving immediate handoff cancellation.
 - Verify gather-and-store against net inventory/storage gains, refresh container baselines and final contents, and reject stale success when storage cannot be inspected.

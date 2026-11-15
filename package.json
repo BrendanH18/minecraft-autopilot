@@ -15,7 +15,8 @@
     "build:mod": "npm run setup:mod && node scripts/gradle.js build && node scripts/package-mod.js",
     "verify:mod": "node scripts/verify-mod.js",
     "dev:mod": "npm run setup:mod && node scripts/gradle.js runClient",
-    "demo": "node src/cli.js demo"
+    "demo": "node src/cli.js demo",
+    "acceptance:bot": "node scripts/live-bot-acceptance.js"
   },
   "engines": { "node": ">=22.12" },
   "overrides": { "uuid": "11.1.1" },

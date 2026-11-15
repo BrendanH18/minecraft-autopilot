@@ -65,6 +65,7 @@ import { registerEventQueryTools } from './event-query-tools.js';
 import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
 import { registerPlanningTools, registerPlanningExtensions } from './planning-tools.js';
 import { registerPlanningStudies } from './planning-studies.js';
+import { registerAcceptanceTools } from './acceptance-tools.js';
 
 const program = new Command();
 program.name('mc-agent').description('Let a local agent play your Minecraft Java character.').version('0.1.0', '-V, --cli-version')
@@ -630,6 +631,7 @@ registerSnapshotQueryTools(program, { print });
 registerPlanningTools(program, { print });
 registerPlanningExtensions(program, { print });
 registerPlanningStudies(program, { print });
+registerAcceptanceTools(program, { print });
 
 try { await program.parseAsync(); }
 catch (error) {
