@@ -160,10 +160,14 @@ Fabric needs a person at the keyboard. Use the packaged mod in a normal launcher
     - Action: Run `mc-agent stop` immediately after the agent clicks the chest, then immediately start `mc-agent goto` nearby.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further items moved into the container; while `stopping` is `true` a new session cannot start work, and it can once the interrupted work settles; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.
     - Observe: `mc-agent job` in a loop (`mc-agent watch`); chest `Items` reads. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
+25. **Inventory fills while mining for a collection quota** (`inventory-full-collect`; inventory-full during collect)
+    - Setup: Stand near trees holding an axe and no oak logs; fill all but one of the other main slots (hotbar and inventory) with full stacks, e.g. `/give <player> minecraft:cobblestone 2176` (34 stacks). From an MCP client, call `minecraft_take_control`.
+    - Action: Call `minecraft_action` with `{"type":"collect","block":"oak_log","count":8}`; while the first log is being broken, run `/give <player> minecraft:dirt 64` to fill the last slot. Start over if a log was picked up first.
+    - Expected: mode stays `agent`; the job ends `failed` with a message matching `/Inventory full; collected \d+ of \d+ \w+\./i`; no further blocks broken; the same session can start its next action once `stopping` is `false`. The job fails within seconds of the last slot filling rather than at the 180 s mining deadline, after the bounded return to where collection started.
+    - Observe: The `minecraft_action` result and `mc-agent job` (still `agent`); the next `minecraft_action` is accepted without taking control again. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart.
 
 Not run on Fabric:
 
 - `takeover-while-stopping-eat`: Fabric ends eating on the client thread during release, so eating leaves no stopping window to take over into.
-- `inventory-full-collect`: Not implemented on Fabric yet: its collection keeps breaking blocks whose drops cannot be picked up until the 180 s mining deadline. Check by hand once Fabric detects a full inventory.
 
 <!-- fabric-checklist:end -->

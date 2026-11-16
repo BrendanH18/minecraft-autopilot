@@ -29,6 +29,7 @@ import net.minecraft.util.math.BlockPos;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,7 @@ public final class AgentController {
     private long jobStarted;
     private final ActionTiming timing = new ActionTiming();
     private int targetCount;
+    private int collectRequested;
     private BlockPos destination;
     private BlockPos collectStart;
     private boolean returning;
@@ -193,6 +195,7 @@ public final class AgentController {
                     baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1)); break;
                 case "collect":
                     targetCount = inventoryCount(COLLECT_DROPS.get(block)) + count;
+                    collectRequested = count;
                     collectStart = client.player.getBlockPos();
                     action.addProperty("block", block);
                     BaritoneAPI.getSettings().allowBreak.value = true;
@@ -301,10 +304,13 @@ public final class AgentController {
                         finishCollectionReturn(false, "Could not return to the starting point.");
                     break;
                 }
-                int have = inventoryCount(COLLECT_DROPS.get(string(action, "block")));
+                String drop = COLLECT_DROPS.get(string(action, "block"));
+                int have = inventoryCount(drop);
                 job.addProperty("message", "Inventory: " + have + "/" + targetCount);
                 if (have >= targetCount) beginReturn(now, null);
                 else if (string(action, "block").equals("cobblestone") && !hasPickaxe()) beginReturn(now, "Collection stopped because no pickaxe remains.");
+                // Checked every tick: mining stops as soon as no drop could be picked up, not at the 180 s deadline.
+                else if (!hasRoomFor(drop)) beginReturn(now, InventoryRoom.fullMessage(have - (targetCount - collectRequested), collectRequested, string(action, "block")));
                 else if (now - jobStarted > 3_000_000_000L && !baritone().getMineProcess().isActive()) beginReturn(now, "No reachable matching blocks found.");
                 break;
             }
@@ -444,6 +450,15 @@ public final class AgentController {
             if (!stack.isEmpty() && stack.isIn(ItemTags.PICKAXES)) return true;
         }
         return false;
+    }
+    private boolean hasRoomFor(String item) {
+        List<InventoryRoom.Slot> slots = new ArrayList<>(InventoryRoom.MAIN_SLOTS);
+        for (int i = 0; i < InventoryRoom.MAIN_SLOTS; i++) {
+            ItemStack stack = client.player.getInventory().getStack(i);
+            slots.add(stack.isEmpty() ? InventoryRoom.Slot.EMPTY
+                    : new InventoryRoom.Slot(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), stack.getMaxCount()));
+        }
+        return InventoryRoom.hasRoom(slots, "minecraft:" + item);
     }
     private int inventoryCount(String item) {
         Item target = Registries.ITEM.get(Identifier.of("minecraft", item));
