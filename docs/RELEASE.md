@@ -24,7 +24,7 @@ Record each session with [`mc-agent acceptance`](ACCEPTANCE.md). The [bot scenar
 - [ ] Press F8 during inference/action; close the menu afterward and verify no command resumes. Check emergency stop and lease expiry with the packaged mod.
 - [ ] With the packaged Fabric mod, force failed food consumption while hungry and low on health. Verify eating backoff, retreat, and action/retreat deadlines; interrupt eating and recovery with F8 and stop.
 - [ ] Force a bot mining timeout in a real pit. Verify the bounded return attempt, failure status, preserved inventory progress, and immediate cancellation during recovery.
-- [ ] Validate Fabric chest/barrel deposits with exact and omitted counts, full/blocked containers, double chests, fresh inspection and return, and F8/menu/stop/expiry during transfers. Check that each deposit job reports its `container` and `before` contents and that `--verify-deposit` reopens only the task's containers.
+- [ ] Validate Fabric chest/barrel deposits with exact and omitted counts, full/blocked containers, double chests, fresh inspection and return, and F8/menu/stop/expiry during transfers.
 - [ ] Run collect-and-store with both criteria. Remove stored items during inference and block inspection; stale contents must not produce success. Verify final inspection preserves return-home criteria or reports failure.
 - [ ] Run a real local model and an actual MCP agent against the packaged Fabric mod; historical bot acceptance does not close this gate.
 - [ ] Validate authenticated client → bot → client handoff. Check the UUID and inventory at each stage; never connect both as the same account simultaneously.
