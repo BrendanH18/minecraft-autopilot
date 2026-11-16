@@ -621,8 +621,20 @@ test('a completed deposit that names no container cannot be verified on a scoped
   assert.deepEqual(adapter.inspections, []);
 });
 
-test('backends without scoped storage keep refreshing every known container, unchanged', async () => {
+test('Fabric takes the task-scoped path: no starting inspection, and only the deposit container is reopened', async () => {
   const adapter = scopedStorageAdapter({ backend: 'fabric' });
+  const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, { type: 'done', reason: 'Stored.' }];
+  const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },
+    fetchImpl: async () => reply(decisions.shift()) });
+  // The distant barrel opened earlier would fail an all-containers inspection; the scoped one never names it.
+  assert.equal(result.status, 'criteria_met');
+  assert.deepEqual(adapter.inspections, [[{ x: 1, y: 64, z: 0 }]]);
+  assert.deepEqual(result.verification.checks.deposit.containers, [{ x: 1, y: 64, z: 0 }]);
+  assert.equal(result.verification.checks.deposit.storedAdditional, 8);
+});
+
+test('backends without scoped storage keep refreshing every known container, unchanged', async () => {
+  const adapter = scopedStorageAdapter({ backend: 'third-party' });
   adapter.state.containers.shift();
   const decisions = [{ type: 'deposit', item: 'oak_log', count: 8 }, { type: 'done', reason: 'Stored.' }];
   const result = await runAgent(adapter, 'Store eight logs', { model: 'test', log() {}, criteria: { deposit: { item: 'oak_log', count: 8 } },

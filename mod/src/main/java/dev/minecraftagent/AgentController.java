@@ -7,6 +7,7 @@ import baritone.api.pathing.goals.GoalNear;
 import baritone.api.utils.input.Input;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.block.Block;
@@ -29,6 +30,7 @@ import net.minecraft.util.math.BlockPos;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -132,6 +134,7 @@ public final class AgentController {
         String block = null;
         double wait = 0;
         Item depositItem = null;
+        List<BlockPos> inspectTargets = null;
         switch (type) {
             case "goto": goal = new BlockPos((int) Math.floor(number(requested, "x", -29_999_984, 29_999_984)),
                     (int) Math.floor(number(requested, "y", -64, 320)), (int) Math.floor(number(requested, "z", -29_999_984, 29_999_984))); break;
@@ -163,7 +166,9 @@ public final class AgentController {
                 count = (int) quantity;
                 break;
             }
-            case "inspect_storage": break;
+            case "inspect_storage":
+                if (requested.has("containers")) inspectTargets = containerPositions(requested.get("containers"));
+                break;
             case "eat": case "set_home": break;
             default: throw new IllegalArgumentException("Unsupported action: " + type);
         }
@@ -203,8 +208,8 @@ public final class AgentController {
                     } else finish("completed", "Hunger is already full.");
                     break;
                 case "wait": break;
-                case "deposit": storage.begin(identity(), depositItem, count); break;
-                case "inspect_storage": storage.begin(identity(), null, 0); break;
+                case "deposit": storage.begin(identity(), depositItem, count, null); break;
+                case "inspect_storage": storage.begin(identity(), null, 0, inspectTargets); break;
             }
         } catch (Exception exception) { finish("failed", exception.getMessage()); }
         return job.deepCopy();
@@ -386,7 +391,12 @@ public final class AgentController {
         if (client.interactionManager != null) client.interactionManager.cancelBlockBreaking();
     }
 
-    private void finishWithoutStopping(String status, String message) { job.addProperty("status", status); job.addProperty("message", message); }
+    private void finishWithoutStopping(String status, String message) {
+        job.addProperty("status", status); job.addProperty("message", message);
+        // A deposit whose container opened names it on every terminal status: items may have moved before a failure or cancel.
+        JsonObject container = job.get("type").getAsString().equals("deposit") ? storage.depositContainer() : null;
+        if (container != null) job.add("container", container);
+    }
     private void finish(String status, String message) { stopMotion(); endEating(); storage.cancel(); finishWithoutStopping(status, message); }
     private boolean running() { return job != null && job.get("status").getAsString().equals("running"); }
     private void cancel(String message) { stopMotion(); endEating(); storage.cancel(); resumeAfterEating = false; recovering = false; if (running()) finishWithoutStopping("cancelled", message); }
@@ -542,6 +552,22 @@ public final class AgentController {
     private static String string(JsonObject object, String key) {
         if (object == null || !object.has(key) || !object.get(key).isJsonPrimitive() || !object.getAsJsonPrimitive(key).isString()) throw new IllegalArgumentException("Missing or invalid " + key);
         return object.get(key).getAsString();
+    }
+    /** A scoped inspect_storage's integer block positions; the client validates them too, but the bridge does not rely on it. */
+    private static List<BlockPos> containerPositions(JsonElement value) {
+        if (!value.isJsonArray() || value.getAsJsonArray().size() == 0 || value.getAsJsonArray().size() > StorageTargets.MAX_REQUESTED)
+            throw new IllegalArgumentException("containers must list 1 to " + StorageTargets.MAX_REQUESTED + " block positions.");
+        List<BlockPos> positions = new ArrayList<>();
+        for (JsonElement element : value.getAsJsonArray()) {
+            JsonObject position = element.isJsonObject() ? element.getAsJsonObject() : null;
+            positions.add(new BlockPos(integer(position, "x", -29_999_984, 29_999_984), integer(position, "y", -64, 320), integer(position, "z", -29_999_984, 29_999_984)));
+        }
+        return positions;
+    }
+    private static int integer(JsonObject object, String key, int min, int max) {
+        double value = number(object, key, min, max);
+        if (value != Math.floor(value)) throw new IllegalArgumentException(key + " must be an integer.");
+        return (int) value;
     }
     private static double number(JsonObject object, String key, double min, double max) {
         if (object == null || !object.has(key) || !object.get(key).isJsonPrimitive() || !object.getAsJsonPrimitive(key).isNumber()) throw new IllegalArgumentException("Missing or invalid " + key);

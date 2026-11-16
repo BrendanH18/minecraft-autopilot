@@ -9,9 +9,9 @@ const inventory = z.array(z.object({ name: z.string(), count: z.number().int().n
 const blockPosition = z.object({ x: z.number().int(), y: z.number().int(), z: z.number().int() });
 const container = blockPosition.extend({ items: inventory.nullable(), firstSeen: inventory.optional(), sources: z.array(z.object({ id: z.string().min(1), items: inventory })).min(1).optional() });
 const containers = z.array(container);
-// Task-scoped verification also matches by block name and current members (the bot and demo report both).
+// Task-scoped verification also matches by block name and current members (the bot, Fabric, and demo report both).
 const scopedContainers = z.array(container.extend({ name: z.string().optional(), members: z.array(blockPosition).optional() }));
-// What a server-bot or demo deposit reports: the container it used and that container's live contents just before the deposit.
+// What a deposit reports on the bot, Fabric, and demo: the container it used and that container's live contents just before the deposit.
 const depositedContainer = blockPosition.extend({ name: z.string().optional(), before: inventory });
 const criteriaSchema = z.object({
   collect: z.object({ block: z.string(), count: z.number().int().min(1).max(64) }).strict().optional(),

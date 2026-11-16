@@ -53,19 +53,27 @@ final class FabricStorage {
     private int amount;
     private StorageTransfer transfer;
     private int sent;
+    /** A containers list was given: only those inventories are reopened and only they must be in range. */
+    private boolean scoped;
+    /** Set when a deposit's container first opens: where items went and that container's contents just before the transfer. */
+    private JsonObject depositContainer;
 
     FabricStorage(MinecraftClient client) { this.client = client; StoragePackets.attach(this); }
     boolean active() { return phase != null; }
     boolean navigating() { return phase == Phase.APPROACH || phase == Phase.RETURN; }
 
-    void begin(String identity, Item item, int amount) {
+    /** requested, for an inspection only, limits it to those known inventories; null reopens every known container. */
+    void begin(String identity, Item item, int amount, List<BlockPos> requested) {
+        depositContainer = null;
+        scoped = item == null && requested != null;
         this.identity = identity;
         this.item = item;
         this.amount = amount;
         transfer = null;
         sent = 0;
         start = client.player.getPos();
-        targets = new ArrayDeque<>(item == null ? normalize(identity).keySet() : nearby());
+        if (item != null) targets = new ArrayDeque<>(nearby());
+        else targets = new ArrayDeque<>(scoped ? requestedTargets(identity, requested) : normalize(identity).keySet());
         if (item != null && targets.isEmpty()) throw new IllegalStateException("No chest or barrel within 16 blocks. Move near storage first.");
         if (item != null) targets = new ArrayDeque<>(List.of(targets.getFirst()));
         nextTarget();
@@ -100,13 +108,17 @@ final class FabricStorage {
         if (!active()) return null;
         try {
             if (phase == Phase.RETURN) {
-                if (client.player.getPos().distanceTo(start) <= 1.75) return new Result(true, "Refreshed previously opened storage from the server and returned to inspection start.");
+                if (client.player.getPos().distanceTo(start) <= 1.75) return new Result(true, scoped ? "Refreshed the requested storage from the server."
+                        : "Refreshed previously opened storage from the server and returned to inspection start.");
                 if (now - phaseStarted > 3_000_000_000L && !pathing()) throw new IllegalStateException("Storage refreshed, but could not return to inspection start.");
                 return null;
             }
             if (target == null) return new Result(true, "No previously opened storage to refresh.");
             if (!isContainer(target)) throw new IllegalStateException("The container disappeared before it could be inspected.");
-            if (client.player.getPos().distanceTo(Vec3d.ofCenter(target)) > 16) throw new IllegalStateException("Storage requires containers within 16 blocks. Return near storage first.");
+            if (client.player.getPos().distanceTo(Vec3d.ofCenter(target)) > 16) throw new IllegalStateException(scoped
+                    ? "Storage inspection requires the requested containers to be within 16 blocks; the " + Registries.BLOCK.getId(client.world.getBlockState(target).getBlock()).getPath()
+                            + " at " + describe(target) + " is farther. Return near it before finishing."
+                    : "Storage requires containers within 16 blocks. Return near storage first.");
             if (phase == Phase.APPROACH) {
                 if (opening.pending()) return null;
                 BlockHitResult hit = visibleHit();
@@ -128,8 +140,15 @@ final class FabricStorage {
             }
             int stored = count(stacks.subList(0, size), item);
             int held = count(stacks.subList(size, stacks.size()), item);
-            if (transfer == null) transfer = new StorageTransfer(amount, stored, held);
-            else if (!transfer.confirm(stored, held, sent)) throw new IllegalStateException("Server did not confirm the requested transfer. Check inventory and storage before retrying.");
+            if (transfer == null) {
+                // The screen opened, so report this container even if the transfer later fails: items may move before then.
+                BlockPos key = canonical(target);
+                depositContainer = new JsonObject();
+                depositContainer.addProperty("name", Registries.BLOCK.getId(client.world.getBlockState(key).getBlock()).toString());
+                depositContainer.addProperty("x", key.getX()); depositContainer.addProperty("y", key.getY()); depositContainer.addProperty("z", key.getZ());
+                depositContainer.add("before", contents(stacks.subList(0, size)));
+                transfer = new StorageTransfer(amount, stored, held);
+            } else if (!transfer.confirm(stored, held, sent)) throw new IllegalStateException("Server did not confirm the requested transfer. Check inventory and storage before retrying.");
             if (transfer.remaining() == 0) return new Result(true, "Deposited " + transfer.confirmed() + " " + Registries.ITEM.getId(item) + " into storage.");
             transferStack(stacks, size);
             // Accepted predicted clicks need not produce slot echoes. Reopen for an authoritative inventory packet.
@@ -228,6 +247,24 @@ final class FabricStorage {
 
     void cancel() { opening.cancel(); closeOwned(); phase = null; targets = null; target = null; }
 
+    /** The current deposit's container once its screen opened, kept after it finishes or is cancelled; otherwise null. */
+    JsonObject depositContainer() { return depositContainer == null ? null : depositContainer.deepCopy(); }
+
+    /** Fails before anything moves when a requested position names no inventory this session has opened. */
+    private List<BlockPos> requestedTargets(String identity, List<BlockPos> requested) {
+        Map<BlockPos, List<BlockPos>> members = new LinkedHashMap<>();
+        for (var entry : normalize(identity).entrySet()) {
+            List<BlockPos> current = new ArrayList<>();
+            for (JsonElement member : entry.getValue().getAsJsonArray("members")) current.add(pos(member.getAsJsonObject()));
+            members.put(entry.getKey(), current);
+        }
+        StorageTargets.Resolution<BlockPos> resolution = StorageTargets.resolve(requested, members);
+        BlockPos unknown = resolution.unknown();
+        if (unknown == null) return resolution.keys();
+        if (client.world.isChunkLoaded(unknown) && !isContainer(unknown)) throw new IllegalStateException("There is no chest or barrel at " + describe(unknown) + ".");
+        throw new IllegalStateException("The container at " + describe(unknown) + " has not been opened in this session, so it has no contents to refresh.");
+    }
+
     JsonArray observe(String identity) {
         JsonArray result = new JsonArray();
         Map<BlockPos, JsonObject> known = normalize(identity);
@@ -312,9 +349,7 @@ final class FabricStorage {
         Map<BlockPos, JsonObject> known = normalize(identity);
         BlockPos key = canonical(target);
         JsonObject previous = known.get(key);
-        Map<String, Integer> totals = new LinkedHashMap<>();
-        for (ItemStack stack : stacks.subList(0, size)) if (!stack.isEmpty()) totals.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
-        JsonArray contents = items(totals);
+        JsonArray contents = contents(stacks.subList(0, size));
         JsonObject record = at(key);
         record.addProperty("name", Registries.BLOCK.getId(client.world.getBlockState(key).getBlock()).toString());
         record.addProperty("observedAt", System.currentTimeMillis());
@@ -331,6 +366,12 @@ final class FabricStorage {
     }
 
     private JsonArray memberJson(BlockPos pos) { JsonArray result = new JsonArray(); for (BlockPos member : members(pos)) result.add(at(member)); return result; }
+    private static JsonArray contents(List<ItemStack> stacks) {
+        Map<String, Integer> totals = new LinkedHashMap<>();
+        for (ItemStack stack : stacks) if (!stack.isEmpty()) totals.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+        return items(totals);
+    }
+    private static String describe(BlockPos pos) { return pos.getX() + " " + pos.getY() + " " + pos.getZ(); }
     private static int count(List<ItemStack> stacks, Item item) { return stacks.stream().filter(stack -> stack.isOf(item)).mapToInt(ItemStack::getCount).sum(); }
     private static JsonObject at(BlockPos pos) { JsonObject result = new JsonObject(); result.addProperty("x", pos.getX()); result.addProperty("y", pos.getY()); result.addProperty("z", pos.getZ()); return result; }
     private static BlockPos pos(JsonObject object) { return new BlockPos(object.get("x").getAsInt(), object.get("y").getAsInt(), object.get("z").getAsInt()); }
