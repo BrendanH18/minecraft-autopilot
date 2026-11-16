@@ -47,7 +47,7 @@ const systemPrompt = `You control a Minecraft Java player through a local harnes
 Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, inspect_storage, deposit(item,count), wait(seconds), done(reason).
 collect adds count items to the existing inventory. Supported blocks: oak_log, birch_log, spruce_log, jungle_log, acacia_log, dark_oak_log, cherry_log, mangrove_log, dirt, cobblestone, sand.
 deposit walks to the nearest chest or barrel within 16 blocks and stores the item there; omit count to store all of it. inspect_storage refreshes previously known storage contents without depositing; use it only when state.containers is an array. containers lists nearby storage and the contents last seen inside (items is null until opened).
-Use observations and the initial inventory to verify the requested quantity. When collection and deposit criteria name the same item, collection counts the net increase across inventory and storage. Storage is reopened automatically before final deposit verification; stay within 16 blocks of the storage you deposited into (on other backends, all previously opened storage) before answering done. Never repeat a full collection quota after partial progress.
+Use observations and the initial inventory to verify the requested quantity. When collection and deposit criteria name the same item, collection counts the net increase across inventory and storage. Storage is reopened automatically before final deposit verification; stay within 16 blocks of the storage you deposited into before answering done. Never repeat a full collection quota after partial progress.
 Save a home only if the user requested it or the goal needs it. set_home is refused when a home was saved before the task; only the player can move it.
 Nearby blocks and threats are partial observations of loaded chunks. Do not invent locations or capabilities.
 Prioritize eating and returning to saved shelter when health is low. A saved home is a waypoint, not a guarantee of safety.
@@ -101,7 +101,7 @@ export async function listModels({ ollamaUrl = 'http://127.0.0.1:11434', timeout
 }
 
 // Backends whose deposits report their container and whose inspect_storage accepts a containers list.
-const SCOPED_STORAGE_BACKENDS = new Set(['mineflayer', 'demo']);
+const SCOPED_STORAGE_BACKENDS = new Set(['mineflayer', 'fabric', 'demo']);
 
 const numberWords = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
 const finalView = state => state?.connected && state.player ? { position: state.player.position ?? null, health: state.player.health ?? null, hunger: state.player.hunger ?? null } : null;
@@ -186,8 +186,8 @@ export async function runAgent(adapter, goal, { model, ollamaUrl = 'http://127.0
     const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
     bounded.throwIfAborted();
     let initialState = await observe();
-    // The server bot and demo verify only containers this task deposited into, each against its contents read just before the
-    // task's first deposit there; other backends refresh and count every previously opened container.
+    // The server bot, Fabric, and demo verify only containers this task deposited into, each against its contents read just before
+    // the task's first deposit there; an unrecognized backend refreshes and counts every previously opened container.
     const scopedStorage = !!criteria.deposit && SCOPED_STORAGE_BACKENDS.has(initialState.backend);
     let objective = createObjective(criteria, initialState, { scopedStorage });
     let start = null;

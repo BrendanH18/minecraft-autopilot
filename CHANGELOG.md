@@ -6,7 +6,22 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
-- Task-scoped storage verification on the server bot and demo. Deposits report
+- Fabric parity for task-scoped storage verification and the full-inventory
+  collection stop. Fabric deposit jobs now report `container` (canonical
+  position, block name, and the `before` contents read from the opened screen
+  before any click) on completed, failed, and cancelled jobs, and Fabric
+  `inspect_storage` honours `containers`, reopening only those inventories
+  (either half of a double chest selects it once; an unopened position fails
+  before anything moves). The planner's `--verify-deposit` now takes the
+  scoped path on Fabric too, so unrelated storage opened earlier no longer has
+  to stay within 16 blocks. Fabric collection stops with `Inventory full;
+  collected N of M <block>.` as soon as no main slot can take the drop, keeps
+  its progress, and makes the bounded return attempt. Decision logic lives in
+  Minecraft-free helpers (`InventoryRoom`, `StorageTargets`) with JUnit
+  coverage, and the `inventory-full-collect` lifecycle scenario now has a
+  manual Fabric check. Both changes still need live Fabric acceptance.
+
+- Task-scoped storage verification on the server bot and demo (Fabric followed; see above). Deposits report
   the container they used and its live contents just before the transfer; with
   `--verify-deposit`, the agent counts only those containers against those
   baselines and reopens only them before accepting `done`. A container opened

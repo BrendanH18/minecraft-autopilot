@@ -58,7 +58,7 @@ export async function serveMcp(adapter) {
     await adapter.acquire(); return { controlled: true };
   }));
   server.registerTool('minecraft_action', {
-    description: 'Execute one bounded gameplay action and wait for its result. Requires prior minecraft_take_control. collect adds items to current inventory. deposit stores an item in the nearest chest or barrel within 16 blocks; on the server bot and demo its result names that container (x, y, z) and its contents just before the deposit (before). inspect_storage reopens previously observed storage and returns to its starting position; pass containers (1 to 16 block positions the bot has opened) to reopen only those, for example the ones a task deposited into (server bot and demo; Fabric ignores containers and reopens all known storage). Home is scoped to the world, account, and dimension.',
+    description: 'Execute one bounded gameplay action and wait for its result. Requires prior minecraft_take_control. collect adds items to current inventory. deposit stores an item in the nearest chest or barrel within 16 blocks; its result names that container (x, y, z) and its contents just before the deposit (before). inspect_storage reopens previously observed storage and returns to its starting position; pass containers (1 to 16 block positions opened this session) to reopen only those, for example the ones a task deposited into. Home is scoped to the world, account, and dimension.',
     inputSchema: { action: actionSchema },
   }, wrap(async ({ action }, extra) => {
     if (!adapter.leaseId || adapter.leaseError) throw new Error('Use minecraft_take_control first.');
