@@ -183,7 +183,7 @@ program.command('eat').description('Eat supported food from inventory.')
       print({ status: 'completed', meals, hunger, target });
     } finally { await adapter.close(); }
   });
-program.command('deposit').description('Store an item in the nearest chest or barrel within 16 blocks (server bot and demo).')
+program.command('deposit').description('Store an item in the nearest chest or barrel within 16 blocks.')
   .argument('<item>', 'Minecraft item name').argument('[count]', 'items to store; all when omitted', positiveInteger)
   .action((item, count) => perform({ type: 'deposit', item, ...(count !== undefined && { count }) }));
 async function view(select) {
@@ -386,7 +386,7 @@ waypoint.command('goto').description('Walk to a saved waypoint like goto; refuse
       print(await adapter.execute({ type: 'goto', x: target.x, y: target.y, z: target.z }, { signal: abortController.signal, onProgress: job => log(job.message) }));
     } finally { await adapter.close(); }
   });
-program.command('inspect-storage').description('Open known storage to refresh observed contents (server bot and demo); takes control.')
+program.command('inspect-storage').description('Open known storage to refresh observed contents; takes control.')
   .option('--container <x,y,z>', 'reopen only this previously opened container (repeatable, up to 16); default: every known container', (value, list = []) => {
     const parts = value.split(',');
     if (parts.length !== 3 || parts.some(part => !/^\s*-?\d+\s*$/.test(part))) throw new InvalidArgumentError('Use integer block coordinates x,y,z, for example 3,64,-2.');

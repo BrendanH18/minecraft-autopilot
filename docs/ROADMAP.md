@@ -13,7 +13,7 @@ The November audit identified recovery and verification gaps. The following sour
 - Fabric backs off automatic eating for ten seconds after failed consumption. Action and retreat deadlines are checked before eating, so failed food use cannot indefinitely defer recovery.
 - Bot mining has a separate deadline and up to sixty seconds for a return attempt. Takeover, cancellation, expiry, death, and survival interruption still stop collection without starting recovery.
 - Combined collection/deposit criteria for the same item check the net increase across inventory and storage, so storing the collected quota does not require gathering a duplicate quota.
-- Deposit verification never uses cached contents for success. On the server bot and demo, each container's baseline is the live contents the task's first deposit read there, and the final check reopens only the task's containers; Fabric refreshes every previously opened container before its baseline and before final success. Failed inspection cannot pass using cached contents. Ordinary observations remain last-observed snapshots.
+- Deposit verification never uses cached contents for success. On every backend, each container's baseline is the live contents the task's first deposit read there, and the final check reopens only the task's containers. Failed inspection cannot pass using cached contents. Ordinary observations remain last-observed snapshots.
 - Fabric timing policy is extracted into a helper tested without Minecraft. Controller/game integration still needs live tests; helper tests do not establish full backend parity.
 
 ## v0.1 critical path
@@ -31,8 +31,8 @@ Historical bot Ollama acceptance (20 October 2026) and MCP acceptance (27 Octobe
 
 Evaluate these in order of evidence from actual use:
 
-1. Shared behavioral scenarios for Fabric and bot lifecycle transitions, plus better terrain/tool/inventory recovery. *(The [lifecycle scenario table](LIFECYCLE-SCENARIOS.md) now runs against the demo driver and the bot driver on a mocked bot and generates the Fabric checklist. The bot and demo stop collection promptly when the inventory is full; Fabric full-inventory detection and terrain/tool recovery remain.)*
-2. Richer task criteria and storage inspection scoped to the task rather than every container opened in the bot session. *(Deposit verification on the bot and demo is now task-scoped; Fabric still reopens every known container.)*
+1. Shared behavioral scenarios for Fabric and bot lifecycle transitions, plus better terrain/tool/inventory recovery. *(The [lifecycle scenario table](LIFECYCLE-SCENARIOS.md) now runs against the demo driver and the bot driver on a mocked bot and generates the Fabric checklist. All three backends stop collection promptly when the inventory is full; Fabric's check still needs live acceptance, and terrain/tool recovery remains.)*
+2. Richer task criteria and storage inspection scoped to the task rather than every container opened in the bot session. *(Deposit verification is now task-scoped on all three backends; Fabric's scoped path still needs live acceptance.)*
 3. Crafting/building and richer survival or combat, after current actions are reliable.
 4. Easier client/bot transfer and optional ordinary-input takeover.
 
