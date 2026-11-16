@@ -22,7 +22,7 @@
   "overrides": { "uuid": "11.1.1" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "commander": "15.0.0",
+    "commander": "15.1.0",
     "mineflayer": "4.39.0",
     "mineflayer-pathfinder": "2.4.5",
     "vec3": "0.2.0",
