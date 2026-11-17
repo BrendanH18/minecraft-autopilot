@@ -19,6 +19,8 @@
   formats every tracked `.js` file. `npm run lint` checks both and CI runs it;
   `npm run format` applies formatting and safe fixes. Fix what it reports
   rather than hand-formatting. The Java mod has no formatter yet.
+- The main ruleset requires the `node` and `mod` CI jobs to pass. A new CI
+  job must be added to the ruleset's required checks to block merges.
 
 ## Context maintenance
 
