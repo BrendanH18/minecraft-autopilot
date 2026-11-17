@@ -25,7 +25,7 @@ export function parseSnbt(text) {
   };
   const bare = () => {
     const start = index;
-    while (index < text.length && /[A-Za-z0-9._+\-]/.test(text[index])) index++;
+    while (index < text.length && /[A-Za-z0-9._+-]/.test(text[index])) index++;
     if (index === start) fail('Expected a value');
     return text.slice(start, index);
   };

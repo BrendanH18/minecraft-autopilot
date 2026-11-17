@@ -62,14 +62,12 @@ export const ledgerStacks = (map) =>
   [...map].reduce((n, [name, count]) => n + Math.ceil(count / maxStackSize(name).maxStack), 0);
 const sum = (map) => [...map.values()].reduce((n, v) => n + v, 0);
 const rows = (a, b) =>
-  [...new Set([...a.keys(), ...b.keys()])]
-    .sort()
-    .map((name) => ({
-      name,
-      before: a.get(name) ?? 0,
-      after: b.get(name) ?? 0,
-      delta: (b.get(name) ?? 0) - (a.get(name) ?? 0),
-    }));
+  [...new Set([...a.keys(), ...b.keys()])].sort().map((name) => ({
+    name,
+    before: a.get(name) ?? 0,
+    after: b.get(name) ?? 0,
+    delta: (b.get(name) ?? 0) - (a.get(name) ?? 0),
+  }));
 function allowed(values) {
   if (!values.length || values.length > 100) throw new Error('Give 1 to 100 item names.');
   return new Set(values.map(itemName));

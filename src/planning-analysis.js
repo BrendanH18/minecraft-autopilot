@@ -1040,7 +1040,7 @@ export const ANALYSIS_GROUPS = [
         chronological(x, y);
         return q.map((t) => {
           demand(t >= x[0] && t <= x.at(-1));
-          let i = x.findIndex((v) => v > t);
+          const i = x.findIndex((v) => v > t);
           return y[i === -1 ? y.length - 1 : i - 1];
         });
       },

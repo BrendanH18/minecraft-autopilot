@@ -195,12 +195,10 @@ export function itineraryCalculation(command, args = []) {
     case 'remove-cost':
       read(0);
       result = {
-        stops: ps
-          .slice(1, -1)
-          .map((p, i) => ({
-            stop: i + 2,
-            savedDistance: distance(ps[i], p) + distance(p, ps[i + 2]) - distance(ps[i], ps[i + 2]),
-          })),
+        stops: ps.slice(1, -1).map((p, i) => ({
+          stop: i + 2,
+          savedDistance: distance(ps[i], p) + distance(p, ps[i + 2]) - distance(ps[i], ps[i + 2]),
+        })),
       };
       break;
     case 'shortcut':

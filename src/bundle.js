@@ -27,7 +27,7 @@ export async function verifyModBundle(directory, expectedFiles = modBundleFiles)
   const lines = (await regularFile(join(directory, 'SHA256SUMS'))).toString('utf8').trim().split('\n');
   const hashes = new Map();
   for (const line of lines) {
-    const match = /^([a-f0-9]{64})  ([a-zA-Z0-9_.+-]+\.jar)$/.exec(line);
+    const match = /^([a-f0-9]{64}) {2}([a-zA-Z0-9_.+-]+\.jar)$/.exec(line);
     if (!match || hashes.has(match[2])) throw new Error('Invalid or duplicate bundle checksum entry.');
     hashes.set(match[2], match[1]);
   }

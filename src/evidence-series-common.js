@@ -102,15 +102,13 @@ export function seriesStatistic(values, times, command, args = []) {
     }
     case 'moving-mean':
     case 'moving-median':
-      return values
-        .slice(parameter - 1)
-        .map((_, i) => ({
-          sample: i + parameter,
-          value:
-            command === 'moving-mean'
-              ? avg(values.slice(i, i + parameter))
-              : quantile(values.slice(i, i + parameter), 0.5),
-        }));
+      return values.slice(parameter - 1).map((_, i) => ({
+        sample: i + parameter,
+        value:
+          command === 'moving-mean'
+            ? avg(values.slice(i, i + parameter))
+            : quantile(values.slice(i, i + parameter), 0.5),
+      }));
     case 'acceleration': {
       const rates = values.slice(1).map((v, i) => (v - values[i]) / (tx[i + 1] - tx[i]));
       return rates.slice(1).map((v, i) => ({ sample: i + 3, value: (v - rates[i]) / ((tx[i + 2] - tx[i]) / 2) }));

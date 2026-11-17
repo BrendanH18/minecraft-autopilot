@@ -39,16 +39,14 @@ function projection(a, b, p) {
   return { point, fraction, distance: distance(point, p) };
 }
 function legs(points) {
-  return points
-    .slice(1)
-    .map((to, i) => ({
-      leg: i + 1,
-      from: points[i],
-      to,
-      distance: distance(points[i], to),
-      horizontalDistance: horizontal(points[i], to),
-      rise: to.y - points[i].y,
-    }));
+  return points.slice(1).map((to, i) => ({
+    leg: i + 1,
+    from: points[i],
+    to,
+    distance: distance(points[i], to),
+    horizontalDistance: horizontal(points[i], to),
+    rise: to.y - points[i].y,
+  }));
 }
 function at(points, target) {
   const segments = legs(points),

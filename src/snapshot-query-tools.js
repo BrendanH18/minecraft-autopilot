@@ -30,6 +30,7 @@ export function pointerGet(value, pointer) {
   }
   return { present: true, value: node };
 }
+// biome-ignore lint/suspicious/noShadowRestrictedNames: module-local JSON Pointer escaper; the global escape() is unused
 const escape = (s) => s.replace(/~/g, '~0').replace(/\//g, '~1');
 export function walkEvidence(input) {
   const nodes = [];

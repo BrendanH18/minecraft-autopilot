@@ -47,14 +47,12 @@ function pool(containers) {
   return result;
 }
 const deltas = (a, b) =>
-  [...new Set([...a.keys(), ...b.keys()])]
-    .sort()
-    .map((name) => ({
-      name,
-      before: a.get(name) ?? 0,
-      after: b.get(name) ?? 0,
-      delta: (b.get(name) ?? 0) - (a.get(name) ?? 0),
-    }));
+  [...new Set([...a.keys(), ...b.keys()])].sort().map((name) => ({
+    name,
+    before: a.get(name) ?? 0,
+    after: b.get(name) ?? 0,
+    delta: (b.get(name) ?? 0) - (a.get(name) ?? 0),
+  }));
 const total = (map) => [...map.values()].reduce((n, v) => n + v, 0);
 
 export const DEPOT_COMMANDS = [
