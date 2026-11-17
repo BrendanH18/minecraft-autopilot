@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, count, sequence, checked } from './spatial-inputs.js';
 
 const NOTE =
   'Offline coordinate arithmetic. Negative coordinates use floor division. Blocks and chunk indices are integers; next-boundary and custom lattice calculations use continuous coordinates. Does not read world files or load chunks.';

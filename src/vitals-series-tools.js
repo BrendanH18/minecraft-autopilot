@@ -1,6 +1,6 @@
 import { SERIES_SPECS, seriesReport, registerSeries } from './evidence-series-common.js';
 export const VITALS_SERIES_COMMANDS = SERIES_SPECS.map(([name, args, description]) => [
-  name + ' <field>' + args + ' <files...>',
+  `${name} <field>${args} <files...>`,
   description,
 ]);
 export const vitalsSeriesReport = (values, selector, command, args = []) =>

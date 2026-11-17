@@ -1,16 +1,19 @@
 package dev.minecraftagent;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.*;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class BridgeOwnershipTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
 
-    @Test void anotherBridgeCannotReplaceLiveOwnership() throws Exception {
+    @Test
+    void anotherBridgeCannotReplaceLiveOwnership() throws Exception {
         Path discovery = directory.resolve("bridge.json");
         try (BridgeOwnership first = new BridgeOwnership(discovery)) {
             String before = Files.readString(Path.of(discovery + ".lock"));

@@ -11,14 +11,20 @@ final class StorageTransfer {
     private int confirmed;
 
     StorageTransfer(int requested, int stored, int held) {
-        if (requested < 1 || requested > held) throw new IllegalArgumentException("Not enough matching items in inventory.");
+        if (requested < 1 || requested > held)
+            throw new IllegalArgumentException("Not enough matching items in inventory.");
         this.requested = requested;
         initialStored = stored;
         initialHeld = held;
     }
 
-    int remaining() { return requested - confirmed; }
-    int confirmed() { return confirmed; }
+    int remaining() {
+        return requested - confirmed;
+    }
+
+    int confirmed() {
+        return confirmed;
+    }
 
     boolean confirm(int stored, int held, int sent) {
         int delta = stored - initialStored;
@@ -31,9 +37,9 @@ final class StorageTransfer {
     record Slots(int source, int destination, int capacity) {}
 
     /** Try compatible partial stacks across every source before consuming an empty slot. */
-    static Slots select(int storageSize, int totalSize, IntPredicate matches, IntPredicate empty,
-                        IntBinaryOperator capacity) {
-        for (boolean useEmpty : new boolean[] { false, true }) {
+    static Slots select(
+            int storageSize, int totalSize, IntPredicate matches, IntPredicate empty, IntBinaryOperator capacity) {
+        for (boolean useEmpty : new boolean[] {false, true}) {
             for (int source = storageSize; source < totalSize; source++) {
                 if (!matches.test(source)) continue;
                 for (int destination = 0; destination < storageSize; destination++) {

@@ -339,7 +339,7 @@ test('the full demo scenario fills every slot and refuses new items until a stac
   assert.equal(smoke.json.scenario, 'full');
   assert.match(smoke.stderr, /DEMO SIMULATION \(full scenario\)/);
   const help = await new Promise((resolve) =>
-    execFile(process.execPath, [cliPath, 'demo', '--help'], (error, stdout) => resolve(stdout)),
+    execFile(process.execPath, [cliPath, 'demo', '--help'], (_error, stdout) => resolve(stdout)),
   );
   assert.match(help.replace(/\s+/g, ' '), /full \(all 36 inventory slots occupied\)/);
 });

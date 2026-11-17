@@ -1,6 +1,7 @@
 plugins {
     id 'fabric-loom' version '1.10.5'
     id 'maven-publish'
+    id 'com.diffplug.spotless' version '8.11.0'
 }
 
 version = project.mod_version
@@ -48,6 +49,15 @@ test {
     useJUnitPlatform()
     systemProperty 'java.io.tmpdir', file('../.runtime/tmp').absolutePath
     doFirst { file('../.runtime/tmp').mkdirs() }
+}
+// `check` (and so `build`) runs spotlessCheck; `npm run format:mod` applies the formatting.
+spotless {
+    java {
+        target 'src/**/*.java'
+        palantirJavaFormat('2.102.0')
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
 }
 tasks.withType(JavaExec).configureEach {
     systemProperty 'java.io.tmpdir', file('../.runtime/tmp').absolutePath

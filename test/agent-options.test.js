@@ -51,7 +51,7 @@ const reply = (decision) =>
   new Response(JSON.stringify({ message: { content: JSON.stringify(decision) } }), { status: 200 });
 const scripted =
   (decisions, bodies = []) =>
-  async (url, request) => {
+  async (_url, request) => {
     bodies.push(JSON.parse(request.body));
     return reply(decisions.shift());
   };
@@ -417,8 +417,8 @@ test('model listing reports names, sizes, and dates, and explains failures', asy
   await assert.rejects(
     listModels({
       timeout: 0.05,
-      fetchImpl: (url, { signal }) =>
-        new Promise((resolve, reject) => {
+      fetchImpl: (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
           const socket = setInterval(() => {}, 1000);
           signal.addEventListener('abort', () => {
             clearInterval(socket);
@@ -486,7 +486,7 @@ test('agent CLI applies environment defaults, new options, and step-limit exit 2
   const bridge = await startBridge(harness, { discoveryPath });
   t.after(() => bridge.close());
   const bodies = [];
-  const url = await fakeOllama(t, (request, body) => {
+  const url = await fakeOllama(t, (_request, body) => {
     bodies.push(body);
     return { message: { content: JSON.stringify({ type: 'collect', block: 'oak_log', count: 1 }) } };
   });

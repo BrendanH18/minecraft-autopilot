@@ -447,7 +447,7 @@ test('stale-removal passes only when refreshed storage matches the server after 
   // The deposit (decision 1) lands in the server chest before decision 3, when the removal hook runs.
   const agent =
     (world, result, { deposits = true } = {}) =>
-    async (adapter, goal, { fetchImpl, criteria }) => {
+    async (_adapter, _goal, { fetchImpl, criteria }) => {
       assert.deepEqual(criteria, {
         collect: { block: 'oak_log', count: 8 },
         deposit: { item: 'oak_log', count: 8 },
@@ -501,7 +501,7 @@ test('stale-removal passes only when refreshed storage matches the server after 
 function recoveryBehaviors(world, clock, { finishEarly = false } = {}) {
   let release;
   return {
-    collect: async (action, { onProgress }) => {
+    collect: async (_action, { onProgress }) => {
       world.mode = 'agent';
       world.job = { id: 'j', status: 'running', message: 'Inventory: 9/64' };
       clock.now += 180_000;
@@ -597,7 +597,7 @@ test('recovery-timeout checks failure status, bounded return, preserved inventor
 
 /** Applies scripted decisions to the fake world so server reads change as a real run would. */
 function storeAgent(world, result) {
-  return async (adapter, goal, { fetchImpl }) => {
+  return async (_adapter, _goal, { fetchImpl }) => {
     for (let i = 0; i < 6; i++) {
       const decision = JSON.parse(
         (await (await fetchImpl('http://127.0.0.1:11434/api/chat', { body: '{}' })).json()).message.content,
@@ -750,7 +750,7 @@ test('scripted planner serves decisions in order and runs hooks during the match
   const wrapped = interceptInference(
     (request) => depositCompleted(request),
     async () => seen.push('removed'),
-    async (url, init) => {
+    async (_url, init) => {
       forwarded.push(init.body.length);
       return 'response';
     },

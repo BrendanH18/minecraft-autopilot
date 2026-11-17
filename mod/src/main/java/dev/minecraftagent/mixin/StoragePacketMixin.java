@@ -14,14 +14,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientPlayNetworkHandler.class)
 public abstract class StoragePacketMixin {
     @Inject(method = "onOpenScreen", at = @At("TAIL"))
-    private void minecraftAgentScreen(OpenScreenS2CPacket packet, CallbackInfo ci) { StoragePackets.screenOpened(); }
+    private void minecraftAgentScreen(OpenScreenS2CPacket packet, CallbackInfo ci) {
+        StoragePackets.screenOpened();
+    }
 
     @Inject(method = "onPlayerActionResponse", at = @At("TAIL"))
-    private void minecraftAgentAck(PlayerActionResponseS2CPacket packet, CallbackInfo ci) { StoragePackets.acknowledged(packet.sequence()); }
+    private void minecraftAgentAck(PlayerActionResponseS2CPacket packet, CallbackInfo ci) {
+        StoragePackets.acknowledged(packet.sequence());
+    }
 
     @Inject(method = "onInventory", at = @At("TAIL"))
-    private void minecraftAgentInventory(InventoryS2CPacket packet, CallbackInfo ci) { StoragePackets.inventory(packet); }
+    private void minecraftAgentInventory(InventoryS2CPacket packet, CallbackInfo ci) {
+        StoragePackets.inventory(packet);
+    }
 
     @Inject(method = "onScreenHandlerSlotUpdate", at = @At("TAIL"))
-    private void minecraftAgentSlot(ScreenHandlerSlotUpdateS2CPacket packet, CallbackInfo ci) { StoragePackets.slot(packet); }
+    private void minecraftAgentSlot(ScreenHandlerSlotUpdateS2CPacket packet, CallbackInfo ci) {
+        StoragePackets.slot(packet);
+    }
 }

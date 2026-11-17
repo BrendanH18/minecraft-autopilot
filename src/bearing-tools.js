@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
 
 const NOTE =
   'Offline orientation math. Minecraft yaw zero faces +Z and positive yaw turns toward -X; pitch is positive downward. Does not rotate a player or check visibility.';

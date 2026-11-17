@@ -135,7 +135,7 @@ for (const [name, args, check] of cases)
     const expected = report(samples, name, args);
     check(expected);
     const directory = await testDirectory(t),
-      files = samples.map((s, i) => join(directory, `${i}.json`));
+      files = samples.map((_, i) => join(directory, `${i}.json`));
     await Promise.all(files.map((f, i) => writeFile(f, JSON.stringify(samples[i]))));
     let printed;
     const program = new Command().exitOverride();

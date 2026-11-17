@@ -1,6 +1,6 @@
 import { SERIES_SPECS, seriesReport, registerSeries } from './evidence-series-common.js';
 export const STORAGE_SERIES_COMMANDS = SERIES_SPECS.map(([name, args, description]) => [
-  name + ' <item>' + args + ' <files...>',
+  `${name} <item>${args} <files...>`,
   description,
 ]);
 export const storageSeriesReport = (values, selector, command, args = []) =>

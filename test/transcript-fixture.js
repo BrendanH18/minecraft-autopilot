@@ -102,7 +102,7 @@ export const transcriptEvents = [
   { event: 'start', time: '2026-01-01T00:01:00Z', goal: 'Preview', model: 'other', dryRun: true },
   { event: 'future', time: 'bad' },
 ];
-export const fixture = transcriptEvents.map((v) => JSON.stringify(v)).join('\n') + '\nnot json\n';
+export const fixture = `${transcriptEvents.map((v) => JSON.stringify(v)).join('\n')}\nnot json\n`;
 export const journalArgs = {
   runs: [],
   events: [],

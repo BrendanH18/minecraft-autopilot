@@ -27,9 +27,15 @@ public final class BridgeOwnership implements AutoCloseable {
             } catch (FileAlreadyExistsException exception) {
                 String previous = Files.readString(path);
                 JsonObject saved;
-                try { saved = JsonParser.parseString(previous).getAsJsonObject(); }
-                catch (RuntimeException invalid) { throw new IOException("Bridge lock is unreadable or another bridge is starting: " + path); }
-                if (!saved.has("pid") || ProcessHandle.of(saved.get("pid").getAsLong()).map(ProcessHandle::isAlive).orElse(false))
+                try {
+                    saved = JsonParser.parseString(previous).getAsJsonObject();
+                } catch (RuntimeException invalid) {
+                    throw new IOException("Bridge lock is unreadable or another bridge is starting: " + path);
+                }
+                if (!saved.has("pid")
+                        || ProcessHandle.of(saved.get("pid").getAsLong())
+                                .map(ProcessHandle::isAlive)
+                                .orElse(false))
                     throw new IOException("A bridge already owns this profile. Close it before starting another.");
                 if (!previous.equals(Files.readString(path))) throw new IOException("Bridge ownership changed; retry.");
                 Files.delete(path);
@@ -38,10 +44,12 @@ public final class BridgeOwnership implements AutoCloseable {
         throw new IOException("Could not claim bridge ownership.");
     }
 
-    @Override public void close() {
+    @Override
+    public void close() {
         try {
             JsonObject saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
             if (saved.has("nonce") && nonce.equals(saved.get("nonce").getAsString())) Files.deleteIfExists(path);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 }

@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, count, size, sequence, checked } from './spatial-inputs.js';
 
 const NOTE =
   'Abstract light geometry only: maximum source level minus unobstructed Manhattan distance, floored at zero. No occlusion, skylight, game-version behavior, spawning safety, or actual light propagation is checked. Source levels and rates are supplied assumptions. No sources are placed.';

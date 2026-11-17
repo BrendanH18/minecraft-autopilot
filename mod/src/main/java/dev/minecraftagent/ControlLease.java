@@ -10,8 +10,13 @@ public final class ControlLease {
     private String owner;
     private long renewedAt;
 
-    public ControlLease() { this(System::nanoTime); }
-    ControlLease(LongSupplier clock) { this.clock = clock; }
+    public ControlLease() {
+        this(System::nanoTime);
+    }
+
+    ControlLease(LongSupplier clock) {
+        this.clock = clock;
+    }
 
     public void acquire(String id) {
         validate(id);
@@ -25,10 +30,22 @@ public final class ControlLease {
             throw new IllegalStateException("Control was released or expired. Explicitly start a new session.");
     }
 
-    public void heartbeat(String id) { require(id); renewedAt = clock.getAsLong(); }
-    public boolean active() { return owner != null; }
-    public boolean expired() { return owner != null && clock.getAsLong() - renewedAt >= TIMEOUT_NANOS; }
-    public void release() { owner = null; }
+    public void heartbeat(String id) {
+        require(id);
+        renewedAt = clock.getAsLong();
+    }
+
+    public boolean active() {
+        return owner != null;
+    }
+
+    public boolean expired() {
+        return owner != null && clock.getAsLong() - renewedAt >= TIMEOUT_NANOS;
+    }
+
+    public void release() {
+        owner = null;
+    }
 
     private static void validate(String id) {
         if (id == null || !UUID.fromString(id).toString().equals(id))

@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, count, size, radians, sequence, checked } from './spatial-inputs.js';
 
 const NOTE =
   'Offline abstract railway planning. Speeds, spacing, deceleration, recipes, rates, and capacities are supplied assumptions, not Minecraft physics or recipe guarantees. Candidate placement uses zero-based track-cell indices. Does not build track or implement signaling.';

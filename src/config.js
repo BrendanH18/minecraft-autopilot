@@ -51,7 +51,7 @@ export async function writePrivateJson(path, value) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
     await rename(temporary, path);
   } finally {
     await rm(temporary, { force: true });

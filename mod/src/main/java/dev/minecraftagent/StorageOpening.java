@@ -12,11 +12,34 @@ final class StorageOpening {
         cancelled = false;
         sequence = -1;
     }
-    void sent(int sequence) { if (pending) this.sequence = sequence; }
-    boolean pending() { return pending; }
-    boolean sent() { return sequence >= 0; }
-    boolean mayOwnReply() { return pending && !cancelled; }
-    void cancel() { cancelled = true; }
-    void acknowledge(int sequence) { if (pending && this.sequence >= 0 && sequence >= this.sequence) reset(); }
-    void reset() { pending = false; cancelled = false; sequence = -1; }
+
+    void sent(int sequence) {
+        if (pending) this.sequence = sequence;
+    }
+
+    boolean pending() {
+        return pending;
+    }
+
+    boolean sent() {
+        return sequence >= 0;
+    }
+
+    boolean mayOwnReply() {
+        return pending && !cancelled;
+    }
+
+    void cancel() {
+        cancelled = true;
+    }
+
+    void acknowledge(int sequence) {
+        if (pending && this.sequence >= 0 && sequence >= this.sequence) reset();
+    }
+
+    void reset() {
+        pending = false;
+        cancelled = false;
+        sequence = -1;
+    }
 }

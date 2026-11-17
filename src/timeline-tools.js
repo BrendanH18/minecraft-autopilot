@@ -111,7 +111,7 @@ export function timelineReport(values, command, args = []) {
     case 'item-peak':
     case 'item-target': {
       const name = itemName(args[0]),
-        readings = samples.map((s, i) => ({ ...stamp(i), count: quantity(i, name) }));
+        readings = samples.map((_, i) => ({ ...stamp(i), count: quantity(i, name) }));
       if (command === 'item-history') result = { name, readings };
       if (command === 'item-rate') {
         const net = readings.at(-1).count - readings[0].count;
@@ -230,7 +230,7 @@ export function timelineReport(values, command, args = []) {
       result = {
         items: names
           .filter(
-            (name) => quantity(0, name) > 0 && inventories.every((m, i) => quantity(i, name) === quantity(0, name)),
+            (name) => quantity(0, name) > 0 && inventories.every((_, i) => quantity(i, name) === quantity(0, name)),
           )
           .map((name) => ({ name, count: quantity(0, name) })),
       };

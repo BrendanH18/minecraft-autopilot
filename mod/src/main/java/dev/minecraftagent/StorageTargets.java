@@ -24,7 +24,12 @@ final class StorageTargets {
         var keys = new LinkedHashSet<P>();
         for (P position : requested) {
             P key = members.containsKey(position) ? position : null;
-            if (key == null) for (var entry : members.entrySet()) if (entry.getValue().contains(position)) { key = entry.getKey(); break; }
+            if (key == null)
+                for (var entry : members.entrySet())
+                    if (entry.getValue().contains(position)) {
+                        key = entry.getKey();
+                        break;
+                    }
             if (key == null) return new Resolution<>(List.of(), position);
             keys.add(key);
         }

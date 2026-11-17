@@ -645,7 +645,7 @@ test('pareto accepts the case and objective limits and rejects one beyond', () =
   assert.equal(boundary.objectives.length, 10);
   assert.deepEqual(
     boundary.front,
-    Array.from({ length: 100 }, (unused, index) => index + 1),
+    Array.from({ length: 100 }, (_, index) => index + 1),
   );
   assert.ok(boundary.cases.every((row) => row.scores.length === 10 && row.dominated === false));
   assert.equal(runPareto('tunnel', 'excavate', { cases: [[2, 3, 4]], objectives: [objective] }).total, 1);

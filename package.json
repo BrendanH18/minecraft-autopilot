@@ -5,14 +5,26 @@
   "type": "module",
   "description": "A local agent harness for your Minecraft Java player",
   "license": "MIT",
-  "keywords": ["minecraft", "fabric", "mineflayer", "baritone", "mcp", "agent", "ollama"],
-  "bin": { "mc-agent": "src/cli.js" },
+  "keywords": [
+    "minecraft",
+    "fabric",
+    "mineflayer",
+    "baritone",
+    "mcp",
+    "agent",
+    "ollama"
+  ],
+  "bin": {
+    "mc-agent": "src/cli.js"
+  },
   "scripts": {
     "start": "node src/cli.js",
     "test": "node --test test/*.test.js",
     "check": "node scripts/check.js",
-    "lint": "biome ci .",
+    "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",
+    "lint:mod": "node scripts/gradle.js spotlessCheck",
+    "format:mod": "node scripts/gradle.js spotlessApply",
     "setup:mod": "node scripts/setup-mod.js",
     "build:mod": "npm run setup:mod && node scripts/gradle.js build && node scripts/package-mod.js",
     "verify:mod": "node scripts/verify-mod.js",
@@ -20,8 +32,12 @@
     "demo": "node src/cli.js demo",
     "acceptance:bot": "node scripts/live-bot-acceptance.js"
   },
-  "engines": { "node": ">=22.12" },
-  "overrides": { "uuid": "11.1.1" },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
     "commander": "15.1.0",

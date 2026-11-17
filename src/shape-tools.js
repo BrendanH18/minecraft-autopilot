@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, count, radians, wrap, sequence, checked } from './spatial-inputs.js';
 
 function polygon(value) {
   const ps = String(value)
