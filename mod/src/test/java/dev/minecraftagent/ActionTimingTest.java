@@ -1,10 +1,12 @@
 package dev.minecraftagent;
 
-import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import org.junit.jupiter.api.Test;
+
 class ActionTimingTest {
-    @Test void failedEatingAllowsRetreatBeforeAnotherAutomaticAttempt() {
+    @Test
+    void failedEatingAllowsRetreatBeforeAnotherAutomaticAttempt() {
         ActionTiming timing = new ActionTiming();
         assertTrue(timing.canAutoEat(0));
         timing.eatingFailed(5_000_000_000L);
@@ -13,7 +15,8 @@ class ActionTimingTest {
         assertTrue(timing.canAutoEat(15_000_000_000L));
     }
 
-    @Test void eatingFailuresDoNotExtendTheActionOrRecoveryBudget() {
+    @Test
+    void eatingFailuresDoNotExtendTheActionOrRecoveryBudget() {
         ActionTiming timing = new ActionTiming();
         timing.start(0, 180_000_000_000L);
         timing.eatingFailed(179_000_000_000L);
@@ -24,7 +27,8 @@ class ActionTimingTest {
         assertTrue(timing.expired(240_000_000_000L));
     }
 
-    @Test void failedConsumptionCannotKeepASurvivalRetreatAlivePastItsBudget() {
+    @Test
+    void failedConsumptionCannotKeepASurvivalRetreatAlivePastItsBudget() {
         ActionTiming timing = new ActionTiming();
         timing.start(0, 180_000_000_000L);
         timing.startRetreat(20_000_000_000L);

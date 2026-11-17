@@ -1,11 +1,10 @@
 package dev.minecraftagent;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
 import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /** Server inventory mirror. Client clickSlot mutates the screen handler speculatively. Client thread only. */
 public final class StoragePackets {
@@ -15,10 +14,22 @@ public final class StoragePackets {
     private static ItemStack cursor = ItemStack.EMPTY;
 
     private static FabricStorage storage;
-    static void attach(FabricStorage value) { storage = value; }
-    public static void screenOpened() { if (storage != null) storage.screenOpened(); }
-    public static void interactionSent(int sequence) { if (storage != null && storage.agentOpening()) storage.interactionSent(sequence); }
-    public static void acknowledged(int sequence) { if (storage != null) storage.acknowledged(sequence); }
+
+    static void attach(FabricStorage value) {
+        storage = value;
+    }
+
+    public static void screenOpened() {
+        if (storage != null) storage.screenOpened();
+    }
+
+    public static void interactionSent(int sequence) {
+        if (storage != null && storage.agentOpening()) storage.interactionSent(sequence);
+    }
+
+    public static void acknowledged(int sequence) {
+        if (storage != null) storage.acknowledged(sequence);
+    }
 
     private StoragePackets() {}
 
@@ -36,7 +47,15 @@ public final class StoragePackets {
             contents.set(packet.getSlot(), packet.getStack().copy());
     }
 
-    static long generation() { return generation; }
-    static boolean ready(int id, long after, int size) { return syncId == id && generation > after && contents.size() == size && cursor.isEmpty(); }
-    static List<ItemStack> contents() { return contents; }
+    static long generation() {
+        return generation;
+    }
+
+    static boolean ready(int id, long after, int size) {
+        return syncId == id && generation > after && contents.size() == size && cursor.isEmpty();
+    }
+
+    static List<ItemStack> contents() {
+        return contents;
+    }
 }

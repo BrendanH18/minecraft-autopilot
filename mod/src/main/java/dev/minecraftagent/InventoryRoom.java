@@ -10,7 +10,10 @@ final class InventoryRoom {
     /** One inventory slot: an item id (null when empty), its count, and that item's maximum stack size. */
     record Slot(String item, int count, int maxCount) {
         static final Slot EMPTY = new Slot(null, 0, 0);
-        boolean empty() { return item == null || count <= 0; }
+
+        boolean empty() {
+            return item == null || count <= 0;
+        }
     }
 
     private InventoryRoom() {}

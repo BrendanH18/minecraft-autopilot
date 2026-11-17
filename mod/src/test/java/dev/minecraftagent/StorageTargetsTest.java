@@ -1,10 +1,11 @@
 package dev.minecraftagent;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 
 class StorageTargetsTest {
     record Pos(int x, int y, int z) {}
@@ -18,22 +19,33 @@ class StorageTargetsTest {
         return members;
     }
 
-    @Test void requestedPositionsSelectOnlyThoseRecords() {
+    @Test
+    void requestedPositionsSelectOnlyThoseRecords() {
         var resolution = StorageTargets.resolve(List.of(new Pos(5, 64, 5)), known());
         assertNull(resolution.unknown());
         assertEquals(List.of(new Pos(5, 64, 5)), resolution.keys(), "the distant unrelated chest is not reopened");
     }
 
-    @Test void eitherDoubleChestHalfSelectsItsInventoryOnce() {
-        var resolution = StorageTargets.resolve(List.of(new Pos(2, 64, 0), new Pos(5, 64, 5), new Pos(1, 64, 0)), known());
+    @Test
+    void eitherDoubleChestHalfSelectsItsInventoryOnce() {
+        var resolution =
+                StorageTargets.resolve(List.of(new Pos(2, 64, 0), new Pos(5, 64, 5), new Pos(1, 64, 0)), known());
         assertNull(resolution.unknown());
-        assertEquals(List.of(new Pos(1, 64, 0), new Pos(5, 64, 5)), resolution.keys(), "the canonical key, in request order, read once");
+        assertEquals(
+                List.of(new Pos(1, 64, 0), new Pos(5, 64, 5)),
+                resolution.keys(),
+                "the canonical key, in request order, read once");
     }
 
-    @Test void anUnopenedPositionFailsTheWholeRequest() {
-        var resolution = StorageTargets.resolve(List.of(new Pos(5, 64, 5), new Pos(3, 64, 0), new Pos(4, 64, 0)), known());
+    @Test
+    void anUnopenedPositionFailsTheWholeRequest() {
+        var resolution =
+                StorageTargets.resolve(List.of(new Pos(5, 64, 5), new Pos(3, 64, 0), new Pos(4, 64, 0)), known());
         assertEquals(new Pos(3, 64, 0), resolution.unknown(), "the first unknown position is reported");
         assertTrue(resolution.keys().isEmpty(), "nothing is reopened when any position is unknown");
-        assertEquals(new Pos(9, 9, 9), StorageTargets.resolve(List.of(new Pos(9, 9, 9)), Map.<Pos, List<Pos>>of()).unknown());
+        assertEquals(
+                new Pos(9, 9, 9),
+                StorageTargets.resolve(List.of(new Pos(9, 9, 9)), Map.<Pos, List<Pos>>of())
+                        .unknown());
     }
 }

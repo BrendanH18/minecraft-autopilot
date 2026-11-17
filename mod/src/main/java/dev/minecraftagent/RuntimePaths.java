@@ -7,7 +7,10 @@ public final class RuntimePaths {
     private RuntimePaths() {}
 
     public static Path directory(Path gameDirectory, String override) {
-        return (override == null || override.isBlank() ? gameDirectory.resolve("config/minecraft-agent") : Path.of(override))
-                .toAbsolutePath().normalize();
+        return (override == null || override.isBlank()
+                        ? gameDirectory.resolve("config/minecraft-agent")
+                        : Path.of(override))
+                .toAbsolutePath()
+                .normalize();
     }
 }

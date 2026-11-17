@@ -1,10 +1,12 @@
 package dev.minecraftagent;
 
-import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import org.junit.jupiter.api.Test;
+
 class StorageOpeningTest {
-    @Test void cancellationRetainsLateReplyCleanupUntilAcknowledged() {
+    @Test
+    void cancellationRetainsLateReplyCleanupUntilAcknowledged() {
         StorageOpening opening = new StorageOpening();
         opening.expect();
         opening.sent(12);
@@ -18,7 +20,8 @@ class StorageOpeningTest {
         assertFalse(opening.pending());
     }
 
-    @Test void playerInteractionCannotReplaceThePendingAgentOpening() {
+    @Test
+    void playerInteractionCannotReplaceThePendingAgentOpening() {
         StorageOpening opening = new StorageOpening();
         opening.expect();
         opening.sent(3);
@@ -31,7 +34,8 @@ class StorageOpeningTest {
         assertTrue(opening.mayOwnReply());
     }
 
-    @Test void blockedLidAcknowledgementAndWorldResetClearPendingState() {
+    @Test
+    void blockedLidAcknowledgementAndWorldResetClearPendingState() {
         StorageOpening opening = new StorageOpening();
         opening.expect();
         opening.sent(5);

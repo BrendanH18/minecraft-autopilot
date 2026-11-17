@@ -1,21 +1,28 @@
 package dev.minecraftagent;
 
-import org.junit.jupiter.api.Test;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import org.junit.jupiter.api.Test;
+
 class ControlLeaseTest {
-    @Test void anotherControllerCannotStealALiveLease() {
+    @Test
+    void anotherControllerCannotStealALiveLease() {
         ControlLease lease = new ControlLease();
         String owner = UUID.randomUUID().toString();
         lease.acquire(owner);
-        assertThrows(IllegalStateException.class, () -> lease.acquire(UUID.randomUUID().toString()));
-        assertThrows(IllegalStateException.class, () -> lease.heartbeat(UUID.randomUUID().toString()));
+        assertThrows(
+                IllegalStateException.class,
+                () -> lease.acquire(UUID.randomUUID().toString()));
+        assertThrows(
+                IllegalStateException.class,
+                () -> lease.heartbeat(UUID.randomUUID().toString()));
         assertDoesNotThrow(() -> lease.heartbeat(owner));
     }
 
-    @Test void heartbeatExtendsExpiryAndExpiredCommandsAreRejected() {
+    @Test
+    void heartbeatExtendsExpiryAndExpiredCommandsAreRejected() {
         AtomicLong clock = new AtomicLong();
         ControlLease lease = new ControlLease(clock::get);
         String owner = UUID.randomUUID().toString();
@@ -29,7 +36,8 @@ class ControlLeaseTest {
         assertThrows(IllegalStateException.class, () -> lease.require(owner));
     }
 
-    @Test void releasePreventsDelayedHeartbeatFromResumingControl() {
+    @Test
+    void releasePreventsDelayedHeartbeatFromResumingControl() {
         ControlLease lease = new ControlLease();
         String owner = UUID.randomUUID().toString();
         lease.acquire(owner);
