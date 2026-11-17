@@ -1,320 +1,1974 @@
 import { demand, sum, same, sequence, compensatedAdder } from './offline-kit.js';
 import { wholeCeil, wholeFloor, budgetFits } from './resource-rounding.js';
-const sorted = xs => [...xs].sort((a,b)=>a-b);
-const unique = xs => [...new Set(xs)];
-const avg = xs => sum(xs)/xs.length;
-const pairs = xs => xs.slice(1).map((x,i)=>[xs[i],x]);
-const length = p => sum(pairs(p).map(([a,b])=>Math.hypot(b[0]-a[0],b[1]-a[1])));
+const sorted = (xs) => [...xs].sort((a, b) => a - b);
+const unique = (xs) => [...new Set(xs)];
+const avg = (xs) => sum(xs) / xs.length;
+const pairs = (xs) => xs.slice(1).map((x, i) => [xs[i], x]);
+const length = (p) => sum(pairs(p).map(([a, b]) => Math.hypot(b[0] - a[0], b[1] - a[1])));
 function union(rows) {
- const out=[];
- for (const [a,b] of [...rows].sort((x,y)=>x[0]-y[0]||x[1]-y[1])) {
-  if(out.length && a<=out.at(-1)[1]) out.at(-1)[1]=Math.max(out.at(-1)[1],b);
-  else out.push([a,b]);
- }
- return out;
+  const out = [];
+  for (const [a, b] of [...rows].sort((x, y) => x[0] - y[0] || x[1] - y[1])) {
+    if (out.length && a <= out.at(-1)[1]) out.at(-1)[1] = Math.max(out.at(-1)[1], b);
+    else out.push([a, b]);
+  }
+  return out;
 }
-const measure = rows => sum(rows.map(([a,b])=>b-a));
-const gaps = rows => pairs(union(rows)).map(([a,b])=>[a[1],b[0]]);
-function clip(rows,lo,hi) { demand(lo<=hi,'Lower bound exceeds upper bound.'); return union(rows).filter(([a,b])=>b>=lo&&a<=hi).map(([a,b])=>[Math.max(a,lo),Math.min(b,hi)]); }
-function exclude(rows,lo,hi) { demand(lo<=hi);if(lo===hi)return union(rows);return union(rows).flatMap(([a,b])=>b<=lo||a>=hi?[[a,b]]:[...(a<=lo?[[a,lo]]:[]),...(b>=hi?[[hi,b]]:[])]); }
-function quantile(rows,f) { const u=union(rows);let left=measure(u)*f; for(const [a,b] of u){if(left<=b-a)return a+left;left-=b-a;}return u.at(-1)[1]; }
-function schedule(ds) { const add=compensatedAdder();let t=0;return ds.map((d,index)=>{const start=t;t=add(d);return {index,start,end:t,duration:d};}); }
-function graph(n,edges) {
- demand(n<=1000,'At most 1000 nodes.');
- demand(edges.every(e=>e.every(v=>Number.isInteger(v)&&v>=0&&v<n)),'Edges must reference node indexes.');
- const adj=sequence(n,()=>[]),rev=sequence(n,()=>[]);
- for(const [a,b] of edges)if(!adj[a].includes(b)){adj[a].push(b);rev[b].push(a);}
- const indegree=rev.map(v=>v.length),queue=sequence(n,i=>i).filter(i=>!indegree[i]),order=[];
- for(let k=0;k<queue.length;k++){const a=queue[k];order.push(a);for(const b of adj[a])if(--indegree[b]===0)queue.push(b);}
- return {adj,rev,order,dag:order.length===n};
+const measure = (rows) => sum(rows.map(([a, b]) => b - a));
+const gaps = (rows) => pairs(union(rows)).map(([a, b]) => [a[1], b[0]]);
+function clip(rows, lo, hi) {
+  demand(lo <= hi, 'Lower bound exceeds upper bound.');
+  return union(rows)
+    .filter(([a, b]) => b >= lo && a <= hi)
+    .map(([a, b]) => [Math.max(a, lo), Math.min(b, hi)]);
 }
-function walk(adj,start) { demand(Number.isInteger(start)&&start>=0&&start<adj.length,'Invalid node.');const seen=new Set([start]),q=[start];for(let k=0;k<q.length;k++)for(const b of adj[q[k]])if(!seen.has(b)){seen.add(b);q.push(b);}return sorted([...seen]); }
-function levels(g){demand(g.dag,'Requires an acyclic dependency graph.');const out=g.adj.map(()=>0);for(const a of g.order)for(const b of g.adj[a])out[b]=Math.max(out[b],out[a]+1);return out;}
-function pathSample(p,d) { demand(p.length>=2,'Need at least two points.');const total=length(p);demand(total>0,'Path must have positive length.');d=Math.max(0,Math.min(d,total));for(const [a,b]of pairs(p)){const l=Math.hypot(b[0]-a[0],b[1]-a[1]);if(l>0&&d<=l)return a.map((v,i)=>v+(b[i]-v)*d/l);d-=l;}return p.at(-1); }
-function nearest(p,x,z){return p.map((v,index)=>({index,distance:Math.hypot(v[0]-x,v[1]-z)})).sort((a,b)=>a.distance-b.distance||a.index-b.index);}
-function segments(p){return pairs(p).map(([a,b])=>Math.hypot(b[0]-a[0],b[1]-a[1]));}
-function profile(v,spacing){return pairs(v).map(([a,b])=>(b-a)/spacing);}
-function windowSum(v,k){demand(k<=v.length,'Window exceeds list length.');return sequence(v.length-k+1,i=>sum(v.slice(i,i+k)));}
-function cyclePhase(period,time) { const cycles=time/period;return wholeFloor(cycles)===wholeCeil(cycles)?0:((time%period)+period)%period; }
-function patrolTime(length,speed,rest,laps){return laps*(length/speed+rest);}
-export const COORDINATION_GROUPS=[];
+function exclude(rows, lo, hi) {
+  demand(lo <= hi);
+  if (lo === hi) return union(rows);
+  return union(rows).flatMap(([a, b]) =>
+    b <= lo || a >= hi ? [[a, b]] : [...(a <= lo ? [[a, lo]] : []), ...(b >= hi ? [[hi, b]] : [])],
+  );
+}
+function quantile(rows, f) {
+  const u = union(rows);
+  let left = measure(u) * f;
+  for (const [a, b] of u) {
+    if (left <= b - a) return a + left;
+    left -= b - a;
+  }
+  return u.at(-1)[1];
+}
+function schedule(ds) {
+  const add = compensatedAdder();
+  let t = 0;
+  return ds.map((d, index) => {
+    const start = t;
+    t = add(d);
+    return { index, start, end: t, duration: d };
+  });
+}
+function graph(n, edges) {
+  demand(n <= 1000, 'At most 1000 nodes.');
+  demand(
+    edges.every((e) => e.every((v) => Number.isInteger(v) && v >= 0 && v < n)),
+    'Edges must reference node indexes.',
+  );
+  const adj = sequence(n, () => []),
+    rev = sequence(n, () => []);
+  for (const [a, b] of edges)
+    if (!adj[a].includes(b)) {
+      adj[a].push(b);
+      rev[b].push(a);
+    }
+  const indegree = rev.map((v) => v.length),
+    queue = sequence(n, (i) => i).filter((i) => !indegree[i]),
+    order = [];
+  for (let k = 0; k < queue.length; k++) {
+    const a = queue[k];
+    order.push(a);
+    for (const b of adj[a]) if (--indegree[b] === 0) queue.push(b);
+  }
+  return { adj, rev, order, dag: order.length === n };
+}
+function walk(adj, start) {
+  demand(Number.isInteger(start) && start >= 0 && start < adj.length, 'Invalid node.');
+  const seen = new Set([start]),
+    q = [start];
+  for (let k = 0; k < q.length; k++)
+    for (const b of adj[q[k]])
+      if (!seen.has(b)) {
+        seen.add(b);
+        q.push(b);
+      }
+  return sorted([...seen]);
+}
+function levels(g) {
+  demand(g.dag, 'Requires an acyclic dependency graph.');
+  const out = g.adj.map(() => 0);
+  for (const a of g.order) for (const b of g.adj[a]) out[b] = Math.max(out[b], out[a] + 1);
+  return out;
+}
+function pathSample(p, d) {
+  demand(p.length >= 2, 'Need at least two points.');
+  const total = length(p);
+  demand(total > 0, 'Path must have positive length.');
+  d = Math.max(0, Math.min(d, total));
+  for (const [a, b] of pairs(p)) {
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (l > 0 && d <= l) return a.map((v, i) => v + ((b[i] - v) * d) / l);
+    d -= l;
+  }
+  return p.at(-1);
+}
+function nearest(p, x, z) {
+  return p
+    .map((v, index) => ({ index, distance: Math.hypot(v[0] - x, v[1] - z) }))
+    .sort((a, b) => a.distance - b.distance || a.index - b.index);
+}
+function segments(p) {
+  return pairs(p).map(([a, b]) => Math.hypot(b[0] - a[0], b[1] - a[1]));
+}
+function profile(v, spacing) {
+  return pairs(v).map(([a, b]) => (b - a) / spacing);
+}
+function windowSum(v, k) {
+  demand(k <= v.length, 'Window exceeds list length.');
+  return sequence(v.length - k + 1, (i) => sum(v.slice(i, i + k)));
+}
+function cyclePhase(period, time) {
+  const cycles = time / period;
+  return wholeFloor(cycles) === wholeCeil(cycles) ? 0 : ((time % period) + period) % period;
+}
+function patrolTime(length, speed, rest, laps) {
+  return laps * (length / speed + rest);
+}
+export const COORDINATION_GROUPS = [];
 
-const interval_set = {name:"interval-set",note:"Offline continuous interval unions for work windows or route spans. Touching intervals merge; endpoints have zero length. Quantiles use covered length, not elapsed span.",commands:[]};
+const interval_set = {
+  name: 'interval-set',
+  note: 'Offline continuous interval unions for work windows or route spans. Touching intervals merge; endpoints have zero length. Quantiles use covered length, not elapsed span.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(interval_set);
-interval_set.commands.push({signature:"merge <intervals>",types:["intervals"],description:"Merge overlapping or touching intervals.",run:r=>union(r)});
-interval_set.commands.push({signature:"runs <intervals>",types:["intervals"],description:"Count disjoint covered runs.",run:r=>union(r).length});
-interval_set.commands.push({signature:"covered <intervals>",types:["intervals"],description:"Measure the union without double counting.",run:r=>measure(union(r))});
-interval_set.commands.push({signature:"bounds <intervals>",types:["intervals"],description:"Find first start and last end.",run:r=>{const u=union(r);return [u[0][0],u.at(-1)[1]];}});
-interval_set.commands.push({signature:"span <intervals>",types:["intervals"],description:"Measure elapsed span including gaps.",run:r=>{const u=union(r);return u.at(-1)[1]-u[0][0];}});
-interval_set.commands.push({signature:"density <intervals>",types:["intervals"],description:"Fraction of nonzero span covered.",run:r=>{const u=union(r),s=u.at(-1)[1]-u[0][0];demand(s>0);return measure(u)/s;}});
-interval_set.commands.push({signature:"gaps <intervals>",types:["intervals"],description:"List internal uncovered spans.",run:r=>gaps(r)});
-interval_set.commands.push({signature:"idle <intervals>",types:["intervals"],description:"Sum internal gap lengths.",run:r=>measure(gaps(r))});
-interval_set.commands.push({signature:"longest-gap <intervals>",types:["intervals"],description:"Find the largest internal gap length, zero if none.",run:r=>Math.max(0,...gaps(r).map(([a,b])=>b-a))});
-interval_set.commands.push({signature:"longest-run <intervals>",types:["intervals"],description:"Find longest covered run.",run:r=>Math.max(...union(r).map(([a,b])=>b-a))});
-interval_set.commands.push({signature:"shortest-run <intervals>",types:["intervals"],description:"Find shortest covered run including zero-length runs.",run:r=>Math.min(...union(r).map(([a,b])=>b-a))});
-interval_set.commands.push({signature:"starts <intervals>",types:["intervals"],description:"Report starts of merged runs.",run:r=>union(r).map(([a,b])=>a)});
-interval_set.commands.push({signature:"ends <intervals>",types:["intervals"],description:"Report ends of merged runs.",run:r=>union(r).map(([a,b])=>b)});
-interval_set.commands.push({signature:"midpoints <intervals>",types:["intervals"],description:"Report midpoints of merged runs.",run:r=>union(r).map(([a,b])=>(a+b)/2)});
-interval_set.commands.push({signature:"lengths <intervals>",types:["intervals"],description:"Report lengths of merged runs.",run:r=>union(r).map(([a,b])=>b-a)});
-interval_set.commands.push({signature:"contains <intervals> <point>",types:["intervals", "n"],description:"Test closed endpoint membership.",run:(r,p)=>r.some(([a,b])=>a<=p&&p<=b)});
-interval_set.commands.push({signature:"clip <intervals> <low> <high>",types:["intervals", "n", "n"],description:"Intersect with a closed query window.",run:(r,a,b)=>clip(r,a,b)});
-interval_set.commands.push({signature:"exclude <intervals> <low> <high>",types:["intervals", "n", "n"],description:"Remove query window interior; resulting boundaries remain closed.",run:(r,a,b)=>exclude(r,a,b)});
-interval_set.commands.push({signature:"shift <intervals> <offset>",types:["intervals", "n"],description:"Translate all merged runs.",run:(r,o)=>union(r).map(v=>v.map(x=>x+o))});
-interval_set.commands.push({signature:"expand <intervals> <margin>",types:["intervals", "q"],description:"Grow each run then merge.",run:(r,m)=>union(r.map(([a,b])=>[a-m,b+m]))});
-interval_set.commands.push({signature:"shrink <intervals> <margin>",types:["intervals", "q"],description:"Erode merged runs and drop inverted runs.",run:(r,m)=>union(r).filter(([a,b])=>b-a>=2*m).map(([a,b])=>[a+m,b-m])});
-interval_set.commands.push({signature:"complement <intervals> <low> <high>",types:["intervals", "n", "n"],description:"Find uncovered query lengths; boundaries are shared.",run:(r,a,b)=>{demand(a<=b);const c=clip(r,a,b);let t=a;const out=[];for(const [s,e]of c){if(s>t)out.push([t,s]);t=Math.max(t,e);}if(t<b)out.push([t,b]);return out;}});
-interval_set.commands.push({signature:"overlap <intervals> <low> <high>",types:["intervals", "n", "n"],description:"Measure union overlap with a window.",run:(r,a,b)=>measure(clip(r,a,b))});
-interval_set.commands.push({signature:"distance <intervals> <point>",types:["intervals", "n"],description:"Measure nearest distance to covered set.",run:(r,p)=>Math.min(...r.map(([a,b])=>Math.max(a-p,0,p-b)))});
-interval_set.commands.push({signature:"quantile <intervals> <fraction>",types:["intervals", "r"],description:"Locate a fraction of total covered length.",run:(r,f)=>quantile(r,f)});
+interval_set.commands.push({
+  signature: 'merge <intervals>',
+  types: ['intervals'],
+  description: 'Merge overlapping or touching intervals.',
+  run: (r) => union(r),
+});
+interval_set.commands.push({
+  signature: 'runs <intervals>',
+  types: ['intervals'],
+  description: 'Count disjoint covered runs.',
+  run: (r) => union(r).length,
+});
+interval_set.commands.push({
+  signature: 'covered <intervals>',
+  types: ['intervals'],
+  description: 'Measure the union without double counting.',
+  run: (r) => measure(union(r)),
+});
+interval_set.commands.push({
+  signature: 'bounds <intervals>',
+  types: ['intervals'],
+  description: 'Find first start and last end.',
+  run: (r) => {
+    const u = union(r);
+    return [u[0][0], u.at(-1)[1]];
+  },
+});
+interval_set.commands.push({
+  signature: 'span <intervals>',
+  types: ['intervals'],
+  description: 'Measure elapsed span including gaps.',
+  run: (r) => {
+    const u = union(r);
+    return u.at(-1)[1] - u[0][0];
+  },
+});
+interval_set.commands.push({
+  signature: 'density <intervals>',
+  types: ['intervals'],
+  description: 'Fraction of nonzero span covered.',
+  run: (r) => {
+    const u = union(r),
+      s = u.at(-1)[1] - u[0][0];
+    demand(s > 0);
+    return measure(u) / s;
+  },
+});
+interval_set.commands.push({
+  signature: 'gaps <intervals>',
+  types: ['intervals'],
+  description: 'List internal uncovered spans.',
+  run: (r) => gaps(r),
+});
+interval_set.commands.push({
+  signature: 'idle <intervals>',
+  types: ['intervals'],
+  description: 'Sum internal gap lengths.',
+  run: (r) => measure(gaps(r)),
+});
+interval_set.commands.push({
+  signature: 'longest-gap <intervals>',
+  types: ['intervals'],
+  description: 'Find the largest internal gap length, zero if none.',
+  run: (r) => Math.max(0, ...gaps(r).map(([a, b]) => b - a)),
+});
+interval_set.commands.push({
+  signature: 'longest-run <intervals>',
+  types: ['intervals'],
+  description: 'Find longest covered run.',
+  run: (r) => Math.max(...union(r).map(([a, b]) => b - a)),
+});
+interval_set.commands.push({
+  signature: 'shortest-run <intervals>',
+  types: ['intervals'],
+  description: 'Find shortest covered run including zero-length runs.',
+  run: (r) => Math.min(...union(r).map(([a, b]) => b - a)),
+});
+interval_set.commands.push({
+  signature: 'starts <intervals>',
+  types: ['intervals'],
+  description: 'Report starts of merged runs.',
+  run: (r) => union(r).map(([a, b]) => a),
+});
+interval_set.commands.push({
+  signature: 'ends <intervals>',
+  types: ['intervals'],
+  description: 'Report ends of merged runs.',
+  run: (r) => union(r).map(([a, b]) => b),
+});
+interval_set.commands.push({
+  signature: 'midpoints <intervals>',
+  types: ['intervals'],
+  description: 'Report midpoints of merged runs.',
+  run: (r) => union(r).map(([a, b]) => (a + b) / 2),
+});
+interval_set.commands.push({
+  signature: 'lengths <intervals>',
+  types: ['intervals'],
+  description: 'Report lengths of merged runs.',
+  run: (r) => union(r).map(([a, b]) => b - a),
+});
+interval_set.commands.push({
+  signature: 'contains <intervals> <point>',
+  types: ['intervals', 'n'],
+  description: 'Test closed endpoint membership.',
+  run: (r, p) => r.some(([a, b]) => a <= p && p <= b),
+});
+interval_set.commands.push({
+  signature: 'clip <intervals> <low> <high>',
+  types: ['intervals', 'n', 'n'],
+  description: 'Intersect with a closed query window.',
+  run: (r, a, b) => clip(r, a, b),
+});
+interval_set.commands.push({
+  signature: 'exclude <intervals> <low> <high>',
+  types: ['intervals', 'n', 'n'],
+  description: 'Remove query window interior; resulting boundaries remain closed.',
+  run: (r, a, b) => exclude(r, a, b),
+});
+interval_set.commands.push({
+  signature: 'shift <intervals> <offset>',
+  types: ['intervals', 'n'],
+  description: 'Translate all merged runs.',
+  run: (r, o) => union(r).map((v) => v.map((x) => x + o)),
+});
+interval_set.commands.push({
+  signature: 'expand <intervals> <margin>',
+  types: ['intervals', 'q'],
+  description: 'Grow each run then merge.',
+  run: (r, m) => union(r.map(([a, b]) => [a - m, b + m])),
+});
+interval_set.commands.push({
+  signature: 'shrink <intervals> <margin>',
+  types: ['intervals', 'q'],
+  description: 'Erode merged runs and drop inverted runs.',
+  run: (r, m) =>
+    union(r)
+      .filter(([a, b]) => b - a >= 2 * m)
+      .map(([a, b]) => [a + m, b - m]),
+});
+interval_set.commands.push({
+  signature: 'complement <intervals> <low> <high>',
+  types: ['intervals', 'n', 'n'],
+  description: 'Find uncovered query lengths; boundaries are shared.',
+  run: (r, a, b) => {
+    demand(a <= b);
+    const c = clip(r, a, b);
+    let t = a;
+    const out = [];
+    for (const [s, e] of c) {
+      if (s > t) out.push([t, s]);
+      t = Math.max(t, e);
+    }
+    if (t < b) out.push([t, b]);
+    return out;
+  },
+});
+interval_set.commands.push({
+  signature: 'overlap <intervals> <low> <high>',
+  types: ['intervals', 'n', 'n'],
+  description: 'Measure union overlap with a window.',
+  run: (r, a, b) => measure(clip(r, a, b)),
+});
+interval_set.commands.push({
+  signature: 'distance <intervals> <point>',
+  types: ['intervals', 'n'],
+  description: 'Measure nearest distance to covered set.',
+  run: (r, p) => Math.min(...r.map(([a, b]) => Math.max(a - p, 0, p - b))),
+});
+interval_set.commands.push({
+  signature: 'quantile <intervals> <fraction>',
+  types: ['intervals', 'r'],
+  description: 'Locate a fraction of total covered length.',
+  run: (r, f) => quantile(r, f),
+});
 
-const shiftplan = {name:"shiftplan",note:"Offline sequential work durations in consistent time units; no travel or resource contention is inferred. Zero durations are allowed. Indexes are zero-based.",commands:[]};
+const shiftplan = {
+  name: 'shiftplan',
+  note: 'Offline sequential work durations in consistent time units; no travel or resource contention is inferred. Zero durations are allowed. Indexes are zero-based.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(shiftplan);
-shiftplan.commands.push({signature:"schedule <durations>",types:["L"],description:"Produce sequential start/end records.",run:v=>schedule(v)});
-shiftplan.commands.push({signature:"starts <durations>",types:["L"],description:"Report start times.",run:v=>schedule(v).map(x=>x.start)});
-shiftplan.commands.push({signature:"finishes <durations>",types:["L"],description:"Report completion times.",run:v=>schedule(v).map(x=>x.end)});
-shiftplan.commands.push({signature:"total <durations>",types:["L"],description:"Sum serial work duration.",run:v=>sum(v)});
-shiftplan.commands.push({signature:"completion-mean <durations>",types:["L"],description:"Mean job completion time.",run:v=>avg(schedule(v).map(x=>x.end))});
-shiftplan.commands.push({signature:"waiting-total <durations>",types:["L"],description:"Sum waiting time before jobs start.",run:v=>sum(schedule(v).map(x=>x.start))});
-shiftplan.commands.push({signature:"shortest-first <durations>",types:["L"],description:"Order job indexes by duration ascending.",run:v=>v.map((d,i)=>i).sort((a,b)=>v[a]-v[b]||a-b)});
-shiftplan.commands.push({signature:"longest-first <durations>",types:["L"],description:"Order job indexes by duration descending.",run:v=>v.map((d,i)=>i).sort((a,b)=>v[b]-v[a]||a-b)});
-shiftplan.commands.push({signature:"deadline-slack <durations> <deadline>",types:["L", "q"],description:"Report slack after all jobs.",run:(v,d)=>d-sum(v)});
-shiftplan.commands.push({signature:"completed-at <durations> <time>",types:["L", "q"],description:"Count jobs whose completion is at or before time.",run:(v,t)=>schedule(v).filter(x=>budgetFits(x.end,t)).length});
-shiftplan.commands.push({signature:"active-at <durations> <time>",types:["L", "q"],description:"Find active positive-duration job at time or null.",run:(v,t)=>schedule(v).find(x=>budgetFits(x.start,t)&&!budgetFits(x.end,t))?.index??null});
-shiftplan.commands.push({signature:"remaining-at <durations> <time>",types:["L", "q"],description:"Report remaining serial work.",run:(v,t)=>Math.max(0,sum(v)-t)});
-shiftplan.commands.push({signature:"progress <durations> <time>",types:["L", "q"],description:"Fraction of total nonzero work elapsed, clamped.",run:(v,t)=>{demand(sum(v)>0);return Math.min(1,t/sum(v));}});
-shiftplan.commands.push({signature:"offset <durations> <start>",types:["L", "n"],description:"Shift schedule to a supplied origin.",run:(v,t)=>schedule(v).map(x=>({...x,start:x.start+t,end:x.end+t}))});
-shiftplan.commands.push({signature:"breaks <durations> <break-duration>",types:["L", "q"],description:"Insert breaks between jobs, never after last.",run:(v,b)=>sum(v)+(v.length-1)*b});
-shiftplan.commands.push({signature:"setup <durations> <setup-duration>",types:["L", "q"],description:"Include setup before every listed job.",run:(v,s)=>sum(v)+v.length*s});
-shiftplan.commands.push({signature:"repeat <durations> <cycles>",types:["L", "c"],description:"Budget repeated full cycles.",run:(v,n)=>sum(v)*n});
-shiftplan.commands.push({signature:"fit-cycles <durations> <budget>",types:["L", "q"],description:"Count complete nonzero cycles fitting a budget.",run:(v,b)=>{demand(sum(v)>0);return wholeFloor(b/sum(v));}});
-shiftplan.commands.push({signature:"scale <durations> <factor>",types:["L", "q"],description:"Scale durations by a deterministic factor.",run:(v,f)=>v.map(d=>d*f)});
-shiftplan.commands.push({signature:"overheads <durations> <overheads>",types:["L", "L"],description:"Add separate overhead per job.",run:(v,o)=>{same(v,o);return v.map((d,i)=>d+o[i]);}});
-shiftplan.commands.push({signature:"lateness <durations> <deadlines>",types:["L", "L"],description:"Compute signed lateness per job.",run:(v,d)=>{same(v,d);return schedule(v).map((x,i)=>x.end-d[i]);}});
-shiftplan.commands.push({signature:"tardiness <durations> <deadlines>",types:["L", "L"],description:"Sum positive lateness.",run:(v,d)=>{same(v,d);return sum(schedule(v).map((x,i)=>Math.max(0,x.end-d[i])));}});
-shiftplan.commands.push({signature:"weighted-completion <durations> <weights>",types:["L", "L"],description:"Sum completion times times job importance weights.",run:(v,w)=>{same(v,w);return sum(schedule(v).map((x,i)=>x.end*w[i]));}});
-shiftplan.commands.push({signature:"parallel-lower-bound <durations> <workers>",types:["L", "s"],description:"Work/span lower bound ignoring job divisibility.",run:(v,n)=>Math.max(Math.max(...v),sum(v)/n)});
-shiftplan.commands.push({signature:"greedy-workers <durations> <workers>",types:["L", "s"],description:"Assign each ordered job to earliest-free worker.",run:(v,n)=>{const loads=sequence(n,()=>0),jobs=[];for(const d of v){const w=loads.indexOf(Math.min(...loads));jobs.push({worker:w,start:loads[w],end:loads[w]+d});loads[w]+=d;}return {jobs,makespan:Math.max(...loads)};}});
+shiftplan.commands.push({
+  signature: 'schedule <durations>',
+  types: ['L'],
+  description: 'Produce sequential start/end records.',
+  run: (v) => schedule(v),
+});
+shiftplan.commands.push({
+  signature: 'starts <durations>',
+  types: ['L'],
+  description: 'Report start times.',
+  run: (v) => schedule(v).map((x) => x.start),
+});
+shiftplan.commands.push({
+  signature: 'finishes <durations>',
+  types: ['L'],
+  description: 'Report completion times.',
+  run: (v) => schedule(v).map((x) => x.end),
+});
+shiftplan.commands.push({
+  signature: 'total <durations>',
+  types: ['L'],
+  description: 'Sum serial work duration.',
+  run: (v) => sum(v),
+});
+shiftplan.commands.push({
+  signature: 'completion-mean <durations>',
+  types: ['L'],
+  description: 'Mean job completion time.',
+  run: (v) => avg(schedule(v).map((x) => x.end)),
+});
+shiftplan.commands.push({
+  signature: 'waiting-total <durations>',
+  types: ['L'],
+  description: 'Sum waiting time before jobs start.',
+  run: (v) => sum(schedule(v).map((x) => x.start)),
+});
+shiftplan.commands.push({
+  signature: 'shortest-first <durations>',
+  types: ['L'],
+  description: 'Order job indexes by duration ascending.',
+  run: (v) => v.map((d, i) => i).sort((a, b) => v[a] - v[b] || a - b),
+});
+shiftplan.commands.push({
+  signature: 'longest-first <durations>',
+  types: ['L'],
+  description: 'Order job indexes by duration descending.',
+  run: (v) => v.map((d, i) => i).sort((a, b) => v[b] - v[a] || a - b),
+});
+shiftplan.commands.push({
+  signature: 'deadline-slack <durations> <deadline>',
+  types: ['L', 'q'],
+  description: 'Report slack after all jobs.',
+  run: (v, d) => d - sum(v),
+});
+shiftplan.commands.push({
+  signature: 'completed-at <durations> <time>',
+  types: ['L', 'q'],
+  description: 'Count jobs whose completion is at or before time.',
+  run: (v, t) => schedule(v).filter((x) => budgetFits(x.end, t)).length,
+});
+shiftplan.commands.push({
+  signature: 'active-at <durations> <time>',
+  types: ['L', 'q'],
+  description: 'Find active positive-duration job at time or null.',
+  run: (v, t) => schedule(v).find((x) => budgetFits(x.start, t) && !budgetFits(x.end, t))?.index ?? null,
+});
+shiftplan.commands.push({
+  signature: 'remaining-at <durations> <time>',
+  types: ['L', 'q'],
+  description: 'Report remaining serial work.',
+  run: (v, t) => Math.max(0, sum(v) - t),
+});
+shiftplan.commands.push({
+  signature: 'progress <durations> <time>',
+  types: ['L', 'q'],
+  description: 'Fraction of total nonzero work elapsed, clamped.',
+  run: (v, t) => {
+    demand(sum(v) > 0);
+    return Math.min(1, t / sum(v));
+  },
+});
+shiftplan.commands.push({
+  signature: 'offset <durations> <start>',
+  types: ['L', 'n'],
+  description: 'Shift schedule to a supplied origin.',
+  run: (v, t) => schedule(v).map((x) => ({ ...x, start: x.start + t, end: x.end + t })),
+});
+shiftplan.commands.push({
+  signature: 'breaks <durations> <break-duration>',
+  types: ['L', 'q'],
+  description: 'Insert breaks between jobs, never after last.',
+  run: (v, b) => sum(v) + (v.length - 1) * b,
+});
+shiftplan.commands.push({
+  signature: 'setup <durations> <setup-duration>',
+  types: ['L', 'q'],
+  description: 'Include setup before every listed job.',
+  run: (v, s) => sum(v) + v.length * s,
+});
+shiftplan.commands.push({
+  signature: 'repeat <durations> <cycles>',
+  types: ['L', 'c'],
+  description: 'Budget repeated full cycles.',
+  run: (v, n) => sum(v) * n,
+});
+shiftplan.commands.push({
+  signature: 'fit-cycles <durations> <budget>',
+  types: ['L', 'q'],
+  description: 'Count complete nonzero cycles fitting a budget.',
+  run: (v, b) => {
+    demand(sum(v) > 0);
+    return wholeFloor(b / sum(v));
+  },
+});
+shiftplan.commands.push({
+  signature: 'scale <durations> <factor>',
+  types: ['L', 'q'],
+  description: 'Scale durations by a deterministic factor.',
+  run: (v, f) => v.map((d) => d * f),
+});
+shiftplan.commands.push({
+  signature: 'overheads <durations> <overheads>',
+  types: ['L', 'L'],
+  description: 'Add separate overhead per job.',
+  run: (v, o) => {
+    same(v, o);
+    return v.map((d, i) => d + o[i]);
+  },
+});
+shiftplan.commands.push({
+  signature: 'lateness <durations> <deadlines>',
+  types: ['L', 'L'],
+  description: 'Compute signed lateness per job.',
+  run: (v, d) => {
+    same(v, d);
+    return schedule(v).map((x, i) => x.end - d[i]);
+  },
+});
+shiftplan.commands.push({
+  signature: 'tardiness <durations> <deadlines>',
+  types: ['L', 'L'],
+  description: 'Sum positive lateness.',
+  run: (v, d) => {
+    same(v, d);
+    return sum(schedule(v).map((x, i) => Math.max(0, x.end - d[i])));
+  },
+});
+shiftplan.commands.push({
+  signature: 'weighted-completion <durations> <weights>',
+  types: ['L', 'L'],
+  description: 'Sum completion times times job importance weights.',
+  run: (v, w) => {
+    same(v, w);
+    return sum(schedule(v).map((x, i) => x.end * w[i]));
+  },
+});
+shiftplan.commands.push({
+  signature: 'parallel-lower-bound <durations> <workers>',
+  types: ['L', 's'],
+  description: 'Work/span lower bound ignoring job divisibility.',
+  run: (v, n) => Math.max(Math.max(...v), sum(v) / n),
+});
+shiftplan.commands.push({
+  signature: 'greedy-workers <durations> <workers>',
+  types: ['L', 's'],
+  description: 'Assign each ordered job to earliest-free worker.',
+  run: (v, n) => {
+    const loads = sequence(n, () => 0),
+      jobs = [];
+    for (const d of v) {
+      const w = loads.indexOf(Math.min(...loads));
+      jobs.push({ worker: w, start: loads[w], end: loads[w] + d });
+      loads[w] += d;
+    }
+    return { jobs, makespan: Math.max(...loads) };
+  },
+});
 
-const dependency = {name:"dependency",note:"Offline directed task graphs. Edges are JSON [prerequisite,dependent] index pairs; node count includes isolated nodes. Duplicate edges count once; no actions execute.",commands:[]};
+const dependency = {
+  name: 'dependency',
+  note: 'Offline directed task graphs. Edges are JSON [prerequisite,dependent] index pairs; node count includes isolated nodes. Duplicate edges count once; no actions execute.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(dependency);
-dependency.commands.push({signature:"order <nodes> <edges>",types:["s", "edges"],description:"Return stable topological order; reject cycles.",run:(n,e)=>(g=>{demand(g.dag);return g.order;})(graph(n,e))});
-dependency.commands.push({signature:"acyclic <nodes> <edges>",types:["s", "edges"],description:"Test directed acyclicity.",run:(n,e)=>(g=>g.dag)(graph(n,e))});
-dependency.commands.push({signature:"roots <nodes> <edges>",types:["s", "edges"],description:"List nodes with no prerequisites.",run:(n,e)=>(g=>g.rev.flatMap((v,i)=>v.length?[]:[i]))(graph(n,e))});
-dependency.commands.push({signature:"leaves <nodes> <edges>",types:["s", "edges"],description:"List nodes with no dependents.",run:(n,e)=>(g=>g.adj.flatMap((v,i)=>v.length?[]:[i]))(graph(n,e))});
-dependency.commands.push({signature:"indegree <nodes> <edges>",types:["s", "edges"],description:"Count direct prerequisites per node.",run:(n,e)=>(g=>g.rev.map(v=>v.length))(graph(n,e))});
-dependency.commands.push({signature:"outdegree <nodes> <edges>",types:["s", "edges"],description:"Count direct dependents per node.",run:(n,e)=>(g=>g.adj.map(v=>v.length))(graph(n,e))});
-dependency.commands.push({signature:"levels <nodes> <edges>",types:["s", "edges"],description:"Longest prerequisite-chain depth per node.",run:(n,e)=>(g=>levels(g))(graph(n,e))});
-dependency.commands.push({signature:"layers <nodes> <edges>",types:["s", "edges"],description:"Group nodes by prerequisite-chain depth.",run:(n,e)=>(g=>{const l=levels(g);return sequence(Math.max(...l)+1,k=>l.flatMap((v,i)=>v===k?[i]:[]));})(graph(n,e))});
-dependency.commands.push({signature:"depth <nodes> <edges>",types:["s", "edges"],description:"Find longest chain length in edges.",run:(n,e)=>(g=>Math.max(...levels(g)))(graph(n,e))});
-dependency.commands.push({signature:"width <nodes> <edges>",types:["s", "edges"],description:"Find largest earliest-start layer; not maximum antichain.",run:(n,e)=>(g=>{const l=levels(g);return Math.max(...l.map(x=>l.filter(y=>y===x).length));})(graph(n,e))});
-dependency.commands.push({signature:"edges <nodes> <edges>",types:["s", "edges"],description:"Count distinct edges.",run:(n,e)=>(g=>sum(g.adj.map(v=>v.length)))(graph(n,e))});
-dependency.commands.push({signature:"isolated <nodes> <edges>",types:["s", "edges"],description:"List nodes without incident edges.",run:(n,e)=>(g=>g.adj.flatMap((v,i)=>!v.length&&!g.rev[i].length?[i]:[]))(graph(n,e))});
-dependency.commands.push({signature:"adjacency <nodes> <edges>",types:["s", "edges"],description:"Report direct forward adjacency.",run:(n,e)=>(g=>g.adj)(graph(n,e))});
-dependency.commands.push({signature:"reverse <nodes> <edges>",types:["s", "edges"],description:"Report direct reverse adjacency.",run:(n,e)=>(g=>g.rev)(graph(n,e))});
-dependency.commands.push({signature:"reachable-pairs <nodes> <edges>",types:["s", "edges"],description:"Count ordered reachable distinct-node pairs.",run:(n,e)=>(g=>sum(g.adj.map((v,i)=>walk(g.adj,i).length-1)))(graph(n,e))});
-dependency.commands.push({signature:"closure <nodes> <edges>",types:["s", "edges"],description:"Report transitive reachable dependents.",run:(n,e)=>(g=>g.adj.map((v,i)=>walk(g.adj,i).filter(j=>j!==i)))(graph(n,e))});
-dependency.commands.push({signature:"redundant <nodes> <edges>",types:["s", "edges"],description:"Find edges implied by other prerequisite paths.",run:(n,e)=>(g=>{demand(g.dag);return g.adj.flatMap((v,i)=>v.flatMap(j=>v.some(k=>k!==j&&walk(g.adj,k).includes(j))?[[i,j]]:[]));})(graph(n,e))});
-dependency.commands.push({signature:"critical-nodes <nodes> <edges>",types:["s", "edges"],description:"List nodes on some longest unit-time chain.",run:(n,e)=>(g=>{const l=levels(g),r=levels({...g,adj:g.rev,order:[...g.order].reverse()});const d=Math.max(...l);return l.flatMap((v,i)=>v+r[i]===d?[i]:[]);})(graph(n,e))});
-dependency.commands.push({signature:"unit-makespan <nodes> <edges>",types:["s", "edges"],description:"Earliest finish with unit tasks and unlimited workers.",run:(n,e)=>(g=>Math.max(...levels(g))+1)(graph(n,e))});
-dependency.commands.push({signature:"unit-slack <nodes> <edges>",types:["s", "edges"],description:"Unit-time schedule slack per node.",run:(n,e)=>(g=>{const l=levels(g),r=levels({...g,adj:g.rev,order:[...g.order].reverse()}),d=Math.max(...l);return l.map((v,i)=>d-v-r[i]);})(graph(n,e))});
-dependency.commands.push({signature:"descendants <nodes> <edges> <node>",types:["s", "edges", "c"],description:"List transitive dependents excluding the selected node.",run:(n,e,k)=>walk(graph(n,e).adj,k).filter(i=>i!==k)});
-dependency.commands.push({signature:"ancestors <nodes> <edges> <node>",types:["s", "edges", "c"],description:"List transitive prerequisites excluding the selected node.",run:(n,e,k)=>walk(graph(n,e).rev,k).filter(i=>i!==k)});
-dependency.commands.push({signature:"ready-after <nodes> <edges> <completed>",types:["s", "edges", "indexes"],description:"List unfinished nodes whose prerequisites are completed.",run:(n,e,c)=>{const g=graph(n,e);demand(c.every(i=>i<n));return g.rev.flatMap((v,i)=>!c.includes(i)&&v.every(j=>c.includes(j))?[i]:[]);}});
-dependency.commands.push({signature:"blocked-by <nodes> <edges> <node>",types:["s", "edges", "c"],description:"Report selected node and all nodes depending on it.",run:(n,e,k)=>walk(graph(n,e).adj,k)});
-dependency.commands.push({signature:"path-counts <nodes> <edges> <source>",types:["s", "edges", "c"],description:"Count directed paths from a source including its empty path.",run:(n,e,k)=>{const g=graph(n,e);demand(g.dag&&k<n);const v=sequence(n,()=>0);v[k]=1;for(const i of g.order)for(const j of g.adj[i])v[j]+=v[i];return v;}});
+dependency.commands.push({
+  signature: 'order <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Return stable topological order; reject cycles.',
+  run: (n, e) =>
+    ((g) => {
+      demand(g.dag);
+      return g.order;
+    })(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'acyclic <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Test directed acyclicity.',
+  run: (n, e) => ((g) => g.dag)(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'roots <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'List nodes with no prerequisites.',
+  run: (n, e) => ((g) => g.rev.flatMap((v, i) => (v.length ? [] : [i])))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'leaves <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'List nodes with no dependents.',
+  run: (n, e) => ((g) => g.adj.flatMap((v, i) => (v.length ? [] : [i])))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'indegree <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Count direct prerequisites per node.',
+  run: (n, e) => ((g) => g.rev.map((v) => v.length))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'outdegree <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Count direct dependents per node.',
+  run: (n, e) => ((g) => g.adj.map((v) => v.length))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'levels <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Longest prerequisite-chain depth per node.',
+  run: (n, e) => ((g) => levels(g))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'layers <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Group nodes by prerequisite-chain depth.',
+  run: (n, e) =>
+    ((g) => {
+      const l = levels(g);
+      return sequence(Math.max(...l) + 1, (k) => l.flatMap((v, i) => (v === k ? [i] : [])));
+    })(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'depth <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Find longest chain length in edges.',
+  run: (n, e) => ((g) => Math.max(...levels(g)))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'width <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Find largest earliest-start layer; not maximum antichain.',
+  run: (n, e) =>
+    ((g) => {
+      const l = levels(g);
+      return Math.max(...l.map((x) => l.filter((y) => y === x).length));
+    })(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'edges <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Count distinct edges.',
+  run: (n, e) => ((g) => sum(g.adj.map((v) => v.length)))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'isolated <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'List nodes without incident edges.',
+  run: (n, e) => ((g) => g.adj.flatMap((v, i) => (!v.length && !g.rev[i].length ? [i] : [])))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'adjacency <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Report direct forward adjacency.',
+  run: (n, e) => ((g) => g.adj)(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'reverse <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Report direct reverse adjacency.',
+  run: (n, e) => ((g) => g.rev)(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'reachable-pairs <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Count ordered reachable distinct-node pairs.',
+  run: (n, e) => ((g) => sum(g.adj.map((v, i) => walk(g.adj, i).length - 1)))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'closure <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Report transitive reachable dependents.',
+  run: (n, e) => ((g) => g.adj.map((v, i) => walk(g.adj, i).filter((j) => j !== i)))(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'redundant <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Find edges implied by other prerequisite paths.',
+  run: (n, e) =>
+    ((g) => {
+      demand(g.dag);
+      return g.adj.flatMap((v, i) =>
+        v.flatMap((j) => (v.some((k) => k !== j && walk(g.adj, k).includes(j)) ? [[i, j]] : [])),
+      );
+    })(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'critical-nodes <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'List nodes on some longest unit-time chain.',
+  run: (n, e) =>
+    ((g) => {
+      const l = levels(g),
+        r = levels({ ...g, adj: g.rev, order: [...g.order].reverse() });
+      const d = Math.max(...l);
+      return l.flatMap((v, i) => (v + r[i] === d ? [i] : []));
+    })(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'unit-makespan <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Earliest finish with unit tasks and unlimited workers.',
+  run: (n, e) => ((g) => Math.max(...levels(g)) + 1)(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'unit-slack <nodes> <edges>',
+  types: ['s', 'edges'],
+  description: 'Unit-time schedule slack per node.',
+  run: (n, e) =>
+    ((g) => {
+      const l = levels(g),
+        r = levels({ ...g, adj: g.rev, order: [...g.order].reverse() }),
+        d = Math.max(...l);
+      return l.map((v, i) => d - v - r[i]);
+    })(graph(n, e)),
+});
+dependency.commands.push({
+  signature: 'descendants <nodes> <edges> <node>',
+  types: ['s', 'edges', 'c'],
+  description: 'List transitive dependents excluding the selected node.',
+  run: (n, e, k) => walk(graph(n, e).adj, k).filter((i) => i !== k),
+});
+dependency.commands.push({
+  signature: 'ancestors <nodes> <edges> <node>',
+  types: ['s', 'edges', 'c'],
+  description: 'List transitive prerequisites excluding the selected node.',
+  run: (n, e, k) => walk(graph(n, e).rev, k).filter((i) => i !== k),
+});
+dependency.commands.push({
+  signature: 'ready-after <nodes> <edges> <completed>',
+  types: ['s', 'edges', 'indexes'],
+  description: 'List unfinished nodes whose prerequisites are completed.',
+  run: (n, e, c) => {
+    const g = graph(n, e);
+    demand(c.every((i) => i < n));
+    return g.rev.flatMap((v, i) => (!c.includes(i) && v.every((j) => c.includes(j)) ? [i] : []));
+  },
+});
+dependency.commands.push({
+  signature: 'blocked-by <nodes> <edges> <node>',
+  types: ['s', 'edges', 'c'],
+  description: 'Report selected node and all nodes depending on it.',
+  run: (n, e, k) => walk(graph(n, e).adj, k),
+});
+dependency.commands.push({
+  signature: 'path-counts <nodes> <edges> <source>',
+  types: ['s', 'edges', 'c'],
+  description: 'Count directed paths from a source including its empty path.',
+  run: (n, e, k) => {
+    const g = graph(n, e);
+    demand(g.dag && k < n);
+    const v = sequence(n, () => 0);
+    v[k] = 1;
+    for (const i of g.order) for (const j of g.adj[i]) v[j] += v[i];
+    return v;
+  },
+});
 
-const pathplan = {name:"pathplan",note:"Offline ordered X/Z polyline measurements; repeated vertices allowed, but nonzero length is required for distance sampling. No terrain, navigation, or dimension inference.",commands:[]};
+const pathplan = {
+  name: 'pathplan',
+  note: 'Offline ordered X/Z polyline measurements; repeated vertices allowed, but nonzero length is required for distance sampling. No terrain, navigation, or dimension inference.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(pathplan);
-pathplan.commands.push({signature:"segments <points>",types:["points2"],description:"Measure each consecutive leg.",run:p=>segments(p)});
-pathplan.commands.push({signature:"chainage <points>",types:["points2"],description:"Cumulative distance at each vertex.",run:p=>{let s=0;return [0,...segments(p).map(v=>s+=v)];}});
-pathplan.commands.push({signature:"length <points>",types:["points2"],description:"Total ordered path distance.",run:p=>length(p)});
-pathplan.commands.push({signature:"chord <points>",types:["points2"],description:"Direct endpoint distance.",run:p=>Math.hypot(...p[0].map((v,i)=>p.at(-1)[i]-v))});
-pathplan.commands.push({signature:"detour <points>",types:["points2"],description:"Extra path distance above endpoint chord.",run:p=>length(p)-Math.hypot(...p[0].map((v,i)=>p.at(-1)[i]-v))});
-pathplan.commands.push({signature:"efficiency <points>",types:["points2"],description:"Chord distance divided by nonzero path length.",run:p=>{demand(length(p)>0);return Math.hypot(...p[0].map((v,i)=>p.at(-1)[i]-v))/length(p);}});
-pathplan.commands.push({signature:"longest-leg <points>",types:["points2"],description:"Maximum consecutive leg length.",run:p=>Math.max(0,...segments(p))});
-pathplan.commands.push({signature:"shortest-leg <points>",types:["points2"],description:"Minimum consecutive leg length including zero.",run:p=>{demand(p.length>1);return Math.min(...segments(p));}});
-pathplan.commands.push({signature:"mean-leg <points>",types:["points2"],description:"Arithmetic mean leg length.",run:p=>{demand(p.length>1);return avg(segments(p));}});
-pathplan.commands.push({signature:"duplicates <points>",types:["points2"],description:"Indexes of consecutive repeated vertices.",run:p=>pairs(p).flatMap(([a,b],i)=>a.every((v,k)=>v===b[k])?[i+1]:[])});
-pathplan.commands.push({signature:"reverse <points>",types:["points2"],description:"Reverse ordered visit sequence.",run:p=>[...p].reverse()});
-pathplan.commands.push({signature:"close <points>",types:["points2"],description:"Append the starting point to make a closed route.",run:p=>{demand(p.length<1000);return [...p,p[0]];}});
-pathplan.commands.push({signature:"midpoint <points>",types:["points2"],description:"Sample at half total chainage.",run:p=>pathSample(p,length(p)/2)});
-pathplan.commands.push({signature:"leg-shares <points>",types:["points2"],description:"Fraction of path distance in each leg.",run:p=>{demand(length(p)>0);return segments(p).map(d=>d/length(p));}});
-pathplan.commands.push({signature:"centers <points>",types:["points2"],description:"Midpoints of each leg.",run:p=>pairs(p).map(([a,b])=>a.map((v,i)=>(v+b[i])/2))});
-pathplan.commands.push({signature:"headings <points>",types:["points2"],description:"Planar headings from positive X in degrees; zero legs unknown.",run:p=>pairs(p).map(([a,b])=>a.every((v,i)=>v===b[i])?null:Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI)});
-pathplan.commands.push({signature:"sample <points> <distance>",types:["points2", "q"],description:"Sample a clamped distance along the route.",run:(p,d)=>pathSample(p,d)});
-pathplan.commands.push({signature:"resample <points> <count>",types:["points2", "s"],description:"Return equally spaced chainage samples including endpoints.",run:(p,n)=>{demand(n>=2);return sequence(n,i=>pathSample(p,length(p)*i/(n-1)));}});
-pathplan.commands.push({signature:"trim-start <points> <distance>",types:["points2", "q"],description:"Move starting point forward and preserve later original vertices.",run:(p,d)=>{demand(length(p)>0);const out=[pathSample(p,d)];let s=0;for(let i=1;i<p.length;i++){s+=segments(p)[i-1];if(s>d)out.push(p[i]);}return out;}});
-pathplan.commands.push({signature:"travel-time <points> <speed>",types:["points2", "p"],description:"Budget motion time at supplied constant speed.",run:(p,s)=>length(p)/s});
-pathplan.commands.push({signature:"leg-times <points> <speeds>",types:["points2", "P"],description:"Budget each leg at its own constant speed.",run:(p,s)=>{const d=segments(p);same(d,s);return d.map((v,i)=>v/s[i]);}});
-pathplan.commands.push({signature:"translate <points> <dx> <dz>",types:["points2", "n", "n"],description:"Shift every route vertex.",run:(p,x,z)=>p.map(([a,b])=>[a+x,b+z])});
-pathplan.commands.push({signature:"crossings-x <points> <x>",types:["points2", "n"],description:"List segment indexes straddling an X line; endpoint on line included.",run:(p,x)=>pairs(p).flatMap(([a,b],i)=>Math.min(a[0],b[0])<=x&&Math.max(a[0],b[0])>=x?[i]:[])});
-pathplan.commands.push({signature:"stops-budget <points> <speed> <per-vertex>",types:["points2", "p", "q"],description:"Add dwell at every listed waypoint to motion time.",run:(p,s,t)=>length(p)/s+p.length*t});
-pathplan.commands.push({signature:"simplify-collinear <points>",types:["points2"],description:"Remove exact collinear interior vertices only when direction is preserved.",run:p=>{p=p.filter((v,i)=>i===0||v.some((x,k)=>x!==p[i-1][k]));return p.filter((v,i)=>{if(i===0||i===p.length-1)return true;const a=p[i-1],b=p[i+1],u=[v[0]-a[0],v[1]-a[1]],w=[b[0]-v[0],b[1]-v[1]];return u[0]*w[1]!==u[1]*w[0]||u[0]*w[0]+u[1]*w[1]<0;});}});
+pathplan.commands.push({
+  signature: 'segments <points>',
+  types: ['points2'],
+  description: 'Measure each consecutive leg.',
+  run: (p) => segments(p),
+});
+pathplan.commands.push({
+  signature: 'chainage <points>',
+  types: ['points2'],
+  description: 'Cumulative distance at each vertex.',
+  run: (p) => {
+    let s = 0;
+    return [0, ...segments(p).map((v) => (s += v))];
+  },
+});
+pathplan.commands.push({
+  signature: 'length <points>',
+  types: ['points2'],
+  description: 'Total ordered path distance.',
+  run: (p) => length(p),
+});
+pathplan.commands.push({
+  signature: 'chord <points>',
+  types: ['points2'],
+  description: 'Direct endpoint distance.',
+  run: (p) => Math.hypot(...p[0].map((v, i) => p.at(-1)[i] - v)),
+});
+pathplan.commands.push({
+  signature: 'detour <points>',
+  types: ['points2'],
+  description: 'Extra path distance above endpoint chord.',
+  run: (p) => length(p) - Math.hypot(...p[0].map((v, i) => p.at(-1)[i] - v)),
+});
+pathplan.commands.push({
+  signature: 'efficiency <points>',
+  types: ['points2'],
+  description: 'Chord distance divided by nonzero path length.',
+  run: (p) => {
+    demand(length(p) > 0);
+    return Math.hypot(...p[0].map((v, i) => p.at(-1)[i] - v)) / length(p);
+  },
+});
+pathplan.commands.push({
+  signature: 'longest-leg <points>',
+  types: ['points2'],
+  description: 'Maximum consecutive leg length.',
+  run: (p) => Math.max(0, ...segments(p)),
+});
+pathplan.commands.push({
+  signature: 'shortest-leg <points>',
+  types: ['points2'],
+  description: 'Minimum consecutive leg length including zero.',
+  run: (p) => {
+    demand(p.length > 1);
+    return Math.min(...segments(p));
+  },
+});
+pathplan.commands.push({
+  signature: 'mean-leg <points>',
+  types: ['points2'],
+  description: 'Arithmetic mean leg length.',
+  run: (p) => {
+    demand(p.length > 1);
+    return avg(segments(p));
+  },
+});
+pathplan.commands.push({
+  signature: 'duplicates <points>',
+  types: ['points2'],
+  description: 'Indexes of consecutive repeated vertices.',
+  run: (p) => pairs(p).flatMap(([a, b], i) => (a.every((v, k) => v === b[k]) ? [i + 1] : [])),
+});
+pathplan.commands.push({
+  signature: 'reverse <points>',
+  types: ['points2'],
+  description: 'Reverse ordered visit sequence.',
+  run: (p) => [...p].reverse(),
+});
+pathplan.commands.push({
+  signature: 'close <points>',
+  types: ['points2'],
+  description: 'Append the starting point to make a closed route.',
+  run: (p) => {
+    demand(p.length < 1000);
+    return [...p, p[0]];
+  },
+});
+pathplan.commands.push({
+  signature: 'midpoint <points>',
+  types: ['points2'],
+  description: 'Sample at half total chainage.',
+  run: (p) => pathSample(p, length(p) / 2),
+});
+pathplan.commands.push({
+  signature: 'leg-shares <points>',
+  types: ['points2'],
+  description: 'Fraction of path distance in each leg.',
+  run: (p) => {
+    demand(length(p) > 0);
+    return segments(p).map((d) => d / length(p));
+  },
+});
+pathplan.commands.push({
+  signature: 'centers <points>',
+  types: ['points2'],
+  description: 'Midpoints of each leg.',
+  run: (p) => pairs(p).map(([a, b]) => a.map((v, i) => (v + b[i]) / 2)),
+});
+pathplan.commands.push({
+  signature: 'headings <points>',
+  types: ['points2'],
+  description: 'Planar headings from positive X in degrees; zero legs unknown.',
+  run: (p) =>
+    pairs(p).map(([a, b]) =>
+      a.every((v, i) => v === b[i]) ? null : (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI,
+    ),
+});
+pathplan.commands.push({
+  signature: 'sample <points> <distance>',
+  types: ['points2', 'q'],
+  description: 'Sample a clamped distance along the route.',
+  run: (p, d) => pathSample(p, d),
+});
+pathplan.commands.push({
+  signature: 'resample <points> <count>',
+  types: ['points2', 's'],
+  description: 'Return equally spaced chainage samples including endpoints.',
+  run: (p, n) => {
+    demand(n >= 2);
+    return sequence(n, (i) => pathSample(p, (length(p) * i) / (n - 1)));
+  },
+});
+pathplan.commands.push({
+  signature: 'trim-start <points> <distance>',
+  types: ['points2', 'q'],
+  description: 'Move starting point forward and preserve later original vertices.',
+  run: (p, d) => {
+    demand(length(p) > 0);
+    const out = [pathSample(p, d)];
+    let s = 0;
+    for (let i = 1; i < p.length; i++) {
+      s += segments(p)[i - 1];
+      if (s > d) out.push(p[i]);
+    }
+    return out;
+  },
+});
+pathplan.commands.push({
+  signature: 'travel-time <points> <speed>',
+  types: ['points2', 'p'],
+  description: 'Budget motion time at supplied constant speed.',
+  run: (p, s) => length(p) / s,
+});
+pathplan.commands.push({
+  signature: 'leg-times <points> <speeds>',
+  types: ['points2', 'P'],
+  description: 'Budget each leg at its own constant speed.',
+  run: (p, s) => {
+    const d = segments(p);
+    same(d, s);
+    return d.map((v, i) => v / s[i]);
+  },
+});
+pathplan.commands.push({
+  signature: 'translate <points> <dx> <dz>',
+  types: ['points2', 'n', 'n'],
+  description: 'Shift every route vertex.',
+  run: (p, x, z) => p.map(([a, b]) => [a + x, b + z]),
+});
+pathplan.commands.push({
+  signature: 'crossings-x <points> <x>',
+  types: ['points2', 'n'],
+  description: 'List segment indexes straddling an X line; endpoint on line included.',
+  run: (p, x) => pairs(p).flatMap(([a, b], i) => (Math.min(a[0], b[0]) <= x && Math.max(a[0], b[0]) >= x ? [i] : [])),
+});
+pathplan.commands.push({
+  signature: 'stops-budget <points> <speed> <per-vertex>',
+  types: ['points2', 'p', 'q'],
+  description: 'Add dwell at every listed waypoint to motion time.',
+  run: (p, s, t) => length(p) / s + p.length * t,
+});
+pathplan.commands.push({
+  signature: 'simplify-collinear <points>',
+  types: ['points2'],
+  description: 'Remove exact collinear interior vertices only when direction is preserved.',
+  run: (p) => {
+    p = p.filter((v, i) => i === 0 || v.some((x, k) => x !== p[i - 1][k]));
+    return p.filter((v, i) => {
+      if (i === 0 || i === p.length - 1) return true;
+      const a = p[i - 1],
+        b = p[i + 1],
+        u = [v[0] - a[0], v[1] - a[1]],
+        w = [b[0] - v[0], b[1] - v[1]];
+      return u[0] * w[1] !== u[1] * w[0] || u[0] * w[0] + u[1] * w[1] < 0;
+    });
+  },
+});
 
-const pointcloud = {name:"pointcloud",note:"Offline unordered supplied X/Z observations. Duplicate points retain weight unless deduplicating. Neighbors are straight-line distances; absent observations imply nothing about the world.",commands:[]};
+const pointcloud = {
+  name: 'pointcloud',
+  note: 'Offline unordered supplied X/Z observations. Duplicate points retain weight unless deduplicating. Neighbors are straight-line distances; absent observations imply nothing about the world.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(pointcloud);
-pointcloud.commands.push({signature:"count <points>",types:["points2"],description:"Count observations including duplicates.",run:p=>p.length});
-pointcloud.commands.push({signature:"unique <points>",types:["points2"],description:"Preserve first occurrence of each coordinate.",run:p=>p.filter((v,i)=>p.findIndex(w=>w[0]===v[0]&&w[1]===v[1])===i)});
-pointcloud.commands.push({signature:"centroid <points>",types:["points2"],description:"Find equally weighted coordinate mean.",run:p=>[avg(p.map(v=>v[0])),avg(p.map(v=>v[1]))]});
-pointcloud.commands.push({signature:"bounds <points>",types:["points2"],description:"Find axis-aligned lower and upper bounds.",run:p=>[[Math.min(...p.map(v=>v[0])),Math.min(...p.map(v=>v[1]))],[Math.max(...p.map(v=>v[0])),Math.max(...p.map(v=>v[1]))]]});
-pointcloud.commands.push({signature:"extent <points>",types:["points2"],description:"Measure X and Z range.",run:p=>[Math.max(...p.map(v=>v[0]))-Math.min(...p.map(v=>v[0])),Math.max(...p.map(v=>v[1]))-Math.min(...p.map(v=>v[1]))]});
-pointcloud.commands.push({signature:"box-area <points>",types:["points2"],description:"Measure bounding rectangle area, zero when degenerate.",run:p=>(Math.max(...p.map(v=>v[0]))-Math.min(...p.map(v=>v[0])))*(Math.max(...p.map(v=>v[1]))-Math.min(...p.map(v=>v[1])))});
-pointcloud.commands.push({signature:"median-center <points>",types:["points2"],description:"Coordinatewise median center.",run:p=>[0,1].map(k=>{const s=sorted(p.map(v=>v[k]));return (s[wholeFloor((s.length-1)/2)]+s[wholeFloor(s.length/2)])/2;})});
-pointcloud.commands.push({signature:"variance <points>",types:["points2"],description:"Population coordinate variances.",run:p=>[0,1].map(k=>{const m=avg(p.map(v=>v[k]));return avg(p.map(v=>(v[k]-m)**2));})});
-pointcloud.commands.push({signature:"covariance <points>",types:["points2"],description:"Population covariance between coordinates.",run:p=>{const x=avg(p.map(v=>v[0])),z=avg(p.map(v=>v[1]));return avg(p.map(v=>(v[0]-x)*(v[1]-z)));}});
-pointcloud.commands.push({signature:"rms-origin <points>",types:["points2"],description:"Root mean square radial distance from origin.",run:p=>Math.sqrt(avg(p.map(([x,z])=>x*x+z*z)))});
-pointcloud.commands.push({signature:"radii <points>",types:["points2"],description:"Distances to coordinate centroid.",run:p=>{const x=avg(p.map(v=>v[0])),z=avg(p.map(v=>v[1]));return p.map(v=>Math.hypot(v[0]-x,v[1]-z));}});
-pointcloud.commands.push({signature:"medoid <points>",types:["points2"],description:"Index minimizing summed distances to observations.",run:p=>{let best=0,cost=Infinity;for(let i=0;i<p.length;i++){const s=sum(p.map(v=>Math.hypot(v[0]-p[i][0],v[1]-p[i][1])));if(s<cost){cost=s;best=i;}}return best;}});
-pointcloud.commands.push({signature:"sort-x <points>",types:["points2"],description:"Sort coordinates lexicographically by X then Z.",run:p=>[...p].sort((a,b)=>a[0]-b[0]||a[1]-b[1])});
-pointcloud.commands.push({signature:"sort-z <points>",types:["points2"],description:"Sort coordinates lexicographically by Z then X.",run:p=>[...p].sort((a,b)=>a[1]-b[1]||a[0]-b[0])});
-pointcloud.commands.push({signature:"quadrants <points>",types:["points2"],description:"Count half-open origin quadrants, axes in positive halves.",run:p=>[p.filter(([x,z])=>x>=0&&z>=0).length,p.filter(([x,z])=>x<0&&z>=0).length,p.filter(([x,z])=>x<0&&z<0).length,p.filter(([x,z])=>x>=0&&z<0).length]});
-pointcloud.commands.push({signature:"nearest <points> <x> <z>",types:["points2", "n", "n"],description:"Nearest observation index and distance.",run:(p,x,z)=>nearest(p,x,z)[0]});
-pointcloud.commands.push({signature:"farthest <points> <x> <z>",types:["points2", "n", "n"],description:"Farthest observation index and distance, latest index wins ties.",run:(p,x,z)=>nearest(p,x,z).at(-1)});
-pointcloud.commands.push({signature:"within <points> <x> <z> <radius>",types:["points2", "n", "n", "q"],description:"Indexes within closed query radius sorted by distance.",run:(p,x,z,r)=>nearest(p,x,z).filter(v=>v.distance<=r).map(v=>v.index)});
-pointcloud.commands.push({signature:"outside <points> <x> <z> <radius>",types:["points2", "n", "n", "q"],description:"Indexes strictly beyond query radius sorted by distance.",run:(p,x,z,r)=>nearest(p,x,z).filter(v=>v.distance>r).map(v=>v.index)});
-pointcloud.commands.push({signature:"k-nearest <points> <x> <z> <count>",types:["points2", "n", "n", "s"],description:"Up to count nearest observations.",run:(p,x,z,k)=>nearest(p,x,z).slice(0,k)});
-pointcloud.commands.push({signature:"radius-counts <points> <radius>",types:["points2", "q"],description:"Neighbor counts per observation excluding itself.",run:(p,r)=>p.map((v,i)=>p.filter((w,j)=>j!==i&&Math.hypot(w[0]-v[0],w[1]-v[1])<=r).length)});
-pointcloud.commands.push({signature:"isolated <points> <radius>",types:["points2", "q"],description:"Indexes with no other observation inside radius.",run:(p,r)=>p.flatMap((v,i)=>p.some((w,j)=>j!==i&&Math.hypot(w[0]-v[0],w[1]-v[1])<=r)?[]:[i])});
-pointcloud.commands.push({signature:"clip-box <points> <xmin> <zmin> <xmax> <zmax>",types:["points2", "n", "n", "n", "n"],description:"Keep observations inside closed valid rectangle.",run:(p,a,b,c,d)=>{demand(a<=c&&b<=d);return p.filter(([x,z])=>x>=a&&x<=c&&z>=b&&z<=d);}});
-pointcloud.commands.push({signature:"snap <points> <step>",types:["points2", "p"],description:"Round each coordinate to nearest grid multiple.",run:(p,s)=>p.map(v=>v.map(x=>Math.round(x/s)*s))});
-pointcloud.commands.push({signature:"occupancy <points> <cell-size>",types:["points2", "p"],description:"Count observations per floored grid cell in first-seen order.",run:(p,s)=>{const m=new Map();for(const [x,z]of p){const key=[wholeFloor(x/s),wholeFloor(z/s)].join(",");m.set(key,(m.get(key)??0)+1);}return [...m].map(([cell,count])=>({cell:cell.split(",").map(Number),count}));}});
+pointcloud.commands.push({
+  signature: 'count <points>',
+  types: ['points2'],
+  description: 'Count observations including duplicates.',
+  run: (p) => p.length,
+});
+pointcloud.commands.push({
+  signature: 'unique <points>',
+  types: ['points2'],
+  description: 'Preserve first occurrence of each coordinate.',
+  run: (p) => p.filter((v, i) => p.findIndex((w) => w[0] === v[0] && w[1] === v[1]) === i),
+});
+pointcloud.commands.push({
+  signature: 'centroid <points>',
+  types: ['points2'],
+  description: 'Find equally weighted coordinate mean.',
+  run: (p) => [avg(p.map((v) => v[0])), avg(p.map((v) => v[1]))],
+});
+pointcloud.commands.push({
+  signature: 'bounds <points>',
+  types: ['points2'],
+  description: 'Find axis-aligned lower and upper bounds.',
+  run: (p) => [
+    [Math.min(...p.map((v) => v[0])), Math.min(...p.map((v) => v[1]))],
+    [Math.max(...p.map((v) => v[0])), Math.max(...p.map((v) => v[1]))],
+  ],
+});
+pointcloud.commands.push({
+  signature: 'extent <points>',
+  types: ['points2'],
+  description: 'Measure X and Z range.',
+  run: (p) => [
+    Math.max(...p.map((v) => v[0])) - Math.min(...p.map((v) => v[0])),
+    Math.max(...p.map((v) => v[1])) - Math.min(...p.map((v) => v[1])),
+  ],
+});
+pointcloud.commands.push({
+  signature: 'box-area <points>',
+  types: ['points2'],
+  description: 'Measure bounding rectangle area, zero when degenerate.',
+  run: (p) =>
+    (Math.max(...p.map((v) => v[0])) - Math.min(...p.map((v) => v[0]))) *
+    (Math.max(...p.map((v) => v[1])) - Math.min(...p.map((v) => v[1]))),
+});
+pointcloud.commands.push({
+  signature: 'median-center <points>',
+  types: ['points2'],
+  description: 'Coordinatewise median center.',
+  run: (p) =>
+    [0, 1].map((k) => {
+      const s = sorted(p.map((v) => v[k]));
+      return (s[wholeFloor((s.length - 1) / 2)] + s[wholeFloor(s.length / 2)]) / 2;
+    }),
+});
+pointcloud.commands.push({
+  signature: 'variance <points>',
+  types: ['points2'],
+  description: 'Population coordinate variances.',
+  run: (p) =>
+    [0, 1].map((k) => {
+      const m = avg(p.map((v) => v[k]));
+      return avg(p.map((v) => (v[k] - m) ** 2));
+    }),
+});
+pointcloud.commands.push({
+  signature: 'covariance <points>',
+  types: ['points2'],
+  description: 'Population covariance between coordinates.',
+  run: (p) => {
+    const x = avg(p.map((v) => v[0])),
+      z = avg(p.map((v) => v[1]));
+    return avg(p.map((v) => (v[0] - x) * (v[1] - z)));
+  },
+});
+pointcloud.commands.push({
+  signature: 'rms-origin <points>',
+  types: ['points2'],
+  description: 'Root mean square radial distance from origin.',
+  run: (p) => Math.sqrt(avg(p.map(([x, z]) => x * x + z * z))),
+});
+pointcloud.commands.push({
+  signature: 'radii <points>',
+  types: ['points2'],
+  description: 'Distances to coordinate centroid.',
+  run: (p) => {
+    const x = avg(p.map((v) => v[0])),
+      z = avg(p.map((v) => v[1]));
+    return p.map((v) => Math.hypot(v[0] - x, v[1] - z));
+  },
+});
+pointcloud.commands.push({
+  signature: 'medoid <points>',
+  types: ['points2'],
+  description: 'Index minimizing summed distances to observations.',
+  run: (p) => {
+    let best = 0,
+      cost = Infinity;
+    for (let i = 0; i < p.length; i++) {
+      const s = sum(p.map((v) => Math.hypot(v[0] - p[i][0], v[1] - p[i][1])));
+      if (s < cost) {
+        cost = s;
+        best = i;
+      }
+    }
+    return best;
+  },
+});
+pointcloud.commands.push({
+  signature: 'sort-x <points>',
+  types: ['points2'],
+  description: 'Sort coordinates lexicographically by X then Z.',
+  run: (p) => [...p].sort((a, b) => a[0] - b[0] || a[1] - b[1]),
+});
+pointcloud.commands.push({
+  signature: 'sort-z <points>',
+  types: ['points2'],
+  description: 'Sort coordinates lexicographically by Z then X.',
+  run: (p) => [...p].sort((a, b) => a[1] - b[1] || a[0] - b[0]),
+});
+pointcloud.commands.push({
+  signature: 'quadrants <points>',
+  types: ['points2'],
+  description: 'Count half-open origin quadrants, axes in positive halves.',
+  run: (p) => [
+    p.filter(([x, z]) => x >= 0 && z >= 0).length,
+    p.filter(([x, z]) => x < 0 && z >= 0).length,
+    p.filter(([x, z]) => x < 0 && z < 0).length,
+    p.filter(([x, z]) => x >= 0 && z < 0).length,
+  ],
+});
+pointcloud.commands.push({
+  signature: 'nearest <points> <x> <z>',
+  types: ['points2', 'n', 'n'],
+  description: 'Nearest observation index and distance.',
+  run: (p, x, z) => nearest(p, x, z)[0],
+});
+pointcloud.commands.push({
+  signature: 'farthest <points> <x> <z>',
+  types: ['points2', 'n', 'n'],
+  description: 'Farthest observation index and distance, latest index wins ties.',
+  run: (p, x, z) => nearest(p, x, z).at(-1),
+});
+pointcloud.commands.push({
+  signature: 'within <points> <x> <z> <radius>',
+  types: ['points2', 'n', 'n', 'q'],
+  description: 'Indexes within closed query radius sorted by distance.',
+  run: (p, x, z, r) =>
+    nearest(p, x, z)
+      .filter((v) => v.distance <= r)
+      .map((v) => v.index),
+});
+pointcloud.commands.push({
+  signature: 'outside <points> <x> <z> <radius>',
+  types: ['points2', 'n', 'n', 'q'],
+  description: 'Indexes strictly beyond query radius sorted by distance.',
+  run: (p, x, z, r) =>
+    nearest(p, x, z)
+      .filter((v) => v.distance > r)
+      .map((v) => v.index),
+});
+pointcloud.commands.push({
+  signature: 'k-nearest <points> <x> <z> <count>',
+  types: ['points2', 'n', 'n', 's'],
+  description: 'Up to count nearest observations.',
+  run: (p, x, z, k) => nearest(p, x, z).slice(0, k),
+});
+pointcloud.commands.push({
+  signature: 'radius-counts <points> <radius>',
+  types: ['points2', 'q'],
+  description: 'Neighbor counts per observation excluding itself.',
+  run: (p, r) => p.map((v, i) => p.filter((w, j) => j !== i && Math.hypot(w[0] - v[0], w[1] - v[1]) <= r).length),
+});
+pointcloud.commands.push({
+  signature: 'isolated <points> <radius>',
+  types: ['points2', 'q'],
+  description: 'Indexes with no other observation inside radius.',
+  run: (p, r) =>
+    p.flatMap((v, i) => (p.some((w, j) => j !== i && Math.hypot(w[0] - v[0], w[1] - v[1]) <= r) ? [] : [i])),
+});
+pointcloud.commands.push({
+  signature: 'clip-box <points> <xmin> <zmin> <xmax> <zmax>',
+  types: ['points2', 'n', 'n', 'n', 'n'],
+  description: 'Keep observations inside closed valid rectangle.',
+  run: (p, a, b, c, d) => {
+    demand(a <= c && b <= d);
+    return p.filter(([x, z]) => x >= a && x <= c && z >= b && z <= d);
+  },
+});
+pointcloud.commands.push({
+  signature: 'snap <points> <step>',
+  types: ['points2', 'p'],
+  description: 'Round each coordinate to nearest grid multiple.',
+  run: (p, s) => p.map((v) => v.map((x) => Math.round(x / s) * s)),
+});
+pointcloud.commands.push({
+  signature: 'occupancy <points> <cell-size>',
+  types: ['points2', 'p'],
+  description: 'Count observations per floored grid cell in first-seen order.',
+  run: (p, s) => {
+    const m = new Map();
+    for (const [x, z] of p) {
+      const key = [wholeFloor(x / s), wholeFloor(z / s)].join(',');
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return [...m].map(([cell, count]) => ({ cell: cell.split(',').map(Number), count }));
+  },
+});
 
-const index_set = {name:"index-set",note:"Offline set algebra for numeric task or waypoint indexes. Inputs are nonnegative whole-number CSV lists; results discard duplicates. Sorted outputs use increasing index order.",commands:[]};
+const index_set = {
+  name: 'index-set',
+  note: 'Offline set algebra for numeric task or waypoint indexes. Inputs are nonnegative whole-number CSV lists; results discard duplicates. Sorted outputs use increasing index order.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(index_set);
-index_set.commands.push({signature:"union <first> <second>",types:["C", "C"],description:"All indexes in either set.",run:(a,b)=>sorted(unique([...a,...b]))});
-index_set.commands.push({signature:"intersection <first> <second>",types:["C", "C"],description:"Indexes appearing in both sets.",run:(a,b)=>sorted(unique(a).filter(v=>b.includes(v)))});
-index_set.commands.push({signature:"difference <first> <second>",types:["C", "C"],description:"Indexes in first set only.",run:(a,b)=>sorted(unique(a).filter(v=>!b.includes(v)))});
-index_set.commands.push({signature:"reverse-difference <first> <second>",types:["C", "C"],description:"Indexes in second set only.",run:(a,b)=>sorted(unique(b).filter(v=>!a.includes(v)))});
-index_set.commands.push({signature:"symmetric <first> <second>",types:["C", "C"],description:"Indexes in exactly one set.",run:(a,b)=>sorted(unique([...a,...b]).filter(v=>a.includes(v)!==b.includes(v)))});
-index_set.commands.push({signature:"subset <first> <second>",types:["C", "C"],description:"Test first set inclusion in second.",run:(a,b)=>unique(a).every(v=>b.includes(v))});
-index_set.commands.push({signature:"superset <first> <second>",types:["C", "C"],description:"Test second set inclusion in first.",run:(a,b)=>unique(b).every(v=>a.includes(v))});
-index_set.commands.push({signature:"equal <first> <second>",types:["C", "C"],description:"Test set equality ignoring duplicates.",run:(a,b)=>unique(a).length===unique(b).length&&a.every(v=>b.includes(v))});
-index_set.commands.push({signature:"disjoint <first> <second>",types:["C", "C"],description:"Test whether intersection is empty.",run:(a,b)=>!a.some(v=>b.includes(v))});
-index_set.commands.push({signature:"jaccard <first> <second>",types:["C", "C"],description:"Intersection size divided by union size.",run:(a,b)=>unique(a).filter(v=>b.includes(v)).length/unique([...a,...b]).length});
-index_set.commands.push({signature:"dice <first> <second>",types:["C", "C"],description:"Twice overlap divided by total set sizes.",run:(a,b)=>2*unique(a).filter(v=>b.includes(v)).length/(unique(a).length+unique(b).length)});
-index_set.commands.push({signature:"overlap <first> <second>",types:["C", "C"],description:"Intersection over smaller set size.",run:(a,b)=>unique(a).filter(v=>b.includes(v)).length/Math.min(unique(a).length,unique(b).length)});
-index_set.commands.push({signature:"coverage-first <first> <second>",types:["C", "C"],description:"Fraction of first indexes present in second.",run:(a,b)=>unique(a).filter(v=>b.includes(v)).length/unique(a).length});
-index_set.commands.push({signature:"coverage-second <first> <second>",types:["C", "C"],description:"Fraction of second indexes present in first.",run:(a,b)=>unique(b).filter(v=>a.includes(v)).length/unique(b).length});
-index_set.commands.push({signature:"union-count <first> <second>",types:["C", "C"],description:"Count distinct combined indexes.",run:(a,b)=>unique([...a,...b]).length});
-index_set.commands.push({signature:"intersection-count <first> <second>",types:["C", "C"],description:"Count shared distinct indexes.",run:(a,b)=>unique(a).filter(v=>b.includes(v)).length});
-index_set.commands.push({signature:"edit-count <first> <second>",types:["C", "C"],description:"Number of membership toggles between sets.",run:(a,b)=>unique([...a,...b]).filter(v=>a.includes(v)!==b.includes(v)).length});
-index_set.commands.push({signature:"retain-order <first> <second>",types:["C", "C"],description:"Intersect while retaining first input encounter order.",run:(a,b)=>unique(a).filter(v=>b.includes(v))});
-index_set.commands.push({signature:"append-new <first> <second>",types:["C", "C"],description:"Append new second-set indexes after first encounter order.",run:(a,b)=>[...unique(a),...unique(b).filter(v=>!a.includes(v))]});
-index_set.commands.push({signature:"membership <first> <second>",types:["C", "C"],description:"Report membership flags in combined encounter order.",run:(a,b)=>unique([...a,...b]).map(index=>({index,first:a.includes(index),second:b.includes(index)}))});
-index_set.commands.push({signature:"complement <indexes> <size>",types:["C", "s"],description:"Missing indexes in range zero through size minus one.",run:(a,n)=>{demand(a.every(v=>v<n));return sequence(n,i=>i).filter(i=>!a.includes(i));}});
-index_set.commands.push({signature:"runs <indexes>",types:["C"],description:"Group consecutive indexes into inclusive ranges.",run:a=>{const out=[];for(const v of sorted(unique(a))){if(out.length&&v===out.at(-1)[1]+1)out.at(-1)[1]=v;else out.push([v,v]);}return out;}});
-index_set.commands.push({signature:"duplicates <indexes>",types:["C"],description:"List indexes repeated at least once.",run:a=>sorted(unique(a).filter(v=>a.filter(w=>w===v).length>1))});
-index_set.commands.push({signature:"shift <indexes> <offset>",types:["C", "i"],description:"Translate indexes; reject negative results.",run:(a,o)=>{const r=sorted(unique(a)).map(v=>v+o);demand(r.every(v=>v>=0));return r;}});
-index_set.commands.push({signature:"mask <indexes> <size>",types:["C", "s"],description:"Boolean membership mask of supplied bounded size.",run:(a,n)=>{demand(a.every(v=>v<n));return sequence(n,i=>a.includes(i));}});
+index_set.commands.push({
+  signature: 'union <first> <second>',
+  types: ['C', 'C'],
+  description: 'All indexes in either set.',
+  run: (a, b) => sorted(unique([...a, ...b])),
+});
+index_set.commands.push({
+  signature: 'intersection <first> <second>',
+  types: ['C', 'C'],
+  description: 'Indexes appearing in both sets.',
+  run: (a, b) => sorted(unique(a).filter((v) => b.includes(v))),
+});
+index_set.commands.push({
+  signature: 'difference <first> <second>',
+  types: ['C', 'C'],
+  description: 'Indexes in first set only.',
+  run: (a, b) => sorted(unique(a).filter((v) => !b.includes(v))),
+});
+index_set.commands.push({
+  signature: 'reverse-difference <first> <second>',
+  types: ['C', 'C'],
+  description: 'Indexes in second set only.',
+  run: (a, b) => sorted(unique(b).filter((v) => !a.includes(v))),
+});
+index_set.commands.push({
+  signature: 'symmetric <first> <second>',
+  types: ['C', 'C'],
+  description: 'Indexes in exactly one set.',
+  run: (a, b) => sorted(unique([...a, ...b]).filter((v) => a.includes(v) !== b.includes(v))),
+});
+index_set.commands.push({
+  signature: 'subset <first> <second>',
+  types: ['C', 'C'],
+  description: 'Test first set inclusion in second.',
+  run: (a, b) => unique(a).every((v) => b.includes(v)),
+});
+index_set.commands.push({
+  signature: 'superset <first> <second>',
+  types: ['C', 'C'],
+  description: 'Test second set inclusion in first.',
+  run: (a, b) => unique(b).every((v) => a.includes(v)),
+});
+index_set.commands.push({
+  signature: 'equal <first> <second>',
+  types: ['C', 'C'],
+  description: 'Test set equality ignoring duplicates.',
+  run: (a, b) => unique(a).length === unique(b).length && a.every((v) => b.includes(v)),
+});
+index_set.commands.push({
+  signature: 'disjoint <first> <second>',
+  types: ['C', 'C'],
+  description: 'Test whether intersection is empty.',
+  run: (a, b) => !a.some((v) => b.includes(v)),
+});
+index_set.commands.push({
+  signature: 'jaccard <first> <second>',
+  types: ['C', 'C'],
+  description: 'Intersection size divided by union size.',
+  run: (a, b) => unique(a).filter((v) => b.includes(v)).length / unique([...a, ...b]).length,
+});
+index_set.commands.push({
+  signature: 'dice <first> <second>',
+  types: ['C', 'C'],
+  description: 'Twice overlap divided by total set sizes.',
+  run: (a, b) => (2 * unique(a).filter((v) => b.includes(v)).length) / (unique(a).length + unique(b).length),
+});
+index_set.commands.push({
+  signature: 'overlap <first> <second>',
+  types: ['C', 'C'],
+  description: 'Intersection over smaller set size.',
+  run: (a, b) => unique(a).filter((v) => b.includes(v)).length / Math.min(unique(a).length, unique(b).length),
+});
+index_set.commands.push({
+  signature: 'coverage-first <first> <second>',
+  types: ['C', 'C'],
+  description: 'Fraction of first indexes present in second.',
+  run: (a, b) => unique(a).filter((v) => b.includes(v)).length / unique(a).length,
+});
+index_set.commands.push({
+  signature: 'coverage-second <first> <second>',
+  types: ['C', 'C'],
+  description: 'Fraction of second indexes present in first.',
+  run: (a, b) => unique(b).filter((v) => a.includes(v)).length / unique(b).length,
+});
+index_set.commands.push({
+  signature: 'union-count <first> <second>',
+  types: ['C', 'C'],
+  description: 'Count distinct combined indexes.',
+  run: (a, b) => unique([...a, ...b]).length,
+});
+index_set.commands.push({
+  signature: 'intersection-count <first> <second>',
+  types: ['C', 'C'],
+  description: 'Count shared distinct indexes.',
+  run: (a, b) => unique(a).filter((v) => b.includes(v)).length,
+});
+index_set.commands.push({
+  signature: 'edit-count <first> <second>',
+  types: ['C', 'C'],
+  description: 'Number of membership toggles between sets.',
+  run: (a, b) => unique([...a, ...b]).filter((v) => a.includes(v) !== b.includes(v)).length,
+});
+index_set.commands.push({
+  signature: 'retain-order <first> <second>',
+  types: ['C', 'C'],
+  description: 'Intersect while retaining first input encounter order.',
+  run: (a, b) => unique(a).filter((v) => b.includes(v)),
+});
+index_set.commands.push({
+  signature: 'append-new <first> <second>',
+  types: ['C', 'C'],
+  description: 'Append new second-set indexes after first encounter order.',
+  run: (a, b) => [...unique(a), ...unique(b).filter((v) => !a.includes(v))],
+});
+index_set.commands.push({
+  signature: 'membership <first> <second>',
+  types: ['C', 'C'],
+  description: 'Report membership flags in combined encounter order.',
+  run: (a, b) => unique([...a, ...b]).map((index) => ({ index, first: a.includes(index), second: b.includes(index) })),
+});
+index_set.commands.push({
+  signature: 'complement <indexes> <size>',
+  types: ['C', 's'],
+  description: 'Missing indexes in range zero through size minus one.',
+  run: (a, n) => {
+    demand(a.every((v) => v < n));
+    return sequence(n, (i) => i).filter((i) => !a.includes(i));
+  },
+});
+index_set.commands.push({
+  signature: 'runs <indexes>',
+  types: ['C'],
+  description: 'Group consecutive indexes into inclusive ranges.',
+  run: (a) => {
+    const out = [];
+    for (const v of sorted(unique(a))) {
+      if (out.length && v === out.at(-1)[1] + 1) out.at(-1)[1] = v;
+      else out.push([v, v]);
+    }
+    return out;
+  },
+});
+index_set.commands.push({
+  signature: 'duplicates <indexes>',
+  types: ['C'],
+  description: 'List indexes repeated at least once.',
+  run: (a) => sorted(unique(a).filter((v) => a.filter((w) => w === v).length > 1)),
+});
+index_set.commands.push({
+  signature: 'shift <indexes> <offset>',
+  types: ['C', 'i'],
+  description: 'Translate indexes; reject negative results.',
+  run: (a, o) => {
+    const r = sorted(unique(a)).map((v) => v + o);
+    demand(r.every((v) => v >= 0));
+    return r;
+  },
+});
+index_set.commands.push({
+  signature: 'mask <indexes> <size>',
+  types: ['C', 's'],
+  description: 'Boolean membership mask of supplied bounded size.',
+  run: (a, n) => {
+    demand(a.every((v) => v < n));
+    return sequence(n, (i) => a.includes(i));
+  },
+});
 
-const tiling = {name:"tiling",note:"Offline rectangular panel layout with caller-supplied continuous widths and heights. Tile counts include partial edge tiles; cut reuse and material mechanics are excluded.",commands:[]};
+const tiling = {
+  name: 'tiling',
+  note: 'Offline rectangular panel layout with caller-supplied continuous widths and heights. Tile counts include partial edge tiles; cut reuse and material mechanics are excluded.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(tiling);
-tiling.commands.push({signature:"columns <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Columns needed including a partial edge column.",run:(w,h,x,z)=>wholeCeil(w/x)});
-tiling.commands.push({signature:"rows <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Rows needed including a partial edge row.",run:(w,h,x,z)=>wholeCeil(h/z)});
-tiling.commands.push({signature:"tiles <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Total whole tiles to purchase without cut reuse.",run:(w,h,x,z)=>wholeCeil(w/x)*wholeCeil(h/z)});
-tiling.commands.push({signature:"full-tiles <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Count uncut interior tiles.",run:(w,h,x,z)=>wholeFloor(w/x)*wholeFloor(h/z)});
-tiling.commands.push({signature:"partial-tiles <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Count tiles requiring any edge cut.",run:(w,h,x,z)=>wholeCeil(w/x)*wholeCeil(h/z)-wholeFloor(w/x)*wholeFloor(h/z)});
-tiling.commands.push({signature:"area <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Target covered area.",run:(w,h,x,z)=>w*h});
-tiling.commands.push({signature:"purchased-area <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Area of all purchased whole tiles.",run:(w,h,x,z)=>wholeCeil(w/x)*wholeCeil(h/z)*x*z});
-tiling.commands.push({signature:"waste-area <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Discard area when cuts cannot be reused.",run:(w,h,x,z)=>wholeCeil(w/x)*wholeCeil(h/z)*x*z-w*h});
-tiling.commands.push({signature:"waste-fraction <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Discard area divided by purchased area.",run:(w,h,x,z)=>1-w*h/(wholeCeil(w/x)*wholeCeil(h/z)*x*z)});
-tiling.commands.push({signature:"edge-width <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Remainder width; zero when exactly divisible.",run:(w,h,x,z)=>Math.max(0,w-wholeFloor(w/x)*x)});
-tiling.commands.push({signature:"edge-height <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Remainder height; zero when exactly divisible.",run:(w,h,x,z)=>Math.max(0,h-wholeFloor(h/z)*z)});
-tiling.commands.push({signature:"horizontal-seams <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Length of interior row seams.",run:(w,h,x,z)=>Math.max(0,wholeCeil(h/z)-1)*w});
-tiling.commands.push({signature:"vertical-seams <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Length of interior column seams.",run:(w,h,x,z)=>Math.max(0,wholeCeil(w/x)-1)*h});
-tiling.commands.push({signature:"seam-total <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Total interior grid seam length.",run:(w,h,x,z)=>Math.max(0,wholeCeil(h/z)-1)*w+Math.max(0,wholeCeil(w/x)-1)*h});
-tiling.commands.push({signature:"border <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Outer boundary length.",run:(w,h,x,z)=>2*(w+h)});
-tiling.commands.push({signature:"junctions <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Interior four-tile grid junction count.",run:(w,h,x,z)=>(wholeCeil(w/x)-1)*(wholeCeil(h/z)-1)});
-tiling.commands.push({signature:"row-widths <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Cut width of each column.",run:(w,h,x,z)=>sequence(wholeCeil(w/x),i=>Math.min(x,w-i*x))});
-tiling.commands.push({signature:"column-heights <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Cut height of each row.",run:(w,h,x,z)=>sequence(wholeCeil(h/z),i=>Math.min(z,h-i*z))});
-tiling.commands.push({signature:"rotated-count <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Purchase count with tile orientation rotated ninety degrees.",run:(w,h,x,z)=>wholeCeil(w/z)*wholeCeil(h/x)});
-tiling.commands.push({signature:"rotation-saving <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Whole-tile saving from rotating all tiles.",run:(w,h,x,z)=>wholeCeil(w/x)*wholeCeil(h/z)-wholeCeil(w/z)*wholeCeil(h/x)});
-tiling.commands.push({signature:"dimensions <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"Grid dimensions including edge cuts.",run:(w,h,x,z)=>[wholeCeil(w/x),wholeCeil(h/z)]});
-tiling.commands.push({signature:"cells <width> <height> <tile-width> <tile-height>",types:["p", "p", "p", "p"],description:"List bounded tile cut dimensions in row-major order.",run:(w,h,x,z)=>sequence(wholeCeil(w/x)*wholeCeil(h/z),i=>{const col=i%wholeCeil(w/x),row=wholeFloor(i/wholeCeil(w/x));return {column:col,row,width:Math.min(x,w-col*x),height:Math.min(z,h-row*z)};})});
-tiling.commands.push({signature:"order-cost <width> <height> <tile-width> <tile-height> <unit-cost>",types:["p", "p", "p", "p", "q"],description:"Budget whole tiles at a supplied price.",run:(w,h,x,z,c)=>wholeCeil(w/x)*wholeCeil(h/z)*c});
-tiling.commands.push({signature:"spares <width> <height> <tile-width> <tile-height> <fraction>",types:["p", "p", "p", "p", "r"],description:"Add rounded-up proportional spare tiles.",run:(w,h,x,z,f)=>{const base=wholeCeil(w/x)*wholeCeil(h/z);return {base,spares:wholeCeil(base*f),total:base+wholeCeil(base*f)};}});
-tiling.commands.push({signature:"packages <width> <height> <tile-width> <tile-height> <pack-size>",types:["p", "p", "p", "p", "s"],description:"Round tile demand to whole packages.",run:(w,h,x,z,n)=>wholeCeil(wholeCeil(w/x)*wholeCeil(h/z)/n)});
+tiling.commands.push({
+  signature: 'columns <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Columns needed including a partial edge column.',
+  run: (w, h, x, z) => wholeCeil(w / x),
+});
+tiling.commands.push({
+  signature: 'rows <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Rows needed including a partial edge row.',
+  run: (w, h, x, z) => wholeCeil(h / z),
+});
+tiling.commands.push({
+  signature: 'tiles <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Total whole tiles to purchase without cut reuse.',
+  run: (w, h, x, z) => wholeCeil(w / x) * wholeCeil(h / z),
+});
+tiling.commands.push({
+  signature: 'full-tiles <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Count uncut interior tiles.',
+  run: (w, h, x, z) => wholeFloor(w / x) * wholeFloor(h / z),
+});
+tiling.commands.push({
+  signature: 'partial-tiles <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Count tiles requiring any edge cut.',
+  run: (w, h, x, z) => wholeCeil(w / x) * wholeCeil(h / z) - wholeFloor(w / x) * wholeFloor(h / z),
+});
+tiling.commands.push({
+  signature: 'area <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Target covered area.',
+  run: (w, h, x, z) => w * h,
+});
+tiling.commands.push({
+  signature: 'purchased-area <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Area of all purchased whole tiles.',
+  run: (w, h, x, z) => wholeCeil(w / x) * wholeCeil(h / z) * x * z,
+});
+tiling.commands.push({
+  signature: 'waste-area <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Discard area when cuts cannot be reused.',
+  run: (w, h, x, z) => wholeCeil(w / x) * wholeCeil(h / z) * x * z - w * h,
+});
+tiling.commands.push({
+  signature: 'waste-fraction <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Discard area divided by purchased area.',
+  run: (w, h, x, z) => 1 - (w * h) / (wholeCeil(w / x) * wholeCeil(h / z) * x * z),
+});
+tiling.commands.push({
+  signature: 'edge-width <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Remainder width; zero when exactly divisible.',
+  run: (w, h, x, z) => Math.max(0, w - wholeFloor(w / x) * x),
+});
+tiling.commands.push({
+  signature: 'edge-height <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Remainder height; zero when exactly divisible.',
+  run: (w, h, x, z) => Math.max(0, h - wholeFloor(h / z) * z),
+});
+tiling.commands.push({
+  signature: 'horizontal-seams <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Length of interior row seams.',
+  run: (w, h, x, z) => Math.max(0, wholeCeil(h / z) - 1) * w,
+});
+tiling.commands.push({
+  signature: 'vertical-seams <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Length of interior column seams.',
+  run: (w, h, x, z) => Math.max(0, wholeCeil(w / x) - 1) * h,
+});
+tiling.commands.push({
+  signature: 'seam-total <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Total interior grid seam length.',
+  run: (w, h, x, z) => Math.max(0, wholeCeil(h / z) - 1) * w + Math.max(0, wholeCeil(w / x) - 1) * h,
+});
+tiling.commands.push({
+  signature: 'border <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Outer boundary length.',
+  run: (w, h, x, z) => 2 * (w + h),
+});
+tiling.commands.push({
+  signature: 'junctions <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Interior four-tile grid junction count.',
+  run: (w, h, x, z) => (wholeCeil(w / x) - 1) * (wholeCeil(h / z) - 1),
+});
+tiling.commands.push({
+  signature: 'row-widths <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Cut width of each column.',
+  run: (w, h, x, z) => sequence(wholeCeil(w / x), (i) => Math.min(x, w - i * x)),
+});
+tiling.commands.push({
+  signature: 'column-heights <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Cut height of each row.',
+  run: (w, h, x, z) => sequence(wholeCeil(h / z), (i) => Math.min(z, h - i * z)),
+});
+tiling.commands.push({
+  signature: 'rotated-count <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Purchase count with tile orientation rotated ninety degrees.',
+  run: (w, h, x, z) => wholeCeil(w / z) * wholeCeil(h / x),
+});
+tiling.commands.push({
+  signature: 'rotation-saving <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Whole-tile saving from rotating all tiles.',
+  run: (w, h, x, z) => wholeCeil(w / x) * wholeCeil(h / z) - wholeCeil(w / z) * wholeCeil(h / x),
+});
+tiling.commands.push({
+  signature: 'dimensions <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'Grid dimensions including edge cuts.',
+  run: (w, h, x, z) => [wholeCeil(w / x), wholeCeil(h / z)],
+});
+tiling.commands.push({
+  signature: 'cells <width> <height> <tile-width> <tile-height>',
+  types: ['p', 'p', 'p', 'p'],
+  description: 'List bounded tile cut dimensions in row-major order.',
+  run: (w, h, x, z) =>
+    sequence(wholeCeil(w / x) * wholeCeil(h / z), (i) => {
+      const col = i % wholeCeil(w / x),
+        row = wholeFloor(i / wholeCeil(w / x));
+      return { column: col, row, width: Math.min(x, w - col * x), height: Math.min(z, h - row * z) };
+    }),
+});
+tiling.commands.push({
+  signature: 'order-cost <width> <height> <tile-width> <tile-height> <unit-cost>',
+  types: ['p', 'p', 'p', 'p', 'q'],
+  description: 'Budget whole tiles at a supplied price.',
+  run: (w, h, x, z, c) => wholeCeil(w / x) * wholeCeil(h / z) * c,
+});
+tiling.commands.push({
+  signature: 'spares <width> <height> <tile-width> <tile-height> <fraction>',
+  types: ['p', 'p', 'p', 'p', 'r'],
+  description: 'Add rounded-up proportional spare tiles.',
+  run: (w, h, x, z, f) => {
+    const base = wholeCeil(w / x) * wholeCeil(h / z);
+    return { base, spares: wholeCeil(base * f), total: base + wholeCeil(base * f) };
+  },
+});
+tiling.commands.push({
+  signature: 'packages <width> <height> <tile-width> <tile-height> <pack-size>',
+  types: ['p', 'p', 'p', 'p', 's'],
+  description: 'Round tile demand to whole packages.',
+  run: (w, h, x, z, n) => wholeCeil((wholeCeil(w / x) * wholeCeil(h / z)) / n),
+});
 
-const elevation = {name:"elevation",note:"Offline equally spaced supplied height-profile samples. These are abstract measurements, not world scans. Fill and excavation use linear interpolation and supplied cross-section width.",commands:[]};
+const elevation = {
+  name: 'elevation',
+  note: 'Offline equally spaced supplied height-profile samples. These are abstract measurements, not world scans. Fill and excavation use linear interpolation and supplied cross-section width.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(elevation);
-elevation.commands.push({signature:"deltas <heights>",types:["l"],description:"Signed height changes between samples.",run:v=>pairs(v).map(([a,b])=>b-a)});
-elevation.commands.push({signature:"ascent <heights>",types:["l"],description:"Total positive elevation gain.",run:v=>sum(pairs(v).map(([a,b])=>Math.max(0,b-a)))});
-elevation.commands.push({signature:"descent <heights>",types:["l"],description:"Total positive elevation loss.",run:v=>sum(pairs(v).map(([a,b])=>Math.max(0,a-b)))});
-elevation.commands.push({signature:"net <heights>",types:["l"],description:"Final height minus initial height.",run:v=>v.at(-1)-v[0]});
-elevation.commands.push({signature:"range <heights>",types:["l"],description:"Highest minus lowest sample.",run:v=>Math.max(...v)-Math.min(...v)});
-elevation.commands.push({signature:"peaks <heights>",types:["l"],description:"Strict interior peak indexes.",run:v=>v.flatMap((h,i)=>i>0&&i<v.length-1&&h>v[i-1]&&h>v[i+1]?[i]:[])});
-elevation.commands.push({signature:"valleys <heights>",types:["l"],description:"Strict interior valley indexes.",run:v=>v.flatMap((h,i)=>i>0&&i<v.length-1&&h<v[i-1]&&h<v[i+1]?[i]:[])});
-elevation.commands.push({signature:"level-legs <heights>",types:["l"],description:"Indexes of horizontal legs.",run:v=>pairs(v).flatMap(([a,b],i)=>a===b?[i]:[])});
-elevation.commands.push({signature:"up-legs <heights>",types:["l"],description:"Indexes of ascending legs.",run:v=>pairs(v).flatMap(([a,b],i)=>b>a?[i]:[])});
-elevation.commands.push({signature:"down-legs <heights>",types:["l"],description:"Indexes of descending legs.",run:v=>pairs(v).flatMap(([a,b],i)=>b<a?[i]:[])});
-elevation.commands.push({signature:"roughness <heights>",types:["l"],description:"Sum absolute second differences, in height units.",run:v=>{demand(v.length>=3);return sum(v.slice(2).map((x,i)=>Math.abs(x-2*v[i+1]+v[i])));}});
-elevation.commands.push({signature:"total-variation <heights>",types:["l"],description:"Total absolute elevation change.",run:v=>sum(pairs(v).map(([a,b])=>Math.abs(b-a)))});
-elevation.commands.push({signature:"running-high <heights>",types:["l"],description:"Highest observed height through each sample.",run:v=>{let m=-Infinity;return v.map(h=>m=Math.max(m,h));}});
-elevation.commands.push({signature:"running-low <heights>",types:["l"],description:"Lowest observed height through each sample.",run:v=>{let m=Infinity;return v.map(h=>m=Math.min(m,h));}});
-elevation.commands.push({signature:"relative-start <heights>",types:["l"],description:"Height offsets from first sample.",run:v=>v.map(h=>h-v[0])});
-elevation.commands.push({signature:"grades <heights> <spacing>",types:["l", "p"],description:"Signed rise divided by horizontal spacing.",run:(v,s)=>profile(v,s)});
-elevation.commands.push({signature:"angles <heights> <spacing>",types:["l", "p"],description:"Signed inclination angle in degrees per leg.",run:(v,s)=>profile(v,s).map(g=>Math.atan(g)*180/Math.PI)});
-elevation.commands.push({signature:"surface-length <heights> <spacing>",types:["l", "p"],description:"Polyline length through the sampled vertical cross-section.",run:(v,s)=>sum(pairs(v).map(([a,b])=>Math.hypot(s,b-a)))});
-elevation.commands.push({signature:"horizontal-span <heights> <spacing>",types:["l", "p"],description:"Horizontal distance between first and last sample.",run:(v,s)=>(v.length-1)*s});
-elevation.commands.push({signature:"max-grade <heights> <spacing>",types:["l", "p"],description:"Largest absolute grade, zero with one sample.",run:(v,s)=>Math.max(0,...profile(v,s).map(Math.abs))});
-elevation.commands.push({signature:"steep-legs <heights> <spacing> <limit>",types:["l", "p", "q"],description:"Indexes whose absolute grade strictly exceeds a supplied threshold.",run:(v,s,t)=>profile(v,s).flatMap((g,i)=>Math.abs(g)>t?[i]:[])});
-elevation.commands.push({signature:"offset <heights> <delta>",types:["l", "n"],description:"Translate all heights by a vertical offset.",run:(v,d)=>v.map(h=>h+d)});
-elevation.commands.push({signature:"level-deficits <heights> <target>",types:["l", "n"],description:"Per-sample fill heights below a target plane.",run:(v,t)=>v.map(h=>Math.max(0,t-h))});
-elevation.commands.push({signature:"level-excess <heights> <target>",types:["l", "n"],description:"Per-sample cut heights above a target plane.",run:(v,t)=>v.map(h=>Math.max(0,h-t))});
-elevation.commands.push({signature:"signed-volume <heights> <target> <spacing> <width>",types:["l", "n", "p", "p"],description:"Signed fill-minus-cut volume using trapezoidal integration.",run:(v,t,s,w)=>sum(pairs(v).map(([a,b])=>(t-(a+b)/2)*s*w))});
+elevation.commands.push({
+  signature: 'deltas <heights>',
+  types: ['l'],
+  description: 'Signed height changes between samples.',
+  run: (v) => pairs(v).map(([a, b]) => b - a),
+});
+elevation.commands.push({
+  signature: 'ascent <heights>',
+  types: ['l'],
+  description: 'Total positive elevation gain.',
+  run: (v) => sum(pairs(v).map(([a, b]) => Math.max(0, b - a))),
+});
+elevation.commands.push({
+  signature: 'descent <heights>',
+  types: ['l'],
+  description: 'Total positive elevation loss.',
+  run: (v) => sum(pairs(v).map(([a, b]) => Math.max(0, a - b))),
+});
+elevation.commands.push({
+  signature: 'net <heights>',
+  types: ['l'],
+  description: 'Final height minus initial height.',
+  run: (v) => v.at(-1) - v[0],
+});
+elevation.commands.push({
+  signature: 'range <heights>',
+  types: ['l'],
+  description: 'Highest minus lowest sample.',
+  run: (v) => Math.max(...v) - Math.min(...v),
+});
+elevation.commands.push({
+  signature: 'peaks <heights>',
+  types: ['l'],
+  description: 'Strict interior peak indexes.',
+  run: (v) => v.flatMap((h, i) => (i > 0 && i < v.length - 1 && h > v[i - 1] && h > v[i + 1] ? [i] : [])),
+});
+elevation.commands.push({
+  signature: 'valleys <heights>',
+  types: ['l'],
+  description: 'Strict interior valley indexes.',
+  run: (v) => v.flatMap((h, i) => (i > 0 && i < v.length - 1 && h < v[i - 1] && h < v[i + 1] ? [i] : [])),
+});
+elevation.commands.push({
+  signature: 'level-legs <heights>',
+  types: ['l'],
+  description: 'Indexes of horizontal legs.',
+  run: (v) => pairs(v).flatMap(([a, b], i) => (a === b ? [i] : [])),
+});
+elevation.commands.push({
+  signature: 'up-legs <heights>',
+  types: ['l'],
+  description: 'Indexes of ascending legs.',
+  run: (v) => pairs(v).flatMap(([a, b], i) => (b > a ? [i] : [])),
+});
+elevation.commands.push({
+  signature: 'down-legs <heights>',
+  types: ['l'],
+  description: 'Indexes of descending legs.',
+  run: (v) => pairs(v).flatMap(([a, b], i) => (b < a ? [i] : [])),
+});
+elevation.commands.push({
+  signature: 'roughness <heights>',
+  types: ['l'],
+  description: 'Sum absolute second differences, in height units.',
+  run: (v) => {
+    demand(v.length >= 3);
+    return sum(v.slice(2).map((x, i) => Math.abs(x - 2 * v[i + 1] + v[i])));
+  },
+});
+elevation.commands.push({
+  signature: 'total-variation <heights>',
+  types: ['l'],
+  description: 'Total absolute elevation change.',
+  run: (v) => sum(pairs(v).map(([a, b]) => Math.abs(b - a))),
+});
+elevation.commands.push({
+  signature: 'running-high <heights>',
+  types: ['l'],
+  description: 'Highest observed height through each sample.',
+  run: (v) => {
+    let m = -Infinity;
+    return v.map((h) => (m = Math.max(m, h)));
+  },
+});
+elevation.commands.push({
+  signature: 'running-low <heights>',
+  types: ['l'],
+  description: 'Lowest observed height through each sample.',
+  run: (v) => {
+    let m = Infinity;
+    return v.map((h) => (m = Math.min(m, h)));
+  },
+});
+elevation.commands.push({
+  signature: 'relative-start <heights>',
+  types: ['l'],
+  description: 'Height offsets from first sample.',
+  run: (v) => v.map((h) => h - v[0]),
+});
+elevation.commands.push({
+  signature: 'grades <heights> <spacing>',
+  types: ['l', 'p'],
+  description: 'Signed rise divided by horizontal spacing.',
+  run: (v, s) => profile(v, s),
+});
+elevation.commands.push({
+  signature: 'angles <heights> <spacing>',
+  types: ['l', 'p'],
+  description: 'Signed inclination angle in degrees per leg.',
+  run: (v, s) => profile(v, s).map((g) => (Math.atan(g) * 180) / Math.PI),
+});
+elevation.commands.push({
+  signature: 'surface-length <heights> <spacing>',
+  types: ['l', 'p'],
+  description: 'Polyline length through the sampled vertical cross-section.',
+  run: (v, s) => sum(pairs(v).map(([a, b]) => Math.hypot(s, b - a))),
+});
+elevation.commands.push({
+  signature: 'horizontal-span <heights> <spacing>',
+  types: ['l', 'p'],
+  description: 'Horizontal distance between first and last sample.',
+  run: (v, s) => (v.length - 1) * s,
+});
+elevation.commands.push({
+  signature: 'max-grade <heights> <spacing>',
+  types: ['l', 'p'],
+  description: 'Largest absolute grade, zero with one sample.',
+  run: (v, s) => Math.max(0, ...profile(v, s).map(Math.abs)),
+});
+elevation.commands.push({
+  signature: 'steep-legs <heights> <spacing> <limit>',
+  types: ['l', 'p', 'q'],
+  description: 'Indexes whose absolute grade strictly exceeds a supplied threshold.',
+  run: (v, s, t) => profile(v, s).flatMap((g, i) => (Math.abs(g) > t ? [i] : [])),
+});
+elevation.commands.push({
+  signature: 'offset <heights> <delta>',
+  types: ['l', 'n'],
+  description: 'Translate all heights by a vertical offset.',
+  run: (v, d) => v.map((h) => h + d),
+});
+elevation.commands.push({
+  signature: 'level-deficits <heights> <target>',
+  types: ['l', 'n'],
+  description: 'Per-sample fill heights below a target plane.',
+  run: (v, t) => v.map((h) => Math.max(0, t - h)),
+});
+elevation.commands.push({
+  signature: 'level-excess <heights> <target>',
+  types: ['l', 'n'],
+  description: 'Per-sample cut heights above a target plane.',
+  run: (v, t) => v.map((h) => Math.max(0, h - t)),
+});
+elevation.commands.push({
+  signature: 'signed-volume <heights> <target> <spacing> <width>',
+  types: ['l', 'n', 'p', 'p'],
+  description: 'Signed fill-minus-cut volume using trapezoidal integration.',
+  run: (v, t, s, w) => sum(pairs(v).map(([a, b]) => (t - (a + b) / 2) * s * w)),
+});
 
-const reach = {name:"reach",note:"Offline constant-speed travel budgets using explicit delays and reserves. Results do not account for terrain, obstacles, loading, acceleration, or food.",commands:[]};
+const reach = {
+  name: 'reach',
+  note: 'Offline constant-speed travel budgets using explicit delays and reserves. Results do not account for terrain, obstacles, loading, acceleration, or food.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(reach);
-reach.commands.push({signature:"radius <budget> <speed> <delay>",types:["q", "p", "q"],description:"Maximum one-way distance after fixed delay.",run:(b,s,d)=>Math.max(0,b-d)*s});
-reach.commands.push({signature:"roundtrip-radius <budget> <speed> <delay>",types:["q", "p", "q"],description:"Maximum distance with equal-speed outward and return travel.",run:(b,s,d)=>Math.max(0,b-d)*s/2});
-reach.commands.push({signature:"time-left <budget> <speed> <delay>",types:["q", "p", "q"],description:"Travel time available after fixed delay.",run:(b,s,d)=>Math.max(0,b-d)});
-reach.commands.push({signature:"delay-share <budget> <speed> <delay>",types:["q", "p", "q"],description:"Delay divided by total time budget.",run:(b,s,d)=>{demand(b>0);return d/b;}});
-reach.commands.push({signature:"disk-area <budget> <speed> <delay>",types:["q", "p", "q"],description:"Area of unobstructed continuous travel disk.",run:(b,s,d)=>Math.PI*(Math.max(0,b-d)*s)**2});
-reach.commands.push({signature:"diamond-area <budget> <speed> <delay>",types:["q", "p", "q"],description:"Area of continuous Manhattan travel diamond.",run:(b,s,d)=>2*(Math.max(0,b-d)*s)**2});
-reach.commands.push({signature:"square-area <budget> <speed> <delay>",types:["q", "p", "q"],description:"Area of continuous Chebyshev travel square.",run:(b,s,d)=>4*(Math.max(0,b-d)*s)**2});
-reach.commands.push({signature:"circumference <budget> <speed> <delay>",types:["q", "p", "q"],description:"Boundary length of continuous travel disk.",run:(b,s,d)=>2*Math.PI*Math.max(0,b-d)*s});
-reach.commands.push({signature:"diameter <budget> <speed> <delay>",types:["q", "p", "q"],description:"Maximum separation of opposite reachable points.",run:(b,s,d)=>2*Math.max(0,b-d)*s});
-reach.commands.push({signature:"lost-distance <budget> <speed> <delay>",types:["q", "p", "q"],description:"Travel distance lost to delay, capped at full budget.",run:(b,s,d)=>Math.min(b,d)*s});
-reach.commands.push({signature:"required-speed <distance> <budget> <delay>",types:["q", "p", "q"],description:"Speed needed after delay; reject absent travel time for positive distance.",run:(d,b,t)=>{demand(b>t||d===0);return d===0?0:d/(b-t);}});
-reach.commands.push({signature:"arrival <distance> <speed> <delay>",types:["q", "p", "q"],description:"Arrival time including a fixed predeparture delay.",run:(d,s,t)=>t+d/s});
-reach.commands.push({signature:"slack <distance> <speed> <delay> <budget>",types:["q", "p", "q", "q"],description:"Signed time budget margin on arrival.",run:(d,s,t,b)=>b-t-d/s});
-reach.commands.push({signature:"can-arrive <distance> <speed> <delay> <budget>",types:["q", "p", "q", "q"],description:"Test whether constant-speed arrival meets budget.",run:(d,s,t,b)=>budgetFits(t+d/s,b)});
-reach.commands.push({signature:"return-reserve <outward> <out-speed> <back-speed> <delay>",types:["q", "p", "p", "q"],description:"Total roundtrip duration with asymmetric speeds.",run:(d,a,b,t)=>d/a+d/b+t});
-reach.commands.push({signature:"asymmetric-radius <budget> <out-speed> <back-speed> <delay>",types:["q", "p", "p", "q"],description:"Maximum roundtrip distance with asymmetric speeds.",run:(b,a,c,t)=>Math.max(0,b-t)/(1/a+1/c)});
-reach.commands.push({signature:"reserve-radius <budget> <speed> <reserve>",types:["q", "p", "q"],description:"One-way distance after reserving explicit time.",run:(b,s,r)=>Math.max(0,b-r)*s});
-reach.commands.push({signature:"waypoints <distances> <speed> <budget>",types:["L", "p", "q"],description:"Indices whose one-way travel times meet a budget.",run:(v,s,b)=>v.flatMap((d,i)=>budgetFits(d/s,b)?[i]:[])});
-reach.commands.push({signature:"arrival-list <distances> <speed> <delay>",types:["L", "p", "q"],description:"Arrival times for independent direct destinations.",run:(v,s,t)=>v.map(d=>t+d/s)});
-reach.commands.push({signature:"speed-window <distance> <fast> <slow>",types:["q", "p", "p"],description:"Earliest/latest travel times for a supplied speed range.",run:(d,f,s)=>{demand(f>=s);return [d/f,d/s];}});
-reach.commands.push({signature:"budget-window <low-budget> <high-budget> <speed>",types:["q", "q", "p"],description:"One-way distance range for ordered time budgets.",run:(a,b,s)=>{demand(a<=b);return [a*s,b*s];}});
-reach.commands.push({signature:"slowdown <distance> <speed> <factor>",types:["q", "p", "p"],description:"Travel time after multiplying speed by a positive factor.",run:(d,s,f)=>d/(s*f)});
-reach.commands.push({signature:"rest-cycles <distance> <speed> <walk-period> <rest>",types:["q", "p", "p", "q"],description:"Time with a rest after each full walking period except on arrival.",run:(d,s,w,r)=>{const t=d/s;return t+Math.max(0,wholeCeil(t/w)-1)*r;}});
-reach.commands.push({signature:"stop-cost <distance> <speed> <stops> <stop-duration>",types:["q", "p", "c", "q"],description:"Travel plus fixed dwell per planned stop.",run:(d,s,n,t)=>d/s+n*t});
-reach.commands.push({signature:"latest-departure <distance> <speed> <deadline>",types:["q", "p", "n"],description:"Latest departure timestamp for a direct constant-speed trip.",run:(d,s,t)=>t-d/s});
+reach.commands.push({
+  signature: 'radius <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Maximum one-way distance after fixed delay.',
+  run: (b, s, d) => Math.max(0, b - d) * s,
+});
+reach.commands.push({
+  signature: 'roundtrip-radius <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Maximum distance with equal-speed outward and return travel.',
+  run: (b, s, d) => (Math.max(0, b - d) * s) / 2,
+});
+reach.commands.push({
+  signature: 'time-left <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Travel time available after fixed delay.',
+  run: (b, s, d) => Math.max(0, b - d),
+});
+reach.commands.push({
+  signature: 'delay-share <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Delay divided by total time budget.',
+  run: (b, s, d) => {
+    demand(b > 0);
+    return d / b;
+  },
+});
+reach.commands.push({
+  signature: 'disk-area <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Area of unobstructed continuous travel disk.',
+  run: (b, s, d) => Math.PI * (Math.max(0, b - d) * s) ** 2,
+});
+reach.commands.push({
+  signature: 'diamond-area <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Area of continuous Manhattan travel diamond.',
+  run: (b, s, d) => 2 * (Math.max(0, b - d) * s) ** 2,
+});
+reach.commands.push({
+  signature: 'square-area <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Area of continuous Chebyshev travel square.',
+  run: (b, s, d) => 4 * (Math.max(0, b - d) * s) ** 2,
+});
+reach.commands.push({
+  signature: 'circumference <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Boundary length of continuous travel disk.',
+  run: (b, s, d) => 2 * Math.PI * Math.max(0, b - d) * s,
+});
+reach.commands.push({
+  signature: 'diameter <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Maximum separation of opposite reachable points.',
+  run: (b, s, d) => 2 * Math.max(0, b - d) * s,
+});
+reach.commands.push({
+  signature: 'lost-distance <budget> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Travel distance lost to delay, capped at full budget.',
+  run: (b, s, d) => Math.min(b, d) * s,
+});
+reach.commands.push({
+  signature: 'required-speed <distance> <budget> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Speed needed after delay; reject absent travel time for positive distance.',
+  run: (d, b, t) => {
+    demand(b > t || d === 0);
+    return d === 0 ? 0 : d / (b - t);
+  },
+});
+reach.commands.push({
+  signature: 'arrival <distance> <speed> <delay>',
+  types: ['q', 'p', 'q'],
+  description: 'Arrival time including a fixed predeparture delay.',
+  run: (d, s, t) => t + d / s,
+});
+reach.commands.push({
+  signature: 'slack <distance> <speed> <delay> <budget>',
+  types: ['q', 'p', 'q', 'q'],
+  description: 'Signed time budget margin on arrival.',
+  run: (d, s, t, b) => b - t - d / s,
+});
+reach.commands.push({
+  signature: 'can-arrive <distance> <speed> <delay> <budget>',
+  types: ['q', 'p', 'q', 'q'],
+  description: 'Test whether constant-speed arrival meets budget.',
+  run: (d, s, t, b) => budgetFits(t + d / s, b),
+});
+reach.commands.push({
+  signature: 'return-reserve <outward> <out-speed> <back-speed> <delay>',
+  types: ['q', 'p', 'p', 'q'],
+  description: 'Total roundtrip duration with asymmetric speeds.',
+  run: (d, a, b, t) => d / a + d / b + t,
+});
+reach.commands.push({
+  signature: 'asymmetric-radius <budget> <out-speed> <back-speed> <delay>',
+  types: ['q', 'p', 'p', 'q'],
+  description: 'Maximum roundtrip distance with asymmetric speeds.',
+  run: (b, a, c, t) => Math.max(0, b - t) / (1 / a + 1 / c),
+});
+reach.commands.push({
+  signature: 'reserve-radius <budget> <speed> <reserve>',
+  types: ['q', 'p', 'q'],
+  description: 'One-way distance after reserving explicit time.',
+  run: (b, s, r) => Math.max(0, b - r) * s,
+});
+reach.commands.push({
+  signature: 'waypoints <distances> <speed> <budget>',
+  types: ['L', 'p', 'q'],
+  description: 'Indices whose one-way travel times meet a budget.',
+  run: (v, s, b) => v.flatMap((d, i) => (budgetFits(d / s, b) ? [i] : [])),
+});
+reach.commands.push({
+  signature: 'arrival-list <distances> <speed> <delay>',
+  types: ['L', 'p', 'q'],
+  description: 'Arrival times for independent direct destinations.',
+  run: (v, s, t) => v.map((d) => t + d / s),
+});
+reach.commands.push({
+  signature: 'speed-window <distance> <fast> <slow>',
+  types: ['q', 'p', 'p'],
+  description: 'Earliest/latest travel times for a supplied speed range.',
+  run: (d, f, s) => {
+    demand(f >= s);
+    return [d / f, d / s];
+  },
+});
+reach.commands.push({
+  signature: 'budget-window <low-budget> <high-budget> <speed>',
+  types: ['q', 'q', 'p'],
+  description: 'One-way distance range for ordered time budgets.',
+  run: (a, b, s) => {
+    demand(a <= b);
+    return [a * s, b * s];
+  },
+});
+reach.commands.push({
+  signature: 'slowdown <distance> <speed> <factor>',
+  types: ['q', 'p', 'p'],
+  description: 'Travel time after multiplying speed by a positive factor.',
+  run: (d, s, f) => d / (s * f),
+});
+reach.commands.push({
+  signature: 'rest-cycles <distance> <speed> <walk-period> <rest>',
+  types: ['q', 'p', 'p', 'q'],
+  description: 'Time with a rest after each full walking period except on arrival.',
+  run: (d, s, w, r) => {
+    const t = d / s;
+    return t + Math.max(0, wholeCeil(t / w) - 1) * r;
+  },
+});
+reach.commands.push({
+  signature: 'stop-cost <distance> <speed> <stops> <stop-duration>',
+  types: ['q', 'p', 'c', 'q'],
+  description: 'Travel plus fixed dwell per planned stop.',
+  run: (d, s, n, t) => d / s + n * t,
+});
+reach.commands.push({
+  signature: 'latest-departure <distance> <speed> <deadline>',
+  types: ['q', 'p', 'n'],
+  description: 'Latest departure timestamp for a direct constant-speed trip.',
+  run: (d, s, t) => t - d / s,
+});
 
-const patrol = {name:"patrol",note:"Offline repeated loop patrol arithmetic. Loop lengths, speeds, rest, visit times, and phases are supplied assumptions; no entities or threats are observed.",commands:[]};
+const patrol = {
+  name: 'patrol',
+  note: 'Offline repeated loop patrol arithmetic. Loop lengths, speeds, rest, visit times, and phases are supplied assumptions; no entities or threats are observed.',
+  commands: [],
+};
 COORDINATION_GROUPS.push(patrol);
-patrol.commands.push({signature:"moving-period <length> <speed> <rest>",types:["q", "p", "q"],description:"Duration moving once around a loop.",run:(l,s,r)=>l/s});
-patrol.commands.push({signature:"cycle-period <length> <speed> <rest>",types:["q", "p", "q"],description:"Duration of one loop plus end-of-loop rest.",run:(l,s,r)=>l/s+r});
-patrol.commands.push({signature:"frequency <length> <speed> <rest>",types:["q", "p", "q"],description:"Cycles per time unit.",run:(l,s,r)=>{demand(l/s+r>0);return 1/(l/s+r);}});
-patrol.commands.push({signature:"moving-share <length> <speed> <rest>",types:["q", "p", "q"],description:"Fraction of each cycle spent moving.",run:(l,s,r)=>{demand(l/s+r>0);return (l/s)/(l/s+r);}});
-patrol.commands.push({signature:"rest-share <length> <speed> <rest>",types:["q", "p", "q"],description:"Fraction of each cycle spent resting.",run:(l,s,r)=>{demand(l/s+r>0);return r/(l/s+r);}});
-patrol.commands.push({signature:"effective-speed <length> <speed> <rest>",types:["q", "p", "q"],description:"Long-run distance per time including rest.",run:(l,s,r)=>{demand(l/s+r>0);return l/(l/s+r);}});
-patrol.commands.push({signature:"absence-gap <length> <speed> <rest> <watch-duration>",types:["q", "p", "q", "q"],description:"Time between departure from and next arrival at a watched point.",run:(l,s,r,w)=>Math.max(0,l/s+r-w)});
-patrol.commands.push({signature:"total-time <length> <speed> <rest> <laps>",types:["q", "p", "q", "c"],description:"Budget laps with rest after every lap including the last.",run:(l,s,r,n)=>patrolTime(l,s,r,n)});
-patrol.commands.push({signature:"moving-time <length> <speed> <laps>",types:["q", "p", "c"],description:"Sum movement time over whole laps.",run:(l,s,n)=>l/s*n});
-patrol.commands.push({signature:"distance <length> <laps>",types:["q", "c"],description:"Total distance over whole laps.",run:(l,n)=>l*n});
-patrol.commands.push({signature:"fit-laps <length> <speed> <rest> <budget>",types:["q", "p", "q", "q"],description:"Count complete movement-plus-rest cycles fitting a time budget.",run:(l,s,r,b)=>{demand(l/s+r>0);return wholeFloor(b/(l/s+r));}});
-patrol.commands.push({signature:"last-rest-free <length> <speed> <rest> <laps>",types:["q", "p", "q", "c"],description:"Budget laps with no rest after the final lap.",run:(l,s,r,n)=>n?patrolTime(l,s,r,n)-r:0});
-patrol.commands.push({signature:"phase <period> <time>",types:["p", "n"],description:"Normalize a timestamp to a cycle phase in time units.",run:(p,t)=>cyclePhase(p,t)});
-patrol.commands.push({signature:"cycle-index <period> <time>",types:["p", "q"],description:"Zero-based cycle index at a nonnegative timestamp.",run:(p,t)=>wholeFloor(t/p)});
-patrol.commands.push({signature:"next-pass <period> <phase> <time>",types:["p", "q", "q"],description:"First pass at supplied phase at or after time; phase must be below period.",run:(p,f,t)=>{demand(f<p);return f+Math.max(0,wholeCeil((t-f)/p))*p;}});
-patrol.commands.push({signature:"wait-pass <period> <phase> <time>",types:["p", "q", "q"],description:"Delay until the next pass at a supplied valid phase.",run:(p,f,t)=>{demand(f<p);return f+Math.max(0,wholeCeil((t-f)/p))*p-t;}});
-patrol.commands.push({signature:"pass-times <period> <phase> <count>",types:["p", "q", "c"],description:"List bounded pass times from cycle zero.",run:(p,f,n)=>{demand(f<p);return sequence(n,i=>f+i*p);}});
-patrol.commands.push({signature:"pass-count <period> <phase> <end>",types:["p", "q", "q"],description:"Count passes from time zero through an inclusive endpoint.",run:(p,f,t)=>{demand(f<p);return t<f?0:wholeFloor((t-f)/p)+1;}});
-patrol.commands.push({signature:"stagger <period> <patrollers>",types:["p", "s"],description:"Evenly spaced patrol start phases.",run:(p,n)=>sequence(n,i=>i*p/n)});
-patrol.commands.push({signature:"stagger-gap <period> <patrollers>",types:["p", "s"],description:"Ideal time gap between evenly staggered passes.",run:(p,n)=>p/n});
-patrol.commands.push({signature:"required-patrollers <period> <max-gap>",types:["p", "p"],description:"Minimum ideal equally spaced patrollers for a pass-gap target.",run:(p,g)=>wholeCeil(p/g)});
-patrol.commands.push({signature:"watch-share <period> <duration> <patrollers>",types:["p", "q", "s"],description:"Ideal covered time fraction under evenly staggered identical watch intervals.",run:(p,d,n)=>Math.min(1,d*n/p)});
-patrol.commands.push({signature:"checkpoint-phase <length> <speed> <distance>",types:["p", "p", "q"],description:"Arrival phase at a loop checkpoint; distance must fit loop.",run:(l,s,d)=>{demand(d<=l);return d/s;}});
-patrol.commands.push({signature:"position <length> <speed> <rest> <time>",types:["p", "p", "q", "q"],description:"Loop distance at a timestamp; rest holds position at loop end.",run:(l,s,r,t)=>{const p=l/s+r,phase=cyclePhase(p,t);return Math.min(l,phase*s);}});
-patrol.commands.push({signature:"state <length> <speed> <rest> <time>",types:["p", "p", "q", "q"],description:"Classify movement or end-of-loop rest at timestamp.",run:(l,s,r,t)=>!budgetFits(l/s,cyclePhase(l/s+r,t))?"moving":"resting"});
+patrol.commands.push({
+  signature: 'moving-period <length> <speed> <rest>',
+  types: ['q', 'p', 'q'],
+  description: 'Duration moving once around a loop.',
+  run: (l, s, r) => l / s,
+});
+patrol.commands.push({
+  signature: 'cycle-period <length> <speed> <rest>',
+  types: ['q', 'p', 'q'],
+  description: 'Duration of one loop plus end-of-loop rest.',
+  run: (l, s, r) => l / s + r,
+});
+patrol.commands.push({
+  signature: 'frequency <length> <speed> <rest>',
+  types: ['q', 'p', 'q'],
+  description: 'Cycles per time unit.',
+  run: (l, s, r) => {
+    demand(l / s + r > 0);
+    return 1 / (l / s + r);
+  },
+});
+patrol.commands.push({
+  signature: 'moving-share <length> <speed> <rest>',
+  types: ['q', 'p', 'q'],
+  description: 'Fraction of each cycle spent moving.',
+  run: (l, s, r) => {
+    demand(l / s + r > 0);
+    return l / s / (l / s + r);
+  },
+});
+patrol.commands.push({
+  signature: 'rest-share <length> <speed> <rest>',
+  types: ['q', 'p', 'q'],
+  description: 'Fraction of each cycle spent resting.',
+  run: (l, s, r) => {
+    demand(l / s + r > 0);
+    return r / (l / s + r);
+  },
+});
+patrol.commands.push({
+  signature: 'effective-speed <length> <speed> <rest>',
+  types: ['q', 'p', 'q'],
+  description: 'Long-run distance per time including rest.',
+  run: (l, s, r) => {
+    demand(l / s + r > 0);
+    return l / (l / s + r);
+  },
+});
+patrol.commands.push({
+  signature: 'absence-gap <length> <speed> <rest> <watch-duration>',
+  types: ['q', 'p', 'q', 'q'],
+  description: 'Time between departure from and next arrival at a watched point.',
+  run: (l, s, r, w) => Math.max(0, l / s + r - w),
+});
+patrol.commands.push({
+  signature: 'total-time <length> <speed> <rest> <laps>',
+  types: ['q', 'p', 'q', 'c'],
+  description: 'Budget laps with rest after every lap including the last.',
+  run: (l, s, r, n) => patrolTime(l, s, r, n),
+});
+patrol.commands.push({
+  signature: 'moving-time <length> <speed> <laps>',
+  types: ['q', 'p', 'c'],
+  description: 'Sum movement time over whole laps.',
+  run: (l, s, n) => (l / s) * n,
+});
+patrol.commands.push({
+  signature: 'distance <length> <laps>',
+  types: ['q', 'c'],
+  description: 'Total distance over whole laps.',
+  run: (l, n) => l * n,
+});
+patrol.commands.push({
+  signature: 'fit-laps <length> <speed> <rest> <budget>',
+  types: ['q', 'p', 'q', 'q'],
+  description: 'Count complete movement-plus-rest cycles fitting a time budget.',
+  run: (l, s, r, b) => {
+    demand(l / s + r > 0);
+    return wholeFloor(b / (l / s + r));
+  },
+});
+patrol.commands.push({
+  signature: 'last-rest-free <length> <speed> <rest> <laps>',
+  types: ['q', 'p', 'q', 'c'],
+  description: 'Budget laps with no rest after the final lap.',
+  run: (l, s, r, n) => (n ? patrolTime(l, s, r, n) - r : 0),
+});
+patrol.commands.push({
+  signature: 'phase <period> <time>',
+  types: ['p', 'n'],
+  description: 'Normalize a timestamp to a cycle phase in time units.',
+  run: (p, t) => cyclePhase(p, t),
+});
+patrol.commands.push({
+  signature: 'cycle-index <period> <time>',
+  types: ['p', 'q'],
+  description: 'Zero-based cycle index at a nonnegative timestamp.',
+  run: (p, t) => wholeFloor(t / p),
+});
+patrol.commands.push({
+  signature: 'next-pass <period> <phase> <time>',
+  types: ['p', 'q', 'q'],
+  description: 'First pass at supplied phase at or after time; phase must be below period.',
+  run: (p, f, t) => {
+    demand(f < p);
+    return f + Math.max(0, wholeCeil((t - f) / p)) * p;
+  },
+});
+patrol.commands.push({
+  signature: 'wait-pass <period> <phase> <time>',
+  types: ['p', 'q', 'q'],
+  description: 'Delay until the next pass at a supplied valid phase.',
+  run: (p, f, t) => {
+    demand(f < p);
+    return f + Math.max(0, wholeCeil((t - f) / p)) * p - t;
+  },
+});
+patrol.commands.push({
+  signature: 'pass-times <period> <phase> <count>',
+  types: ['p', 'q', 'c'],
+  description: 'List bounded pass times from cycle zero.',
+  run: (p, f, n) => {
+    demand(f < p);
+    return sequence(n, (i) => f + i * p);
+  },
+});
+patrol.commands.push({
+  signature: 'pass-count <period> <phase> <end>',
+  types: ['p', 'q', 'q'],
+  description: 'Count passes from time zero through an inclusive endpoint.',
+  run: (p, f, t) => {
+    demand(f < p);
+    return t < f ? 0 : wholeFloor((t - f) / p) + 1;
+  },
+});
+patrol.commands.push({
+  signature: 'stagger <period> <patrollers>',
+  types: ['p', 's'],
+  description: 'Evenly spaced patrol start phases.',
+  run: (p, n) => sequence(n, (i) => (i * p) / n),
+});
+patrol.commands.push({
+  signature: 'stagger-gap <period> <patrollers>',
+  types: ['p', 's'],
+  description: 'Ideal time gap between evenly staggered passes.',
+  run: (p, n) => p / n,
+});
+patrol.commands.push({
+  signature: 'required-patrollers <period> <max-gap>',
+  types: ['p', 'p'],
+  description: 'Minimum ideal equally spaced patrollers for a pass-gap target.',
+  run: (p, g) => wholeCeil(p / g),
+});
+patrol.commands.push({
+  signature: 'watch-share <period> <duration> <patrollers>',
+  types: ['p', 'q', 's'],
+  description: 'Ideal covered time fraction under evenly staggered identical watch intervals.',
+  run: (p, d, n) => Math.min(1, (d * n) / p),
+});
+patrol.commands.push({
+  signature: 'checkpoint-phase <length> <speed> <distance>',
+  types: ['p', 'p', 'q'],
+  description: 'Arrival phase at a loop checkpoint; distance must fit loop.',
+  run: (l, s, d) => {
+    demand(d <= l);
+    return d / s;
+  },
+});
+patrol.commands.push({
+  signature: 'position <length> <speed> <rest> <time>',
+  types: ['p', 'p', 'q', 'q'],
+  description: 'Loop distance at a timestamp; rest holds position at loop end.',
+  run: (l, s, r, t) => {
+    const p = l / s + r,
+      phase = cyclePhase(p, t);
+    return Math.min(l, phase * s);
+  },
+});
+patrol.commands.push({
+  signature: 'state <length> <speed> <rest> <time>',
+  types: ['p', 'p', 'q', 'q'],
+  description: 'Classify movement or end-of-loop rest at timestamp.',
+  run: (l, s, r, t) => (!budgetFits(l / s, cyclePhase(l / s + r, t)) ? 'moving' : 'resting'),
+});

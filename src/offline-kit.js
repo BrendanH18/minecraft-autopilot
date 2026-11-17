@@ -5,20 +5,24 @@ import { checked, sequence } from './spatial-inputs.js';
 export function demand(condition, message = 'Inputs do not describe a valid plan.') {
   if (!condition) throw new Error(message);
 }
-export const sum = values => values.reduce((a, b) => a + b, 0);
+export const sum = (values) => values.reduce((a, b) => a + b, 0);
 // Preserve low-order terms across long sequences of receipts or durations.
 export function compensatedAdder(initial = 0) {
-  let total = initial, correction = 0;
-  return value => {
+  let total = initial,
+    correction = 0;
+  return (value) => {
     const adjusted = value - correction;
     const next = total + adjusted;
-    correction = (next - total) - adjusted;
+    correction = next - total - adjusted;
     total = next;
     return total;
   };
 }
 export function same(...lists) {
-  demand(lists.every(list => list.length === lists[0].length), 'Lists must have equal lengths.');
+  demand(
+    lists.every((list) => list.length === lists[0].length),
+    'Lists must have equal lengths.',
+  );
 }
 export { sequence };
 
@@ -43,16 +47,19 @@ export function readInput(value, type) {
     demand(typeof value === 'string', 'Supply a comma-separated numeric list.');
     const parts = value.split(',');
     demand(parts.length <= 1000, 'Lists are limited to 1000 entries.');
-    return parts.map(part => scalar(part, { l: 'n', L: 'q', P: 'p', C: 'c', S: 's' }[type]));
+    return parts.map((part) => scalar(part, { l: 'n', L: 'q', P: 'p', C: 'c', S: 's' }[type]));
   }
   if (['points2', 'points3', 'intervals', 'edges'].includes(type)) {
     demand(typeof value === 'string' && value.length <= 100000, 'Supply a bounded JSON array.');
     const rows = JSON.parse(value);
-    demand(Array.isArray(rows) && (type === 'edges' || rows.length > 0) && rows.length <= 1000, type === 'edges' ? 'Supply 0–1000 edge rows.' : 'Supply 1–1000 coordinate rows.');
+    demand(
+      Array.isArray(rows) && (type === 'edges' || rows.length > 0) && rows.length <= 1000,
+      type === 'edges' ? 'Supply 0–1000 edge rows.' : 'Supply 1–1000 coordinate rows.',
+    );
     const width = type === 'points3' ? 3 : 2;
-    return rows.map(row => {
+    return rows.map((row) => {
       demand(Array.isArray(row) && row.length === width, `Rows need ${width} numbers.`);
-      const values = row.map(v => scalar(v, type === 'edges' ? 'c' : 'n'));
+      const values = row.map((v) => scalar(v, type === 'edges' ? 'c' : 'n'));
       if (type === 'intervals') demand(values[0] <= values[1], 'Interval starts must not exceed ends.');
       return values;
     });
@@ -61,7 +68,7 @@ export function readInput(value, type) {
 }
 
 export function calculateOffline(group, command, args = []) {
-  const spec = group.commands.find(spec => spec.signature.split(' ')[0] === command);
+  const spec = group.commands.find((spec) => spec.signature.split(' ')[0] === command);
   demand(spec, `Unknown ${group.name} command: ${command}.`);
   demand(Array.isArray(args) && args.length === spec.types.length, 'Supply exactly the documented arguments.');
   const result = spec.run(...spec.types.map((type, i) => readInput(args[i], type)));
@@ -80,7 +87,9 @@ export function registerOfflineGroups(program, groups, { print }) {
     const parent = program.command(group.name).description(group.note);
     for (const spec of group.commands) {
       demand(spec.signature.split(' ').length - 1 === spec.types.length, `Invalid signature: ${spec.signature}.`);
-      parent.command(spec.signature).description(spec.description)
+      parent
+        .command(spec.signature)
+        .description(spec.description)
         .action((...values) => print(calculateOffline(group, spec.signature.split(' ')[0], values.slice(0, -2))));
     }
   }

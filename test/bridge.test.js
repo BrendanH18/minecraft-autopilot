@@ -15,22 +15,29 @@ async function fixture(t) {
   const harness = new Harness(driver);
   const bridge = await startBridge(harness, { discoveryPath });
   const adapter = await FabricAdapter.connect(discoveryPath);
-  t.after(async () => { await adapter.close(); await bridge.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => {
+    await adapter.close();
+    await bridge.close();
+    await rm(directory, { recursive: true, force: true });
+  });
   return { bridge, adapter, driver, harness, discoveryPath };
 }
 
-test('bridge rejects missing credentials, browser origins, wrong methods, and oversized requests', async t => {
+test('bridge rejects missing credentials, browser origins, wrong methods, and oversized requests', async (t) => {
   const { bridge, discoveryPath } = await fixture(t);
   const url = bridge.config.url;
   assert.equal((await stat(discoveryPath)).mode & 0o777, 0o600);
   assert.equal((await fetch(`${url}/v1/state`)).status, 401);
   const headers = { Authorization: `Bearer ${bridge.config.token}` };
-  assert.equal((await fetch(`${url}/v1/state`, { headers: { ...headers, Origin: 'https://example.com' } })).status, 403);
+  assert.equal(
+    (await fetch(`${url}/v1/state`, { headers: { ...headers, Origin: 'https://example.com' } })).status,
+    403,
+  );
   assert.equal((await fetch(`${url}/v1/actions`, { headers })).status, 405);
   assert.equal((await fetch(`${url}/v1/actions`, { method: 'POST', headers, body: 'x'.repeat(9000) })).status, 413);
 });
 
-test('adapter performs a round trip, additional collection, eating, and manual handoff', async t => {
+test('adapter performs a round trip, additional collection, eating, and manual handoff', async (t) => {
   const { adapter } = await fixture(t);
   await adapter.execute({ type: 'set_home' });
   await adapter.execute({ type: 'goto', x: 5, y: 64, z: 5 });
@@ -43,15 +50,20 @@ test('adapter performs a round trip, additional collection, eating, and manual h
   assert.equal(state.mode, 'manual');
   assert.deepEqual(state.player.position, state.home);
   assert.equal(state.player.hunger, 20);
-  assert.equal(state.inventory.find(item => item.name === 'minecraft:oak_log').count, 10);
+  assert.equal(state.inventory.find((item) => item.name === 'minecraft:oak_log').count, 10);
 });
 
-test('a second process can stop the owner and the owner cannot resume', async t => {
+test('a second process can stop the owner and the owner cannot resume', async (t) => {
   const { adapter, bridge, harness } = await fixture(t);
   const second = new FabricAdapter(bridge.config);
   const executing = adapter.execute({ type: 'wait', seconds: 30 });
-  await new Promise(resolve => {
-    const timer = setInterval(() => { if (harness.job) { clearInterval(timer); resolve(); } }, 10);
+  await new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (harness.job) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 10);
   });
   await second.emergencyStop();
   await assert.rejects(executing, /stop|cancelled|released/i);
@@ -59,16 +71,23 @@ test('a second process can stop the owner and the owner cannot resume', async t 
   assert.equal((await adapter.observe()).mode, 'manual');
 });
 
-test('closing during a slow takeover releases the late lease without starting a heartbeat', async t => {
+test('closing during a slow takeover releases the late lease without starting a heartbeat', async (t) => {
   const { adapter, harness } = await fixture(t);
   const request = adapter.request.bind(adapter);
   let acquired;
-  const ready = new Promise(resolve => { acquired = resolve; });
+  const ready = new Promise((resolve) => {
+    acquired = resolve;
+  });
   let reply;
-  const response = new Promise(resolve => { reply = resolve; });
+  const response = new Promise((resolve) => {
+    reply = resolve;
+  });
   adapter.request = async (path, body, signal) => {
     const result = await request(path, body, signal);
-    if (body?.action === 'acquire') { acquired(); await response; }
+    if (body?.action === 'acquire') {
+      acquired();
+      await response;
+    }
     return result;
   };
   const rejected = assert.rejects(adapter.acquire(), /cancelled/);
@@ -83,13 +102,21 @@ test('closing during a slow takeover releases the late lease without starting a 
   await assert.rejects(adapter.acquire(), /closed/);
 });
 
-test('closing an adapter interrupts its action and rejects overlapping submissions', async t => {
+test('closing an adapter interrupts its action and rejects overlapping submissions', async (t) => {
   const { adapter, harness } = await fixture(t);
   let running;
-  const started = new Promise(resolve => { running = resolve; });
-  const rejected = assert.rejects(adapter.execute({ type: 'wait', seconds: 30 }, {
-    onProgress: () => running(),
-  }), /released/);
+  const started = new Promise((resolve) => {
+    running = resolve;
+  });
+  const rejected = assert.rejects(
+    adapter.execute(
+      { type: 'wait', seconds: 30 },
+      {
+        onProgress: () => running(),
+      },
+    ),
+    /released/,
+  );
   await started;
   await assert.rejects(adapter.execute({ type: 'eat' }), /already running/);
   await adapter.close();
@@ -98,23 +125,25 @@ test('closing an adapter interrupts its action and rejects overlapping submissio
   assert.equal(harness.observe().job.status, 'cancelled');
 });
 
-test('takeover waits for a previous command’s cancelled native work to settle', async t => {
+test('takeover waits for a previous command’s cancelled native work to settle', async (t) => {
   const { adapter, driver } = await fixture(t);
   driver.operations = { busy: true };
   driver.isBusy = () => driver.operations.busy;
-  setTimeout(() => { driver.operations.busy = false; }, 600);
+  setTimeout(() => {
+    driver.operations.busy = false;
+  }, 600);
   await adapter.execute({ type: 'set_home' });
   assert.equal(driver.operations.busy, false);
 });
 
 // The simulated driver proves dispatch and verification integration, not real Fabric gameplay.
-test('Fabric-labelled connections dispatch bounded deposits and storage inspection through the bridge', async t => {
+test('Fabric-labelled connections dispatch bounded deposits and storage inspection through the bridge', async (t) => {
   const { adapter, driver } = await fixture(t);
   adapter.config.backend = 'fabric';
   driver.inventory.push({ slot: 1, name: 'minecraft:oak_log', count: 20 });
   await adapter.execute({ type: 'deposit', item: 'oak_log', count: 8 });
   let state = await adapter.observe();
-  assert.equal(state.inventory.find(item => item.name === 'minecraft:oak_log').count, 12);
+  assert.equal(state.inventory.find((item) => item.name === 'minecraft:oak_log').count, 12);
   assert.deepEqual(state.containers[0].firstSeen, []);
   assert.deepEqual(state.containers[0].items, [{ name: 'minecraft:oak_log', count: 8 }]);
   const lastRead = state.containers[0].observedAt;

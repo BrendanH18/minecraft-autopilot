@@ -23,19 +23,25 @@ export const STUDY_WORKFLOWS = Object.freeze({
   summarize: runSummarize,
   pareto: runPareto,
 });
-const note = 'Offline study of supplied plans only. No world observation, control, or gameplay execution; inherited planner assumptions still apply.';
+const note =
+  'Offline study of supplied plans only. No world observation, control, or gameplay execution; inherited planner assumptions still apply.';
 
 export function studyCatalog(groupName) {
-  const groups = groupName === undefined ? ALL_PLANNING_GROUPS : ALL_PLANNING_GROUPS.filter(g => g.name === groupName);
+  const groups =
+    groupName === undefined ? ALL_PLANNING_GROUPS : ALL_PLANNING_GROUPS.filter((g) => g.name === groupName);
   demand(groups.length > 0, `Unknown planning group: ${groupName}.`);
   const workflows = Object.keys(STUDY_WORKFLOWS);
   const planners = groups.reduce((total, group) => total + group.commands.length, 0);
   return {
-    planners, workflows, combinations: planners * workflows.length,
-    groups: groups.map(group => ({
+    planners,
+    workflows,
+    combinations: planners * workflows.length,
+    groups: groups.map((group) => ({
       name: group.name,
-      commands: group.commands.map(spec => ({
-        command: spec.signature.split(' ')[0], signature: spec.signature, types: [...spec.types],
+      commands: group.commands.map((spec) => ({
+        command: spec.signature.split(' ')[0],
+        signature: spec.signature,
+        types: [...spec.types],
       })),
     })),
     note,
@@ -48,7 +54,10 @@ export function calculateStudy(workflow, groupName, commandName, request) {
   const group = resolvePlanner(groupName, commandName);
   const data = STUDY_WORKFLOWS[workflow](groupName, commandName, request);
   const report = checked({ workflow, group: groupName, command: commandName, ...data, note, plannerNote: group.note });
-  demand(Buffer.byteLength(JSON.stringify(report)) <= STUDY_LIMIT_BYTES, 'Study report exceeds 1,000,000 bytes. Use fewer or smaller cases.');
+  demand(
+    Buffer.byteLength(JSON.stringify(report)) <= STUDY_LIMIT_BYTES,
+    'Study report exceeds 1,000,000 bytes. Use fewer or smaller cases.',
+  );
   return report;
 }
 
@@ -71,21 +80,33 @@ export async function readStudyRequest(source, { stdin = process.stdin } = {}) {
   else if (source.startsWith('@')) {
     demand(source.length > 1, 'Supply a filename after @.');
     const file = await open(source.slice(1), 'r');
-    try { text = await readBounded(file.createReadStream({ autoClose: false })); }
-    finally { await file.close(); }
+    try {
+      text = await readBounded(file.createReadStream({ autoClose: false }));
+    } finally {
+      await file.close();
+    }
   } else text = source;
   demand(Buffer.byteLength(text) <= STUDY_LIMIT_BYTES, 'Study request exceeds 1,000,000 bytes.');
   let request;
-  try { request = JSON.parse(text); }
-  catch { throw new Error('Study request must be valid JSON.'); }
+  try {
+    request = JSON.parse(text);
+  } catch {
+    throw new Error('Study request must be valid JSON.');
+  }
   validateRequest(request);
   return request;
 }
 
 export function registerPlanningStudies(program, { print }) {
-  const study = program.command('study').description('Batch, compare, vary, rank, screen, cross, summarize, and trade off the 1,200 typed offline planners. Requests: inline JSON, @file, or - for stdin.');
-  study.command('catalog [group]').description('List supported planners, argument types, and nine workflows per planner.')
-    .action(group => print(studyCatalog(group)));
+  const study = program
+    .command('study')
+    .description(
+      'Batch, compare, vary, rank, screen, cross, summarize, and trade off the 1,200 typed offline planners. Requests: inline JSON, @file, or - for stdin.',
+    );
+  study
+    .command('catalog [group]')
+    .description('List supported planners, argument types, and nine workflows per planner.')
+    .action((group) => print(studyCatalog(group)));
   const descriptions = {
     batch: 'Evaluate independent argument rows: {cases:[[args],...]}.',
     compare: 'Compare candidates with a baseline: {baseline:[args],candidates:[[args],...]}.',
@@ -93,12 +114,17 @@ export function registerPlanningStudies(program, { print }) {
     sensitivity: 'Vary arguments one at a time: {args:[],changes:[{index:1,values:[]}]}.',
     screen: 'Check candidate constraints: {cases:[[]],criteria:[{path:"",measure:"value",op:"gte",value:10}]}.',
     rank: 'Order candidates by a result pointer: {cases:[[]],path:"",direction:"min",measure:"value",limit:10}.',
-    factorial: 'Evaluate every combination of replaced arguments: {args:[],axes:[{index:1,values:[]},{index:2,values:[]}]}.',
+    factorial:
+      'Evaluate every combination of replaced arguments: {args:[],axes:[{index:1,values:[]},{index:2,values:[]}]}.',
     summarize: 'Summarize one result objective across cases: {cases:[[]],path:"",measure:"value"}.',
     pareto: 'Find non-dominated candidates: {cases:[[]],objectives:[{path:"",direction:"min",measure:"value"}]}.',
   };
   for (const workflow of Object.keys(STUDY_WORKFLOWS)) {
-    study.command(`${workflow} <group> <command> <request>`).description(descriptions[workflow])
-      .action(async (group, command, source) => print(calculateStudy(workflow, group, command, await readStudyRequest(source))));
+    study
+      .command(`${workflow} <group> <command> <request>`)
+      .description(descriptions[workflow])
+      .action(async (group, command, source) =>
+        print(calculateStudy(workflow, group, command, await readStudyRequest(source))),
+      );
   }
 }

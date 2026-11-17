@@ -14,33 +14,52 @@ const cases = [...SPATIAL_CASES, ...RESOURCE_CASES, ...ANALYSIS_CASES, ...COORDI
 
 test('batch 10 has exactly 1,000 documented commands with independent examples', async () => {
   assert.equal(PLANNING_GROUPS.length, 40);
-  assert.equal(new Set(PLANNING_GROUPS.map(g => g.name)).size, 40);
+  assert.equal(new Set(PLANNING_GROUPS.map((g) => g.name)).size, 40);
   assert.equal(cases.length, 1000);
   const caseNames = cases.map(([group, command]) => `${group} ${command}`);
   assert.equal(new Set(caseNames).size, 1000);
   const program = new Command();
   registerPlanningTools(program, { print() {} });
   assert.equal(program.commands.length, 40);
-  const docs = (await Promise.all(['SPATIAL', 'RESOURCES', 'ANALYSIS', 'COORDINATION']
-    .map(name => readFile(new URL(`../docs/PLANNING-${name}.md`, import.meta.url), 'utf8')))).join('\n');
+  const docs = (
+    await Promise.all(
+      ['SPATIAL', 'RESOURCES', 'ANALYSIS', 'COORDINATION'].map((name) =>
+        readFile(new URL(`../docs/PLANNING-${name}.md`, import.meta.url), 'utf8'),
+      ),
+    )
+  ).join('\n');
   for (const group of PLANNING_GROUPS) {
     assert.equal(group.commands.length, 25, group.name);
-    const names = group.commands.map(c => c.signature.split(' ')[0]);
+    const names = group.commands.map((c) => c.signature.split(' ')[0]);
     assert.equal(new Set(names).size, 25, group.name);
-    assert.deepEqual(program.commands.find(c => c.name() === group.name).commands.map(c => c.name()), names);
+    assert.deepEqual(
+      program.commands.find((c) => c.name() === group.name).commands.map((c) => c.name()),
+      names,
+    );
     for (const command of group.commands) {
       assert.ok(caseNames.includes(`${group.name} ${command.signature.split(' ')[0]}`), command.signature);
       assert.ok(docs.includes(command.signature), `${group.name}: guide missing ${command.signature}`);
     }
     // Help and one result per group go through the actual shipped entrypoint.
     // A missing bridge proves these tools need no Minecraft connection.
-    const help = execFileSync(process.execPath, ['src/cli.js', '--bridge', '.runtime/nonexistent-batch10.json', group.name, '--help'], { encoding: 'utf8' });
+    const help = execFileSync(
+      process.execPath,
+      ['src/cli.js', '--bridge', '.runtime/nonexistent-batch10.json', group.name, '--help'],
+      { encoding: 'utf8' },
+    );
     for (const name of names) assert.ok(help.includes(name), `${group.name} help: ${name}`);
     const [, command, args] = cases.find(([name]) => name === group.name);
-    const output = execFileSync(process.execPath, ['src/cli.js', '--bridge', '.runtime/nonexistent-batch10.json', group.name, command, '--', ...args], { encoding: 'utf8' });
+    const output = execFileSync(
+      process.execPath,
+      ['src/cli.js', '--bridge', '.runtime/nonexistent-batch10.json', group.name, command, '--', ...args],
+      { encoding: 'utf8' },
+    );
     assert.deepEqual(JSON.parse(output), JSON.parse(JSON.stringify(calculateOffline(group, command, args))));
   }
-  assert.equal(PLANNING_GROUPS.reduce((n, g) => n + g.commands.length, 0), 1000);
+  assert.equal(
+    PLANNING_GROUPS.reduce((n, g) => n + g.commands.length, 0),
+    1000,
+  );
 });
 
 test('offline inputs reject malformed, oversized, and nonfinite values', () => {
@@ -57,13 +76,19 @@ test('offline inputs reject malformed, oversized, and nonfinite values', () => {
   assert.throws(() => readInput('[[null,1]]', 'points2'));
   assert.throws(() => readInput('[[1,2,3]]', 'points2'));
   assert.throws(() => readInput('[]', 'points3'));
-  const group = { name: 'test', note: 'Offline', commands: [{ signature: 'large <n>', types: ['c'], run: () => Array(1001).fill(0) }] };
+  const group = {
+    name: 'test',
+    note: 'Offline',
+    commands: [{ signature: 'large <n>', types: ['c'], run: () => Array(1001).fill(0) }],
+  };
   assert.throws(() => calculateOffline(group, 'large', ['1']));
   assert.throws(() => calculateOffline(group, 'missing', ['1']));
 });
 
 test('invalid batch 10 CLI input fails without emitting a successful report', () => {
-  const result = spawnSync(process.execPath, ['src/cli.js', 'interval-set', 'covered', '[[2,1]]'], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['src/cli.js', 'interval-set', 'covered', '[[2,1]]'], {
+    encoding: 'utf8',
+  });
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /Interval starts/);

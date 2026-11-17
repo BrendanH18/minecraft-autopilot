@@ -16,10 +16,16 @@ export function runRank(group, command, request) {
     const result = evaluate(group, command, args);
     return { case: index + 1, args: [...args], result, score: score(select(result, tokens), measure) };
   });
-  demand(candidates.every(candidate => scalarType(candidate.score) === scalarType(candidates[0].score)), 'Ranking scores must all have the same scalar type; null only ties null.');
+  demand(
+    candidates.every((candidate) => scalarType(candidate.score) === scalarType(candidates[0].score)),
+    'Ranking scores must all have the same scalar type; null only ties null.',
+  );
   candidates.sort((a, b) => ascending(a.score, b.score) * (direction === 'min' ? 1 : -1) || a.case - b.case);
   return {
-    direction, path, measure, total: candidates.length,
+    direction,
+    path,
+    measure,
+    total: candidates.length,
     ranked: candidates.slice(0, limit).map((candidate, index) => ({ rank: index + 1, ...candidate })),
   };
 }

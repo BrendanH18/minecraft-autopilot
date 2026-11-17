@@ -11,7 +11,9 @@ export const profileFile = join(dataDirectory, 'profile.json');
 export async function resolveBridgePath(path = bridgeFile) {
   if (path === bridgeFile) {
     let profile;
-    try { profile = JSON.parse(await readFile(profileFile, 'utf8')); } catch {}
+    try {
+      profile = JSON.parse(await readFile(profileFile, 'utf8'));
+    } catch {}
     if (profile?.discoveryPath) path = resolve(profile.discoveryPath);
   }
   return path;
@@ -20,13 +22,27 @@ export async function resolveBridgePath(path = bridgeFile) {
 export async function readBridge(path = bridgeFile) {
   path = await resolveBridgePath(path);
   let config;
-  try { config = JSON.parse(await readFile(path, 'utf8')); }
-  catch { throw new Error(`No readable bridge at ${path}. Start Minecraft with the agent mod, or use "mc-agent demo" / "mc-agent server".`); }
+  try {
+    config = JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    throw new Error(
+      `No readable bridge at ${path}. Start Minecraft with the agent mod, or use "mc-agent demo" / "mc-agent server".`,
+    );
+  }
   const url = new URL(config.url);
-  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+  if (
+    url.protocol !== 'http:' ||
+    url.hostname !== '127.0.0.1' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
     throw new Error('The bridge must use an HTTP URL on 127.0.0.1.');
   }
-  if (typeof config.token !== 'string' || config.token.length < 32 || config.protocol !== 1) throw new Error('Invalid bridge credentials or protocol version.');
+  if (typeof config.token !== 'string' || config.token.length < 32 || config.protocol !== 1)
+    throw new Error('Invalid bridge credentials or protocol version.');
   return config;
 }
 
@@ -37,5 +53,7 @@ export async function writePrivateJson(path, value) {
   try {
     await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     await rename(temporary, path);
-  } finally { await rm(temporary, { force: true }); }
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }

@@ -6,7 +6,12 @@ import { join } from 'node:path';
 import { testDirectory } from './helpers.js';
 import { routineReport, editRoutine, generateRoutine, registerRoutineTools } from '../src/routine-tools.js';
 
-const actions = [{ type: 'collect', block: 'minecraft:oak_log', count: 8 }, { type: 'wait', seconds: 10 }, { type: 'deposit', item: 'minecraft:oak_log' }, { type: 'home' }];
+const actions = [
+  { type: 'collect', block: 'minecraft:oak_log', count: 8 },
+  { type: 'wait', seconds: 10 },
+  { type: 'deposit', item: 'minecraft:oak_log' },
+  { type: 'home' },
+];
 test('routine reports preserve counts, wait timings, destinations and static warnings', () => {
   assert.deepEqual(routineReport(actions, 'validate'), { valid: true, steps: 4 });
   assert.equal(routineReport(actions, 'summary').waitSeconds, 10);
@@ -14,7 +19,9 @@ test('routine reports preserve counts, wait timings, destinations and static war
   assert.deepEqual(routineReport(actions, 'collection').items, [{ name: 'minecraft:oak_log', count: 8, all: false }]);
   assert.equal(routineReport(actions, 'deposits').items[0].all, true);
   assert.deepEqual(routineReport(actions, 'waits').steps, [{ step: 2, seconds: 10 }]);
-  assert.deepEqual(routineReport([{ type: 'goto', x: 1, y: 64, z: 2 }], 'destinations').destinations, [{ step: 1, x: 1, y: 64, z: 2 }]);
+  assert.deepEqual(routineReport([{ type: 'goto', x: 1, y: 64, z: 2 }], 'destinations').destinations, [
+    { step: 1, x: 1, y: 64, z: 2 },
+  ]);
   assert.equal(routineReport(actions, 'first').action.type, 'collect');
   assert.equal(routineReport(actions, 'last').step, 4);
   assert.equal(routineReport(actions, 'numbered').steps[1].step, 2);
@@ -38,32 +45,67 @@ test('routine editing uses inclusive one-based ranges and validates resulting ro
   assert.throws(() => editRoutine(actions, 'take', 1.5));
 });
 test('routine generators split quotas and waits at protocol limits', () => {
-  assert.deepEqual(generateRoutine('collect', 'oak_log', 130).actions.map(a => a.count), [64, 64, 2]);
-  assert.deepEqual(generateRoutine('deposit', 'dirt', 100).actions, [{ type: 'deposit', item: 'minecraft:dirt', count: 100 }]);
+  assert.deepEqual(
+    generateRoutine('collect', 'oak_log', 130).actions.map((a) => a.count),
+    [64, 64, 2],
+  );
+  assert.deepEqual(generateRoutine('deposit', 'dirt', 100).actions, [
+    { type: 'deposit', item: 'minecraft:dirt', count: 100 },
+  ]);
   assert.equal(generateRoutine('trip', 'dirt', 65).actions.at(-1).type, 'home');
-  assert.deepEqual(generateRoutine('wait', 3601).actions.map(a => a.seconds), [3600, 1]);
+  assert.deepEqual(
+    generateRoutine('wait', 3601).actions.map((a) => a.seconds),
+    [3600, 1],
+  );
   assert.deepEqual(generateRoutine('route', ['-1,64,2']).actions, [{ type: 'goto', x: -1, y: 64, z: 2 }]);
   assert.throws(() => generateRoutine('wait', 360001));
   assert.throws(() => generateRoutine('collect', 'dirt', 0));
   assert.throws(() => generateRoutine('route', ['1,500,2']));
 });
-test('all 25 routine commands execute offline and output valid reports or routines', async t => {
+test('all 25 routine commands execute offline and output valid reports or routines', async (t) => {
   const dir = await testDirectory(t);
   const file = join(dir, 'input.json');
   const other = join(dir, 'other.json');
   await writeFile(file, JSON.stringify(actions));
   await writeFile(other, JSON.stringify([{ type: 'eat' }]));
   const cases = [
-    ...['validate', 'summary', 'types', 'collection', 'deposits', 'waits', 'destinations', 'first', 'last', 'numbered', 'warnings', 'reverse'].map(name => [name, file]),
-    ['slice', file, '2', '3'], ['take', file, '2'], ['drop', file, '1'], ['repeat', file, '2'], ['remove', file, '2'],
-    ['concat', file, other], ['insert', file, '2', other], ['replace', file, '2', other],
-    ['make-collect', 'dirt', '65'], ['make-deposit', 'dirt', '64'], ['make-trip', 'dirt', '3'], ['make-wait', '3601'], ['make-route', '1,64,1'],
+    ...[
+      'validate',
+      'summary',
+      'types',
+      'collection',
+      'deposits',
+      'waits',
+      'destinations',
+      'first',
+      'last',
+      'numbered',
+      'warnings',
+      'reverse',
+    ].map((name) => [name, file]),
+    ['slice', file, '2', '3'],
+    ['take', file, '2'],
+    ['drop', file, '1'],
+    ['repeat', file, '2'],
+    ['remove', file, '2'],
+    ['concat', file, other],
+    ['insert', file, '2', other],
+    ['replace', file, '2', other],
+    ['make-collect', 'dirt', '65'],
+    ['make-deposit', 'dirt', '64'],
+    ['make-trip', 'dirt', '3'],
+    ['make-wait', '3601'],
+    ['make-route', '1,64,1'],
   ];
   assert.equal(cases.length, 25);
   for (const args of cases) {
     let result;
     const program = new Command();
-    registerRoutineTools(program, { print: value => { result = value; } });
+    registerRoutineTools(program, {
+      print: (value) => {
+        result = value;
+      },
+    });
     assert.equal(program.commands[0].commands.length, 25);
     await program.parseAsync(['routine', ...args], { from: 'user' });
     assert.ok(result, args[0]);
@@ -81,5 +123,6 @@ test('collection generators reject targets unavailable in both gameplay backends
 });
 
 test('single-step edits explain why empty output is refused', () => {
-  for (const kind of ['drop', 'remove']) assert.throws(() => editRoutine([{ type: 'eat' }], kind, 1), /at least one step/);
+  for (const kind of ['drop', 'remove'])
+    assert.throws(() => editRoutine([{ type: 'eat' }], kind, 1), /at least one step/);
 });

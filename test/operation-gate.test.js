@@ -4,7 +4,9 @@ import { OperationGate } from '../src/operation-gate.js';
 
 function deferred() {
   let resolve;
-  const promise = new Promise(done => { resolve = done; });
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -12,7 +14,9 @@ test('a queued operation never dispatches after cancellation', async () => {
   const gate = new OperationGate();
   const controller = new AbortController();
   let dispatched = false;
-  const result = gate.run(() => { dispatched = true; }, controller.signal);
+  const result = gate.run(() => {
+    dispatched = true;
+  }, controller.signal);
   controller.abort(new Error('Player took control.'));
   await assert.rejects(result, /Player took control/);
   assert.equal(dispatched, false);
@@ -25,13 +29,24 @@ test('cancelled native work blocks follow-on operations until it settles', async
   const started = deferred();
   const native = deferred();
   let stops = 0;
-  const result = gate.run(() => { started.resolve(); return native.promise; }, controller.signal, () => { stops++; });
+  const result = gate.run(
+    () => {
+      started.resolve();
+      return native.promise;
+    },
+    controller.signal,
+    () => {
+      stops++;
+    },
+  );
   await started.promise;
   controller.abort(new Error('Stop.'));
   await assert.rejects(result, /Stop/);
   assert.equal(gate.busy, true);
   let nextStarted = false;
-  const next = gate.run(() => { nextStarted = true; }, new AbortController().signal);
+  const next = gate.run(() => {
+    nextStarted = true;
+  }, new AbortController().signal);
   await Promise.resolve();
   assert.equal(nextStarted, false);
   native.resolve();
@@ -47,8 +62,14 @@ test('simultaneous callers cannot start overlapping native operations', async ()
   const native = deferred();
   const started = deferred();
   const order = [];
-  const first = gate.run(() => { order.push('first'); started.resolve(); return native.promise; }, signal);
-  const second = gate.run(() => { order.push('second'); }, signal);
+  const first = gate.run(() => {
+    order.push('first');
+    started.resolve();
+    return native.promise;
+  }, signal);
+  const second = gate.run(() => {
+    order.push('second');
+  }, signal);
   await started.promise;
   assert.deepEqual(order, ['first']);
   native.resolve();

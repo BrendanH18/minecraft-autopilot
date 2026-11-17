@@ -1,301 +1,1745 @@
 import { demand, sum, same, sequence } from './offline-kit.js';
 import { wholeCeil, wholeFloor } from './resource-rounding.js';
 
-const addV=(a,b)=>a.map((v,i)=>v+b[i]);
-const subV=(a,b)=>a.map((v,i)=>v-b[i]);
-const mulV=(a,s)=>a.map(v=>v*s);
-const dot=(a,b)=>sum(a.map((v,i)=>v*b[i]));
-const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-const norm=a=>Math.hypot(...a);
-function unit(a){const n=norm(a);demand(n>0,'A direction must be nonzero.');return a.map(v=>v/n);}
-function one(a){demand(a.length===1,'Supply exactly one point.');return a[0];}
-function pair(a,b,fn){same(a,b);return a.map((v,i)=>fn(v,b[i]));}
-const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
-const key=v=>JSON.stringify(v);
-const distinct=a=>[...new Map(a.map(v=>[key(v),v])).values()];
-function cells(a){demand(a.every(v=>v.every(Number.isSafeInteger)),'Voxel coordinates must be integers.');return distinct(a);}
-function boundedCells(a){const c=cells(a);demand(c.length<=1000,'Cell sets are limited to 1000 entries.');return c;}
-function filterCells(a,b,keep){const c=cells(a),s=new Set(cells(b).map(key));return c.filter(v=>s.has(key(v))===keep);}
-const neighbors=([x,y,z])=>[[x+1,y,z],[x-1,y,z],[x,y+1,z],[x,y-1,z],[x,y,z+1],[x,y,z-1]];
-function surface(a){const s=new Set(a.map(key));return sum(a.map(v=>neighbors(v).filter(w=>!s.has(key(w))).length));}
-function bounds(a){return {min:[0,1,2].map(i=>Math.min(...a.map(v=>v[i]))),max:[0,1,2].map(i=>Math.max(...a.map(v=>v[i])))};}
-function meanV(a){return [0,1,2].map(i=>sum(a.map(v=>v[i]))/a.length);}
-function components(a){const unseen=new Map(a.map(v=>[key(v),v])),out=[];while(unseen.size){const seed=unseen.values().next().value,q=[seed];unseen.delete(key(seed));for(let i=0;i<q.length;i++)for(const p of neighbors(q[i]))if(unseen.has(key(p))){q.push(unseen.get(key(p)));unseen.delete(key(p));}out.push(q);}return out;}
-function hist(a){const m=new Map();for(const v of a)m.set(v,(m.get(v)||0)+1);return [...m].sort((a,b)=>a[0]-b[0]);}
-function box(a){demand(a.length===2&&a.every(v=>v.every(Number.isSafeInteger))&&a[0].every((v,i)=>v<=a[1][i]),'Supply two ordered integer box corners.');return a;}
-function rotateY([x,y,z],d){const a=d*Math.PI/180,c=Math.cos(a),s=Math.sin(a);return [x*c+z*s,y,-x*s+z*c];}
-function matches(a,b,t){return a.every(v=>b.some(w=>norm(subV(v,w))<=t))&&b.every(v=>a.some(w=>norm(subV(v,w))<=t));}
-const command=(signature,types,description,run)=>({signature,types,description,run});
+const addV = (a, b) => a.map((v, i) => v + b[i]);
+const subV = (a, b) => a.map((v, i) => v - b[i]);
+const mulV = (a, s) => a.map((v) => v * s);
+const dot = (a, b) => sum(a.map((v, i) => v * b[i]));
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => Math.hypot(...a);
+function unit(a) {
+  const n = norm(a);
+  demand(n > 0, 'A direction must be nonzero.');
+  return a.map((v) => v / n);
+}
+function one(a) {
+  demand(a.length === 1, 'Supply exactly one point.');
+  return a[0];
+}
+function pair(a, b, fn) {
+  same(a, b);
+  return a.map((v, i) => fn(v, b[i]));
+}
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const key = (v) => JSON.stringify(v);
+const distinct = (a) => [...new Map(a.map((v) => [key(v), v])).values()];
+function cells(a) {
+  demand(
+    a.every((v) => v.every(Number.isSafeInteger)),
+    'Voxel coordinates must be integers.',
+  );
+  return distinct(a);
+}
+function boundedCells(a) {
+  const c = cells(a);
+  demand(c.length <= 1000, 'Cell sets are limited to 1000 entries.');
+  return c;
+}
+function filterCells(a, b, keep) {
+  const c = cells(a),
+    s = new Set(cells(b).map(key));
+  return c.filter((v) => s.has(key(v)) === keep);
+}
+const neighbors = ([x, y, z]) => [
+  [x + 1, y, z],
+  [x - 1, y, z],
+  [x, y + 1, z],
+  [x, y - 1, z],
+  [x, y, z + 1],
+  [x, y, z - 1],
+];
+function surface(a) {
+  const s = new Set(a.map(key));
+  return sum(a.map((v) => neighbors(v).filter((w) => !s.has(key(w))).length));
+}
+function bounds(a) {
+  return {
+    min: [0, 1, 2].map((i) => Math.min(...a.map((v) => v[i]))),
+    max: [0, 1, 2].map((i) => Math.max(...a.map((v) => v[i]))),
+  };
+}
+function meanV(a) {
+  return [0, 1, 2].map((i) => sum(a.map((v) => v[i])) / a.length);
+}
+function components(a) {
+  const unseen = new Map(a.map((v) => [key(v), v])),
+    out = [];
+  while (unseen.size) {
+    const seed = unseen.values().next().value,
+      q = [seed];
+    unseen.delete(key(seed));
+    for (let i = 0; i < q.length; i++)
+      for (const p of neighbors(q[i]))
+        if (unseen.has(key(p))) {
+          q.push(unseen.get(key(p)));
+          unseen.delete(key(p));
+        }
+    out.push(q);
+  }
+  return out;
+}
+function hist(a) {
+  const m = new Map();
+  for (const v of a) m.set(v, (m.get(v) || 0) + 1);
+  return [...m].sort((a, b) => a[0] - b[0]);
+}
+function box(a) {
+  demand(
+    a.length === 2 && a.every((v) => v.every(Number.isSafeInteger)) && a[0].every((v, i) => v <= a[1][i]),
+    'Supply two ordered integer box corners.',
+  );
+  return a;
+}
+function rotateY([x, y, z], d) {
+  const a = (d * Math.PI) / 180,
+    c = Math.cos(a),
+    s = Math.sin(a);
+  return [x * c + z * s, y, -x * s + z * c];
+}
+function matches(a, b, t) {
+  return a.every((v) => b.some((w) => norm(subV(v, w)) <= t)) && b.every((v) => a.some((w) => norm(subV(v, w)) <= t));
+}
+const command = (signature, types, description, run) => ({ signature, types, description, run });
 
 export const SPATIAL_GROUPS = [
-  { name: "vector", note: "Offline continuous 3D vector calculations. Coordinates use [x,y,z]; directions and projections do not establish navigability. Zero directions are rejected where a direction is required.", commands: [
-    command("add <a> <b>", ["points3", "points3"], "Add corresponding vectors.", (a,b)=>pair(a,b,addV)),
-    command("subtract <a> <b>", ["points3", "points3"], "Subtract corresponding vectors.", (a,b)=>pair(a,b,subV)),
-    command("scale <vectors> <factor>", ["points3", "n"], "Scale vectors by a signed factor.", (a,f)=>a.map(v=>mulV(v,f))),
-    command("dot <a> <b>", ["points3", "points3"], "Compute paired scalar products.", (a,b)=>pair(a,b,dot)),
-    command("cross <a> <b>", ["points3", "points3"], "Compute paired right-handed vector products.", (a,b)=>pair(a,b,cross)),
-    command("length <vectors>", ["points3"], "Measure vector magnitudes.", a=>a.map(norm)),
-    command("normalize <vectors>", ["points3"], "Normalize nonzero directions.", a=>a.map(unit)),
-    command("project <vectors> <axis>", ["points3", "points3"], "Project vectors onto one nonzero axis.", (a,b)=>{const u=unit(one(b));return a.map(v=>mulV(u,dot(v,u)));}),
-    command("reject <vectors> <axis>", ["points3", "points3"], "Remove components along one nonzero axis.", (a,b)=>{const u=unit(one(b));return a.map(v=>subV(v,mulV(u,dot(v,u))));}),
-    command("angle <a> <b>", ["points3", "points3"], "Measure paired unsigned angles in degrees.", (a,b)=>pair(a,b,(v,w)=>Math.acos(clamp(dot(unit(v),unit(w)),-1,1))*180/Math.PI)),
-    command("interpolate <a> <b> <fraction>", ["points3", "points3", "r"], "Interpolate paired endpoints.", (a,b,t)=>pair(a,b,(v,w)=>addV(mulV(v,1-t),mulV(w,t)))),
-    command("component-product <a> <b>", ["points3", "points3"], "Multiply paired vector components.", (a,b)=>pair(a,b,(v,w)=>v.map((x,i)=>x*w[i]))),
-    command("component-min <a> <b>", ["points3", "points3"], "Take paired component minima.", (a,b)=>pair(a,b,(v,w)=>v.map((x,i)=>Math.min(x,w[i])))),
-    command("component-max <a> <b>", ["points3", "points3"], "Take paired component maxima.", (a,b)=>pair(a,b,(v,w)=>v.map((x,i)=>Math.max(x,w[i])))),
-    command("cap-length <vectors> <maximum>", ["points3", "q"], "Cap magnitudes without changing directions.", (a,m)=>a.map(v=>norm(v)>m?mulV(v,m/norm(v)):v)),
-    command("reflect <vectors> <normal>", ["points3", "points3"], "Reflect directions across a plane through the origin.", (a,b)=>{const u=unit(one(b));return a.map(v=>subV(v,mulV(u,2*dot(v,u))));}),
-    command("plane-distance <points> <normal> <offset>", ["points3", "points3", "n"], "Signed distance to unit-normal plane n dot p = offset.", (a,b,d)=>{const u=unit(one(b));return a.map(v=>dot(v,u)-d);}),
-    command("plane-project <points> <normal> <offset>", ["points3", "points3", "n"], "Project points to unit-normal plane n dot p = offset.", (a,b,d)=>{const u=unit(one(b));return a.map(v=>subV(v,mulV(u,dot(v,u)-d)));}),
-    command("triangle-normal <vertices>", ["points3"], "Unit normal of exactly three noncollinear vertices.", a=>{demand(a.length===3);return unit(cross(subV(a[1],a[0]),subV(a[2],a[0])));}),
-    command("triangle-area <vertices>", ["points3"], "Continuous area of exactly three vertices.", a=>{demand(a.length===3);return norm(cross(subV(a[1],a[0]),subV(a[2],a[0])))/2;}),
-    command("tetra-volume <vertices>", ["points3"], "Unsigned volume of exactly four vertices.", a=>{demand(a.length===4);return Math.abs(dot(subV(a[1],a[0]),cross(subV(a[2],a[0]),subV(a[3],a[0]))))/6;}),
-    command("triple-product <vectors>", ["points3"], "Signed scalar triple product of exactly three vectors.", a=>{demand(a.length===3);return dot(a[0],cross(a[1],a[2]));}),
-    command("parallel <a> <b> <tolerance>", ["points3", "points3", "r"], "Test paired nonzero directions by sine-angle tolerance.", (a,b,t)=>pair(a,b,(v,w)=>norm(cross(unit(v),unit(w)))<=t)),
-    command("orthogonal <a> <b> <tolerance>", ["points3", "points3", "r"], "Test paired nonzero directions by absolute cosine tolerance.", (a,b,t)=>pair(a,b,(v,w)=>Math.abs(dot(unit(v),unit(w)))<=t)),
-    command("elevation <vectors>", ["points3"], "Compute signed elevation above the X/Z plane in degrees.", a=>a.map(v=>{demand(norm(v)>0);return Math.atan2(v[1],Math.hypot(v[0],v[2]))*180/Math.PI;})),
-  ] },
-  { name: "voxel", note: "Offline sets of integer [x,y,z] cells. Duplicate cells collapse; faces use six orthogonal neighbors. Growth and enumeration are limited to 1000 cells; no world blocks are inspected.", commands: [
-    command("unique <cells>", ["points3"], "Canonicalize duplicate integer cells.", a=>cells(a)),
-    command("union <a> <b>", ["points3", "points3"], "Union two occupied cell sets.", (a,b)=>boundedCells([...cells(a),...cells(b)])),
-    command("intersection <a> <b>", ["points3", "points3"], "Keep cells shared by both sets.", (a,b)=>filterCells(a,b,true)),
-    command("difference <a> <b>", ["points3", "points3"], "Remove cells present in the second set.", (a,b)=>filterCells(a,b,false)),
-    command("exclusive <a> <b>", ["points3", "points3"], "Keep cells present in exactly one set.", (a,b)=>boundedCells([...filterCells(a,b,false),...filterCells(b,a,false)])),
-    command("face-count <cells>", ["points3"], "Count faces adjacent to unoccupied cells.", a=>surface(cells(a))),
-    command("internal-faces <cells>", ["points3"], "Count shared face pairs once.", a=>{const c=cells(a);return (6*c.length-surface(c))/2;}),
-    command("bounds-volume <cells>", ["points3"], "Count cells in the inclusive bounding cuboid.", a=>{const b=bounds(cells(a));return b.max.reduce((v,x,i)=>v*(x-b.min[i]+1),1);}),
-    command("fill-fraction <cells>", ["points3"], "Occupied fraction of inclusive bounding cuboid.", a=>{const c=cells(a),b=bounds(c);return c.length/b.max.reduce((v,x,i)=>v*(x-b.min[i]+1),1);}),
-    command("components <cells>", ["points3"], "Partition cells into six-neighbor connected components.", a=>components(cells(a))),
-    command("neighbor-counts <cells>", ["points3"], "Count occupied orthogonal neighbors for each canonical cell.", a=>{const c=cells(a),s=new Set(c.map(key));return c.map(v=>neighbors(v).filter(w=>s.has(key(w))).length);}),
-    command("boundary-cells <cells>", ["points3"], "Select occupied cells with any exposed face.", a=>{const c=cells(a),s=new Set(c.map(key));return c.filter(v=>neighbors(v).some(w=>!s.has(key(w))));}),
-    command("layer-counts <cells>", ["points3"], "Count occupied cells by ascending Y layer.", a=>hist(cells(a).map(v=>v[1]))),
-    command("column-counts <cells>", ["points3"], "Count occupied cells by X/Z column.", a=>{const m=new Map();for(const v of cells(a)){const k=JSON.stringify([v[0],v[2]]);m.set(k,(m.get(k)||0)+1);}return [...m].map(([k,n])=>[...JSON.parse(k),n]);}),
-    command("bottom-cells <cells>", ["points3"], "Select cells with no occupied neighbor immediately below.", a=>{const c=cells(a),s=new Set(c.map(key));return c.filter(([x,y,z])=>!s.has(key([x,y-1,z])));}),
-    command("centroid <cells>", ["points3"], "Mean center of unique occupied cells.", a=>meanV(cells(a))),
-    command("dilate <cells>", ["points3"], "Add all six-neighbor cells by one Manhattan step.", a=>boundedCells(cells(a).flatMap(v=>[v,...neighbors(v)]))),
-    command("erode <cells>", ["points3"], "Keep cells surrounded on all six faces.", a=>{const c=cells(a),s=new Set(c.map(key));return c.filter(v=>neighbors(v).every(w=>s.has(key(w))));}),
-    command("translate <cells> <dx> <dy> <dz>", ["points3", "i", "i", "i"], "Translate integer occupied cells.", (a,x,y,z)=>cells(a).map(v=>addV(v,[x,y,z]))),
-    command("top-cells <cells>", ["points3"], "Select cells with no occupied neighbor immediately above.", a=>{const c=cells(a),s=new Set(c.map(key));return c.filter(([x,y,z])=>!s.has(key([x,y+1,z])));}),
-    command("slice-y <cells> <y>", ["points3", "i"], "Extract one horizontal integer layer.", (a,y)=>cells(a).filter(v=>v[1]===y)),
-    command("clip-box <cells> <corners>", ["points3", "points3"], "Clip cells to two ordered inclusive cuboid corners.", (a,b)=>{const [lo,hi]=box(b);return cells(a).filter(v=>v.every((n,i)=>n>=lo[i]&&n<=hi[i]));}),
-    command("fill-box <corners>", ["points3"], "Enumerate all integer cells between two ordered corners.", a=>{const [lo,hi]=box(a),d=hi.map((v,i)=>v-lo[i]+1);return sequence(d[0]*d[1]*d[2],i=>[lo[0]+i%d[0],lo[1]+wholeFloor(i/d[0])%d[1],lo[2]+wholeFloor(i/(d[0]*d[1]))]);}),
-    command("overlap-fraction <a> <b>", ["points3", "points3"], "Compute intersection over union for occupied sets.", (a,b)=>{const common=filterCells(a,b,true).length;return common/(cells(a).length+cells(b).length-common);}),
-    command("disconnected-count <cells>", ["points3"], "Count cells outside the largest six-neighbor component.", a=>{const c=cells(a);return c.length-Math.max(...components(c).map(v=>v.length));}),
-  ] },
-  { name: "tunnel", note: "Offline rectangular tunnel takeoffs. Width/height are clear interior cell dimensions, wall thickness is explicit, length counts cross-section slices. Openings and terrain are not observed; these quantities do not execute mining or building.", commands: [
-    command("excavate <width> <height> <length>", ["s", "s", "c"], "Count clear rectangular excavation cells.", (w,h,l)=>w*h*l),
-    command("lining <width> <height> <length> <thickness>", ["s", "s", "c", "s"], "Count complete outer rectangular lining excluding end caps.", (w,h,l,t)=>((w+2*t)*(h+2*t)-w*h)*l),
-    command("floor-strip <width> <length> <thickness>", ["s", "c", "s"], "Count floor material under clear width.", (w,l,t)=>w*l*t),
-    command("ceiling-strip <width> <length> <overhang>", ["s", "c", "c"], "Count one-cell ceiling including side overhang.", (w,l,o)=>(w+2*o)*l),
-    command("sidewalls <height> <length> <thickness>", ["s", "c", "s"], "Count two straight sidewalls excluding floor and ceiling.", (h,l,t)=>2*h*l*t),
-    command("portal-ring <width> <height> <thickness>", ["s", "s", "s"], "Count lining in one portal cross section.", (w,h,t)=>(w+2*t)*(h+2*t)-w*h),
-    command("end-caps <width> <height> <thickness> <caps>", ["s", "s", "s", "c"], "Count solid clear-opening closure cells.", (w,h,t,c)=>w*h*t*c),
-    command("cross-section <width> <height> <thickness>", ["s", "s", "c"], "Report outer cross-section dimensions.", (w,h,t)=>[w+2*t,h+2*t]),
-    command("support-count <length> <spacing>", ["s", "s"], "Count endpoint-inclusive support frames.", (l,s)=>wholeCeil((l-1)/s)+1),
-    command("support-positions <length> <spacing>", ["s", "s"], "List endpoint-inclusive support slice indices.", (l,s)=>sequence(wholeCeil((l-1)/s)+1,i=>Math.min(i*s,l-1))),
-    command("support-material <width> <height> <frames>", ["s", "s", "c"], "Count U-shaped one-cell frames: two posts plus header.", (w,h,f)=>(2*h+w+2)*f),
-    command("clear-width <outer-width> <lining>", ["s", "c"], "Subtract two lining widths and reject blocked interiors.", (w,t)=>{demand(w>2*t);return w-2*t;}),
-    command("clear-height <outer-height> <floor> <ceiling>", ["s", "c", "c"], "Subtract floor and ceiling from outer height.", (h,f,c)=>{demand(h>f+c);return h-f-c;}),
-    command("parallel-bores <bores> <width> <separation>", ["s", "s", "c"], "Compute total clear-bore and separator width.", (n,w,s)=>n*w+(n-1)*s),
-    command("cross-passages <length> <spacing> <bores> <separation> <height>", ["s", "s", "s", "s", "s"], "Count excavation in internal cross passages at regular nonendpoint stations.", (l,s,b,d,h)=>wholeFloor(Math.max(0,l-2)/s)*(b-1)*d*h),
-    command("drain <length> <width> <depth>", ["c", "s", "s"], "Count cells in a rectangular below-floor drain.", (l,w,d)=>l*w*d),
-    command("walkway-share <width> <walkways> <walkway-width>", ["s", "c", "s"], "Compute remaining clear travel width after side walkways.", (w,n,s)=>{demand(n*s<=w);return {remaining:w-n*s,walkwayFraction:n*s/w};}),
-    command("grade-rise <length> <rise-per-slice>", ["c", "n"], "Compute supplied linear elevation change.", (l,g)=>l*g),
-    command("ramp-slices <rise> <maximum-rise>", ["q", "p"], "Round required horizontal slices for supplied grade limit.", (r,g)=>wholeCeil(r/g)),
-    command("headroom <ceiling-y> <floor-y> <required>", ["n", "n", "p"], "Report signed continuous headroom margin.", (c,f,r)=>{demand(c>=f);return c-f-r;}),
-    command("haul-work <slice-volume> <length>", ["q", "c"], "Sum cell-distance hauling to entry from slice centers.", (v,l)=>v*l*l/2),
-    command("two-end-haul <slice-volume> <length>", ["q", "s"], "Sum integer-slice hauling to nearest endpoint.", (v,l)=>v*wholeFloor((l-1)**2/4)),
-    command("spoil-trips <volume> <capacity>", ["c", "s"], "Round up trips for supplied spoil carrying capacity.", (v,c)=>wholeCeil(v/c)),
-    command("progress <completed-slices> <length>", ["c", "s"], "Report tunnel completion fraction and uncut slices.", (c,l)=>{demand(c<=l);return {fraction:c/l,remaining:l-c};}),
-    command("work-window <length> <slices-per-minute> <setup-minutes>", ["c", "p", "q"], "Estimate active excavation minutes plus one setup.", (l,r,s)=>l===0?0:s+l/r),
-  ] },
-  { name: "bridgeplan", note: "Offline bridge layout and material estimates from caller dimensions. Span partitions and loads are arithmetic only and establish neither structural stability nor in-game build feasibility. No blocks are placed.", commands: [
-    command("deck-cells <length> <width> <thickness>", ["s", "s", "s"], "Count a rectangular deck.", (l,w,t)=>l*w*t),
-    command("abutment-cells <width> <height> <depth>", ["s", "s", "s"], "Count two solid rectangular abutments.", (w,h,d)=>2*w*h*d),
-    command("span-count <distance> <maximum-span>", ["p", "p"], "Round a continuous gap into bounded spans.", (d,m)=>wholeCeil(d/m)),
-    command("equal-spans <distance> <maximum-span>", ["p", "p"], "List equalized spans that satisfy the supplied maximum.", (d,m)=>{const n=wholeCeil(d/m);return sequence(n,()=>d/n);}),
-    command("pier-count <spans>", ["s"], "Count internal piers between endpoint supports.", n=>n-1),
-    command("pier-stations <distance> <spans>", ["p", "s"], "List internal equally spaced pier chainages.", (d,n)=>sequence(n-1,i=>(i+1)*d/n)),
-    command("pier-volume <heights> <width> <depth>", ["L", "p", "p"], "Sum rectangular pier volumes from supplied heights.", (h,w,d)=>sum(h)*w*d),
-    command("rail-cells <length> <rail-height> <sides>", ["s", "s", "c"], "Count solid side railing cells excluding end returns.", (l,h,s)=>l*h*s),
-    command("post-count <length> <spacing> <sides>", ["s", "s", "s"], "Count endpoint-inclusive posts along selected sides.", (l,s,n)=>(wholeCeil((l-1)/s)+1)*n),
-    command("post-volume <length> <spacing> <height> <sides>", ["s", "s", "s", "s"], "Count one-cell vertical post columns.", (l,s,h,n)=>(wholeCeil((l-1)/s)+1)*h*n),
-    command("underbeam <length> <beams> <depth>", ["s", "s", "s"], "Count continuous one-cell-wide underdeck beams.", (l,n,d)=>l*n*d),
-    command("crossbeams <length> <spacing> <width>", ["s", "s", "s"], "Count one-cell transverse beams at endpoint-inclusive stations.", (l,s,w)=>(wholeCeil((l-1)/s)+1)*w),
-    command("clearance <deck-bottom> <highest-obstacle> <minimum>", ["n", "n", "q"], "Report signed vertical clearance margin.", (d,o,m)=>d-o-m),
-    command("approach-length <deck-y> <ground-y> <maximum-grade>", ["n", "n", "p"], "Estimate minimum continuous approach run.", (d,g,m)=>Math.abs(d-g)/m),
-    command("approach-fill <width> <run> <rise>", ["p", "q", "q"], "Estimate triangular-prism approach fill.", (w,r,h)=>w*r*h/2),
-    command("deck-slope <start-y> <end-y> <run>", ["n", "n", "p"], "Compute signed deck rise per horizontal unit.", (s,e,r)=>(e-s)/r),
-    command("sloped-length <run> <rise>", ["q", "n"], "Compute continuous sloped deck length.", (r,h)=>Math.hypot(r,h)),
-    command("expansion-gaps <length> <section-length> <gap>", ["p", "p", "q"], "Count internal expansion joints and aggregate gap width.", (l,s,g)=>{const joints=wholeCeil(l/s)-1;return {joints,totalGap:joints*g};}),
-    command("deck-panels <length> <width> <panel-length> <panel-width>", ["s", "s", "s", "s"], "Count axis-aligned rectangular panels with edge trimming.", (l,w,a,b)=>wholeCeil(l/a)*wholeCeil(w/b)),
-    command("panel-waste <length> <width> <panel-length> <panel-width>", ["s", "s", "s", "s"], "Compute purchased panel area beyond deck area.", (l,w,a,b)=>wholeCeil(l/a)*wholeCeil(w/b)*a*b-l*w),
-    command("tributary-load <spans> <load-per-length>", ["P", "q"], "Allocate uniform span loads to adjacent supports by halves.", (s,q)=>sequence(s.length+1,i=>((s[i-1]||0)+(s[i]||0))*q/2)),
-    command("load-total <length> <width> <load-per-area>", ["p", "p", "q"], "Multiply supplied uniform surface load by area.", (l,w,q)=>l*w*q),
-    command("cantilever-share <overhang> <supported-length>", ["q", "p"], "Compute overhang fraction of total longitudinal extent.", (o,s)=>o/(o+s)),
-    command("material-reserve <deck> <supports> <reserve-fraction>", ["c", "c", "r"], "Add rounded reserve to explicit deck and support counts.", (d,s,r)=>wholeCeil((d+s)*(1+r))),
-    command("build-hours <cells> <cells-per-hour> <mobilization>", ["c", "p", "q"], "Estimate placement hours plus one mobilization for nonempty work.", (c,r,m)=>c?c/r+m:0),
-  ] },
-  { name: "roofplan", note: "Offline continuous roof takeoffs unless a command explicitly says cells. Width and length include only caller-supplied extents; no placement, weather, collision, recipe, or structural behavior is assumed.", commands: [
-    command("gable-rise <width> <pitch>", ["p", "q"], "Rise of a centered gable with supplied rise/run pitch.", (w,p)=>w*p/2),
-    command("gable-rafter <width> <rise>", ["p", "q"], "Length from eave to centered ridge.", (w,h)=>Math.hypot(w/2,h)),
-    command("gable-surface <width> <length> <rise>", ["p", "p", "q"], "Combined area of two gable roof planes.", (w,l,h)=>2*l*Math.hypot(w/2,h)),
-    command("gable-end <width> <rise>", ["p", "q"], "Area of one triangular gable wall.", (w,h)=>w*h/2),
-    command("gable-volume <width> <length> <rise>", ["p", "p", "q"], "Enclosed triangular-prism attic volume.", (w,l,h)=>w*l*h/2),
-    command("shed-surface <width> <length> <rise>", ["p", "p", "q"], "Area of one rectangular sloping shed plane.", (w,l,h)=>l*Math.hypot(w,h)),
-    command("shed-volume <width> <length> <low-height> <rise>", ["p", "p", "q", "q"], "Volume below a shed roof above a flat datum.", (w,l,b,h)=>w*l*(b+h/2)),
-    command("hip-ridge <width> <length>", ["p", "p"], "Equal-pitch hip roof ridge length with length at least width.", (w,l)=>{demand(l>=w);return l-w;}),
-    command("hip-surface <width> <length> <rise>", ["p", "p", "q"], "Surface area of equal-pitch hip roof on a rectangle.", (w,l,h)=>{demand(l>=w);return 2*l*Math.hypot(w/2,h);}),
-    command("pyramid-surface <side> <rise>", ["p", "q"], "Lateral surface area of a square pyramid roof.", (s,h)=>2*s*Math.hypot(s/2,h)),
-    command("pyramid-volume <side> <rise>", ["p", "q"], "Volume under a square pyramid roof.", (s,h)=>s*s*h/3),
-    command("overhang-footprint <width> <length> <overhang>", ["p", "p", "q"], "Projected footprint including equal overhang on all sides.", (w,l,o)=>(w+2*o)*(l+2*o)),
-    command("eave-length <width> <length>", ["p", "p"], "Total horizontal eave perimeter.", (w,l)=>2*(w+l)),
-    command("ridge-cap <ridge-length> <unit-length>", ["q", "p"], "Round ridge length to whole cap units.", (l,u)=>wholeCeil(l/u)),
-    command("tile-order <surface-area> <coverage> <waste>", ["q", "p", "r"], "Round supplied net coverage and waste into whole tiles.", (a,c,w)=>wholeCeil(a*(1+w)/c)),
-    command("course-count <slope-length> <exposure>", ["q", "p"], "Round slope length to exposed tile courses.", (l,e)=>wholeCeil(l/e)),
-    command("course-overlap <tile-length> <exposure>", ["p", "p"], "Compute longitudinal overlap between adjacent courses.", (t,e)=>{demand(e<=t);return t-e;}),
-    command("batten-length <ridge-length> <courses> <sides>", ["q", "c", "s"], "Sum continuous battens along each roof course.", (l,c,s)=>l*c*s),
-    command("rafter-count <length> <spacing> <sides>", ["p", "p", "s"], "Count endpoint-inclusive rafters along selected roof sides.", (l,s,n)=>(wholeCeil(l/s)+1)*n),
-    command("rafter-stock <width> <rise> <count>", ["p", "q", "c"], "Sum stock length for equal gable half-span rafters.", (w,h,n)=>Math.hypot(w/2,h)*n),
-    command("gutter-fall <length> <gradient>", ["q", "q"], "Vertical fall for supplied gutter gradient.", (l,g)=>l*g),
-    command("outlet-count <area> <area-per-outlet>", ["q", "p"], "Round projected catchment area into outlets using supplied capacity.", (a,c)=>wholeCeil(a/c)),
-    command("rain-volume <projected-area> <rain-depth> <capture-fraction>", ["q", "q", "r"], "Ideal captured volume from matching area/depth units.", (a,d,c)=>a*d*c),
-    command("stepped-profile <half-width> <rise>", ["s", "c"], "List floor-rounded gable heights from eave through ridge.", (w,h)=>sequence(w+1,i=>wholeFloor(i*h/w))),
-    command("attic-clear-width <width> <rise> <required-height>", ["p", "p", "q"], "Width with sufficient headroom under a centered triangular gable.", (w,h,r)=>w*Math.max(0,1-r/h)),
-  ] },
-  { name: "facade", note: "Offline wall and opening layouts. Coordinates are continuous wall-local [horizontal,vertical]; counts use explicit dimensions. Openings must fit where documented; layouts are never placed in Minecraft.", commands: [
-    command("opening-area <widths> <heights>", ["P", "P"], "Sum rectangular opening areas.", (w,h)=>{same(w,h);return sum(w.map((v,i)=>v*h[i]));}),
-    command("net-wall <width> <height> <opening-area>", ["p", "p", "q"], "Subtract explicit total opening area, rejecting excess.", (w,h,o)=>{demand(o<=w*h);return w*h-o;}),
-    command("window-columns <wall-width> <margin> <window-width> <gap>", ["p", "q", "p", "q"], "Maximum equally gapped windows between margins.", (w,m,a,g)=>{demand(w>=2*m);return Math.max(0,wholeFloor((w-2*m+g)/(a+g)));}),
-    command("window-rows <wall-height> <sill> <head-margin> <window-height> <gap>", ["p", "q", "q", "p", "q"], "Maximum rows above a sill and below a head margin.", (h,s,m,a,g)=>{demand(h>=s+m);return Math.max(0,wholeFloor((h-s-m+g)/(a+g)));}),
-    command("centered-start <wall-width> <count> <opening-width> <gap>", ["p", "s", "p", "q"], "Left offset for a centered row of openings.", (w,n,a,g)=>{const used=n*a+(n-1)*g;demand(used<=w);return (w-used)/2;}),
-    command("equal-gaps <wall-width> <count> <opening-width>", ["p", "s", "p"], "Equal gaps including both wall ends.", (w,n,a)=>{demand(n*a<=w);return (w-n*a)/(n+1);}),
-    command("window-centers <start> <count> <width> <gap> <sill> <height>", ["n", "s", "p", "q", "n", "p"], "List center coordinates of a horizontal window row.", (x,n,w,g,y,h)=>sequence(n,i=>[x+i*(w+g)+w/2,y+h/2])),
-    command("frame-perimeter <width> <height> <count>", ["p", "p", "c"], "Total continuous frame centerline perimeter.", (w,h,n)=>2*(w+h)*n),
-    command("frame-ring <width> <height> <thickness> <count>", ["p", "p", "p", "c"], "Area of outer frame rings around clear openings.", (w,h,t,n)=>((w+2*t)*(h+2*t)-w*h)*n),
-    command("sill-stock <width> <overhang> <count>", ["p", "q", "c"], "Total sill length including both side overhangs.", (w,o,n)=>(w+2*o)*n),
-    command("lintel-order <width> <bearing> <count> <stock-length>", ["p", "q", "c", "p"], "Order whole unjoined lintel members cut from supplied stock lengths.", (w,b,n,s)=>{const member=w+2*b;demand(member<=s);const perStock=wholeFloor(s/member),stocks=wholeCeil(n/perStock);return {stocks,waste:stocks*s-n*member};}),
-    command("mullion-stock <height> <divisions> <windows>", ["p", "s", "c"], "Vertical mullion length for equal panes per window.", (h,d,n)=>h*(d-1)*n),
-    command("transom-stock <width> <rows> <windows>", ["p", "s", "c"], "Horizontal transom length for equal pane rows.", (w,r,n)=>w*(r-1)*n),
-    command("pane-size <width> <height> <columns> <rows> <bar-width>", ["p", "p", "s", "s", "q"], "Clear pane dimensions after internal bars.", (w,h,c,r,b)=>{demand(w>(c-1)*b&&h>(r-1)*b);return [(w-(c-1)*b)/c,(h-(r-1)*b)/r];}),
-    command("glazing-fraction <wall-area> <glazed-area>", ["p", "q"], "Compute wall glazing fraction, rejecting excess.", (w,g)=>{demand(g<=w);return g/w;}),
-    command("pier-minimum <wall-width> <openings> <opening-width> <minimum>", ["p", "s", "p", "p"], "Check equal solid pier widths against a supplied minimum.", (w,n,a,m)=>{demand(n*a<w);const width=(w-n*a)/(n+1);return {width,passes:width>=m};}),
-    command("bay-width <wall-width> <bays>", ["p", "s"], "Compute equal facade bay width.", (w,n)=>w/n),
-    command("bay-boundaries <wall-width> <bays>", ["p", "s"], "List local equal bay divider coordinates.", (w,n)=>sequence(n+1,i=>i*w/n)),
-    command("story-datums <base-y> <story-heights>", ["n", "P"], "List base and cumulative story elevations.", (y,h)=>{let n=y;return [y,...h.map(v=>n+=v)];}),
-    command("spandrel-height <story-height> <sill-height> <window-height>", ["p", "q", "p"], "Compute remaining height above a window in one story.", (s,b,h)=>{demand(b+h<=s);return s-b-h;}),
-    command("cladding-panels <width> <height> <panel-width> <panel-height>", ["p", "p", "p", "p"], "Count axis-aligned cladding panels with edge cutting.", (w,h,a,b)=>wholeCeil(w/a)*wholeCeil(h/b)),
-    command("joint-length <columns> <rows> <panel-width> <panel-height>", ["s", "s", "p", "p"], "Total internal panel seam length on an untrimmed rectangular array.", (c,r,w,h)=>(c-1)*r*h+(r-1)*c*w),
-    command("reveal-area <width> <height> <depth> <count>", ["p", "p", "q", "c"], "Area of four internal reveals around clear openings.", (w,h,d,n)=>2*(w+h)*d*n),
-    command("door-threshold <door-widths> <depth>", ["P", "p"], "Total threshold surface area for supplied doors.", (w,d)=>sum(w)*d),
-    command("accent-band <perimeter> <band-height> <bands>", ["p", "p", "c"], "Surface area of supplied horizontal accent bands.", (p,h,n)=>p*h*n),
-  ] },
-  { name: "spiral", note: "Offline ideal polar spirals and helices. Angles are degrees; radial growth is supplied units per full revolution. Samples are bounded to 1000 points and are geometric layouts, never routes proven traversable.", commands: [
-    command("arch-radius <initial> <growth> <turns>", ["q", "n", "q"], "Radius after a supplied number of Archimedean turns.", (r,g,t)=>{demand(r+g*t>=0);return r+g*t;}),
-    command("arch-point <initial> <growth> <turns>", ["q", "n", "q"], "X/Z coordinate at a nonnegative Archimedean turn.", (r,g,t)=>{const radius=r+g*t;demand(radius>=0);return [radius*Math.cos(t*2*Math.PI),radius*Math.sin(t*2*Math.PI)];}),
-    command("arch-samples <initial> <growth> <turns> <segments>", ["q", "n", "q", "s"], "Endpoint-inclusive samples of an Archimedean spiral.", (r,g,t,n)=>{demand(Math.min(r,r+g*t)>=0);return sequence(n+1,i=>{const u=t*i/n,v=r+g*u;return [v*Math.cos(u*2*Math.PI),v*Math.sin(u*2*Math.PI)];});}),
-    command("turn-spacing <growth>", ["n"], "Absolute radial spacing between full revolutions.", g=>Math.abs(g)),
-    command("turns-to-radius <initial> <target> <growth>", ["q", "q", "n"], "Solve outward or inward spiral turns to a radius.", (r,t,g)=>{demand(g!==0&&(t-r)/g>=0);return (t-r)/g;}),
-    command("annulus-area <inner> <outer>", ["q", "p"], "Area swept between inner and outer spiral radii.", (a,b)=>{demand(b>=a);return Math.PI*(b*b-a*a);}),
-    command("helix-rise <turns> <pitch>", ["q", "n"], "Signed height after supplied helix turns.", (t,p)=>t*p),
-    command("helix-turns <rise> <pitch>", ["n", "n"], "Solve nonnegative turn count for a signed pitch.", (r,p)=>{demand(p!==0&&r/p>=0);return r/p;}),
-    command("helix-length <radius> <pitch> <turns>", ["q", "n", "q"], "Continuous constant-radius helix arc length.", (r,p,t)=>Math.hypot(2*Math.PI*r,p)*t),
-    command("helix-grade <radius> <pitch>", ["p", "n"], "Signed rise divided by horizontal circumference.", (r,p)=>p/(2*Math.PI*r)),
-    command("helix-point <radius> <pitch> <turns>", ["q", "n", "q"], "X/Y/Z coordinate on a constant-radius helix.", (r,p,t)=>[r*Math.cos(t*2*Math.PI),p*t,r*Math.sin(t*2*Math.PI)]),
-    command("helix-samples <radius> <pitch> <turns> <segments>", ["q", "n", "q", "s"], "Endpoint-inclusive helix coordinate samples.", (r,p,t,n)=>sequence(n+1,i=>{const u=t*i/n;return [r*Math.cos(u*2*Math.PI),p*u,r*Math.sin(u*2*Math.PI)];})),
-    command("helix-step-angle <steps-per-turn>", ["s"], "Angular advance of equal subdivisions.", n=>360/n),
-    command("helix-step-rise <pitch> <steps-per-turn>", ["n", "s"], "Vertical advance per equal subdivision.", (p,n)=>p/n),
-    command("helix-step-chord <radius> <pitch> <steps-per-turn>", ["q", "n", "s"], "Straight 3D chord length between adjacent equal subdivisions.", (r,p,n)=>Math.hypot(2*r*Math.sin(Math.PI/n),p/n)),
-    command("headroom-pitch <clear-height> <deck-thickness>", ["p", "q"], "Minimum turn pitch from supplied vertical clearances.", (h,d)=>h+d),
-    command("headroom-margin <pitch> <deck-thickness> <required>", ["q", "q", "q"], "Signed vertical separation margin between stacked turns.", (p,d,h)=>p-d-h),
-    command("inner-radius <outer-radius> <walk-width>", ["p", "p"], "Compute remaining central void radius.", (r,w)=>{demand(w<=r);return r-w;}),
-    command("walking-radius <inner-radius> <width> <fraction>", ["q", "p", "r"], "Radius of a supplied position across a spiral walkway.", (r,w,f)=>r+w*f),
-    command("ring-deck-area <inner-radius> <width> <turns>", ["q", "p", "q"], "Horizontal annulus area repeated per turn, ignoring slope.", (r,w,t)=>Math.PI*((r+w)**2-r*r)*t),
-    command("post-angles <posts> <offset>", ["s", "n"], "Even angular positions around one turn.", (n,o)=>sequence(n,i=>o+360*i/n)),
-    command("rise-stations <total-rise> <maximum-step>", ["q", "p"], "Count equal-rise subdivisions for a target ascent.", (h,m)=>wholeCeil(h/m)),
-    command("angular-speed <turns-per-minute>", ["q"], "Convert turns per minute to degrees per second.", t=>t*6),
-    command("helix-travel <radius> <pitch> <turns> <speed>", ["q", "n", "q", "p"], "Ideal travel time along a continuous helix.", (r,p,t,s)=>Math.hypot(2*Math.PI*r,p)*t/s),
-    command("radial-clearance <growth> <corridor-width>", ["n", "p"], "Signed radial margin between adjacent full spiral turns.", (g,w)=>Math.abs(g)-w),
-  ] },
-  { name: "symmetry", note: "Offline 3D reflection, rotation, orbits, and symmetry checks on supplied points. Equality checks use supplied absolute tolerance; no collision, block legality, or world state is evaluated.", commands: [
-    command("mirror-x <points> <plane-x>", ["points3", "n"], "Reflect points across x = plane-x.", (a,x)=>a.map(v=>[2*x-v[0],v[1],v[2]])),
-    command("mirror-y <points> <plane-y>", ["points3", "n"], "Reflect points across y = plane-y.", (a,y)=>a.map(v=>[v[0],2*y-v[1],v[2]])),
-    command("mirror-z <points> <plane-z>", ["points3", "n"], "Reflect points across z = plane-z.", (a,z)=>a.map(v=>[v[0],v[1],2*z-v[2]])),
-    command("invert <points> <center>", ["points3", "points3"], "Point reflection about one center.", (a,c)=>{const v=one(c);return a.map(p=>subV(mulV(v,2),p));}),
-    command("quarter-y <points>", ["points3"], "Rotate positive ninety degrees about Y.", a=>a.map(([x,y,z])=>[z,y,-x])),
-    command("quarter-x <points>", ["points3"], "Rotate positive ninety degrees about X.", a=>a.map(([x,y,z])=>[x,-z,y])),
-    command("quarter-z <points>", ["points3"], "Rotate positive ninety degrees about Z.", a=>a.map(([x,y,z])=>[-y,x,z])),
-    command("swap-xy <points>", ["points3"], "Reflect across diagonal plane x = y.", a=>a.map(([x,y,z])=>[y,x,z])),
-    command("swap-xz <points>", ["points3"], "Reflect across diagonal plane x = z.", a=>a.map(([x,y,z])=>[z,y,x])),
-    command("swap-yz <points>", ["points3"], "Reflect across diagonal plane y = z.", a=>a.map(([x,y,z])=>[x,z,y])),
-    command("orbit-four <point>", ["points3"], "Fourfold Y-axis orbit of one point.", a=>{const [x,y,z]=one(a);return [[x,y,z],[z,y,-x],[-x,y,-z],[-z,y,x]];}),
-    command("orbit-eight <point>", ["points3"], "Distinct sign-reflection orbit across all origin planes.", a=>{const v=one(a);return distinct(sequence(8,i=>v.map((n,j)=>i&(1<<j)?-n:n)));}),
-    command("radial-orbit <point> <copies>", ["points3", "s"], "Equally rotated copies about Y including original.", (a,n)=>{const v=one(a);return sequence(n,i=>rotateY(v,360*i/n));}),
-    command("screw-orbit <point> <copies> <angle> <rise>", ["points3", "s", "n", "n"], "Repeated Y-axis rotation combined with vertical translation.", (a,n,d,h)=>{const v=one(a);return sequence(n,i=>addV(rotateY(v,d*i),[0,h*i,0]));}),
-    command("glide-x <points> <plane-x> <dy> <dz>", ["points3", "n", "n", "n"], "Reflect across an X-plane then translate within that plane.", (a,x,y,z)=>a.map(v=>[2*x-v[0],v[1]+y,v[2]+z])),
-    command("rotate-y <points> <degrees>", ["points3", "n"], "Rotate point list around Y through origin.", (a,d)=>a.map(v=>rotateY(v,d))),
-    command("x-symmetric <points> <plane-x> <tolerance>", ["points3", "n", "q"], "Check whether every point has a reflected partner across an X-plane.", (a,x,t)=>matches(a,a.map(v=>[2*x-v[0],v[1],v[2]]),t)),
-    command("y-symmetric <points> <plane-y> <tolerance>", ["points3", "n", "q"], "Check reflected partners across a Y-plane.", (a,y,t)=>matches(a,a.map(v=>[v[0],2*y-v[1],v[2]]),t)),
-    command("z-symmetric <points> <plane-z> <tolerance>", ["points3", "n", "q"], "Check reflected partners across a Z-plane.", (a,z,t)=>matches(a,a.map(v=>[v[0],v[1],2*z-v[2]]),t)),
-    command("rotational-check <points> <degrees> <tolerance>", ["points3", "n", "q"], "Check point-set invariance under a supplied Y rotation.", (a,d,t)=>matches(a,a.map(v=>rotateY(v,d)),t)),
-    command("central-check <points> <center> <tolerance>", ["points3", "points3", "q"], "Check point-set invariance under point reflection.", (a,c,t)=>{const v=one(c);return matches(a,a.map(p=>subV(mulV(v,2),p)),t);}),
-    command("pair-midpoints <a> <b>", ["points3", "points3"], "Compute centers that would make paired points centrally symmetric.", (a,b)=>pair(a,b,(v,w)=>mulV(addV(v,w),0.5))),
-    command("missing-x <points> <plane-x> <tolerance>", ["points3", "n", "q"], "List reflected X-plane partners absent from the supplied set.", (a,x,t)=>distinct(a.map(v=>[2*x-v[0],v[1],v[2]]).filter(v=>!a.some(p=>norm(subV(v,p))<=t)))),
-    command("fundamental-x <points> <plane-x>", ["points3", "n"], "Select the closed right half-space of an X-reflection layout.", (a,x)=>a.filter(v=>v[0]>=x)),
-    command("symmetry-error <points> <plane-x>", ["points3", "n"], "Maximum nearest-partner error after X reflection.", (a,x)=>Math.max(...a.map(v=>Math.min(...a.map(p=>norm(subV([2*x-v[0],v[1],v[2]],p))))))),
-  ] },
-  { name: "landmark", note: "Offline coordinate survey calculations on caller-supplied [x,y,z] landmarks. Range and bearing geometry ignores occlusion, terrain, measurement uncertainty unless explicit, and dimension transitions. No observations are fetched.", commands: [
-    command("ranges <origin> <landmarks>", ["points3", "points3"], "Compute 3D ranges from one origin.", (o,a)=>{const p=one(o);return a.map(v=>norm(subV(v,p)));}),
-    command("horizontal-ranges <origin> <landmarks>", ["points3", "points3"], "Compute horizontal ranges from one origin.", (o,a)=>{const p=one(o);return a.map(v=>Math.hypot(v[0]-p[0],v[2]-p[2]));}),
-    command("vertical-offsets <origin> <landmarks>", ["points3", "points3"], "Compute signed landmark height differences.", (o,a)=>{const p=one(o);return a.map(v=>v[1]-p[1]);}),
-    command("nearest-index <origin> <landmarks>", ["points3", "points3"], "Return first nearest landmark index, zero-based.", (o,a)=>{const p=one(o),d=a.map(v=>norm(subV(v,p)));return d.indexOf(Math.min(...d));}),
-    command("farthest-index <origin> <landmarks>", ["points3", "points3"], "Return first farthest landmark index, zero-based.", (o,a)=>{const p=one(o),d=a.map(v=>norm(subV(v,p)));return d.indexOf(Math.max(...d));}),
-    command("range-filter <origin> <landmarks> <minimum> <maximum>", ["points3", "points3", "q", "q"], "Select landmarks within a closed 3D range band.", (o,a,l,h)=>{demand(h>=l);const p=one(o);return a.filter(v=>{const d=norm(subV(v,p));return d>=l&&d<=h;});}),
-    command("sort-range <origin> <landmarks>", ["points3", "points3"], "Sort landmarks by 3D distance with stable ties.", (o,a)=>{const p=one(o);return [...a].sort((v,w)=>norm(subV(v,p))-norm(subV(w,p)));}),
-    command("range-margin <origin> <landmarks> <maximum>", ["points3", "points3", "q"], "Report signed range margins to a supplied maximum.", (o,a,m)=>{const p=one(o);return a.map(v=>m-norm(subV(v,p)));}),
-    command("elevation-angles <origin> <landmarks>", ["points3", "points3"], "Signed sight elevation angles above horizontal.", (o,a)=>{const p=one(o);return a.map(v=>{const d=subV(v,p);demand(norm(d)>0);return Math.atan2(d[1],Math.hypot(d[0],d[2]))*180/Math.PI;});}),
-    command("sight-grade <origin> <landmarks>", ["points3", "points3"], "Signed vertical over horizontal sight slopes.", (o,a)=>{const p=one(o);return a.map(v=>{const d=subV(v,p),h=Math.hypot(d[0],d[2]);demand(h>0);return d[1]/h;});}),
-    command("height-from-angle <horizontal-range> <degrees> <eye-y>", ["q", "n", "n"], "Infer landmark height from supplied sight angle and horizontal range.", (r,d,y)=>{demand(Math.abs(d)<90);return y+r*Math.tan(d*Math.PI/180);}),
-    command("range-from-height <height-difference> <degrees>", ["n", "n"], "Infer positive horizontal range from height difference and sight angle.", (h,d)=>{demand(Math.abs(d)<90&&d!==0);const r=h/Math.tan(d*Math.PI/180);demand(r>=0);return r;}),
-    command("baseline <landmarks>", ["points3"], "Length of a baseline defined by exactly two landmarks.", a=>{demand(a.length===2);return norm(subV(a[1],a[0]));}),
-    command("baseline-midpoint <landmarks>", ["points3"], "Midpoint of exactly two survey landmarks.", a=>{demand(a.length===2);return mulV(addV(a[0],a[1]),0.5);}),
-    command("baseline-fraction <landmarks> <point>", ["points3", "points3"], "Unclamped projection fraction along a nonzero landmark baseline.", (a,b)=>{demand(a.length===2);const v=subV(a[1],a[0]);demand(dot(v,v)>0);return dot(subV(one(b),a[0]),v)/dot(v,v);}),
-    command("baseline-offset <landmarks> <point>", ["points3", "points3"], "Perpendicular distance to the infinite landmark baseline.", (a,b)=>{demand(a.length===2);const v=unit(subV(a[1],a[0]));return norm(cross(subV(one(b),a[0]),v));}),
-    command("sight-interpolate <landmarks> <fraction>", ["points3", "r"], "Point at supplied fraction along two landmark endpoints.", (a,t)=>{demand(a.length===2);return addV(mulV(a[0],1-t),mulV(a[1],t));}),
-    command("trilaterate-flat <baseline> <first-range> <second-range>", ["p", "q", "q"], "Two X/Z solutions relative to landmarks at (0,0) and (baseline,0).", (b,r,s)=>{const x=(r*r-s*s+b*b)/(2*b),z2=r*r-x*x;demand(z2>=-1e-8);const z=Math.sqrt(Math.max(0,z2));return [[x,z],[x,-z]];}),
-    command("bearing-cross <origins> <first-degrees> <second-degrees>", ["points2", "n", "n"], "Intersect two infinite X/Z bearing lines; zero degrees is +X.", (o,a,b)=>{demand(o.length===2);const u=[Math.cos(a*Math.PI/180),Math.sin(a*Math.PI/180)],v=[Math.cos(b*Math.PI/180),Math.sin(b*Math.PI/180)],d=u[0]*v[1]-u[1]*v[0];demand(Math.abs(d)>1e-10);const p=[o[1][0]-o[0][0],o[1][1]-o[0][1]],t=(p[0]*v[1]-p[1]*v[0])/d;return [o[0][0]+t*u[0],o[0][1]+t*u[1]];}),
-    command("weighted-fix <landmarks> <weights>", ["points3", "L"], "Compute weighted mean position from explicit nonnegative weights.", (a,w)=>{same(a,w);const t=sum(w);demand(t>0);return [0,1,2].map(i=>sum(a.map((v,j)=>v[i]*w[j]))/t);}),
-    command("measurement-residuals <estimate> <landmarks> <ranges>", ["points3", "points3", "L"], "Subtract measured ranges from predicted 3D ranges.", (e,a,r)=>{same(a,r);const p=one(e);return a.map((v,i)=>norm(subV(v,p))-r[i]);}),
-    command("range-rms <estimate> <landmarks> <ranges>", ["points3", "points3", "L"], "RMS residual over explicit measured landmark ranges.", (e,a,r)=>{same(a,r);const p=one(e);return Math.sqrt(sum(a.map((v,i)=>(norm(subV(v,p))-r[i])**2))/a.length);}),
-    command("sphere-shell <range> <error>", ["q", "q"], "Inner and outer radii for an absolute range error.", (r,e)=>[Math.max(0,r-e),r+e]),
-    command("angular-width <object-width> <range>", ["q", "p"], "Ideal angular width of centered perpendicular object in degrees.", (w,r)=>2*Math.atan(w/(2*r))*180/Math.PI),
-    command("range-ratio <first-range> <second-range>", ["q", "p"], "Relative scale of two supplied landmark ranges.", (a,b)=>a/b),
-  ] },
-  { name: "district", note: "Offline rectangular district and parcel estimates. Road strips and parcels are explicitly abstract rectangles; counts ignore terrain, existing blocks, ownership, connectivity, and game mechanics. No construction is executed.", commands: [
-    command("parcel-count <columns> <rows>", ["s", "s"], "Count regular grid parcels.", (c,r)=>c*r),
-    command("parcel-area <width> <depth> <columns> <rows>", ["p", "p", "s", "s"], "Area of each equal parcel without roads.", (w,d,c,r)=>w*d/(c*r)),
-    command("street-footprint <columns> <rows> <parcel-width> <parcel-depth> <street-width>", ["s", "s", "p", "p", "q"], "Compute extent with internal streets only.", (c,r,w,d,s)=>[c*w+(c-1)*s,r*d+(r-1)*s]),
-    command("street-area <columns> <rows> <parcel-width> <parcel-depth> <street-width>", ["s", "s", "p", "p", "q"], "Compute union area of internal streets without double-counting intersections.", (c,r,w,d,s)=>(c*w+(c-1)*s)*(r*d+(r-1)*s)-c*r*w*d),
-    command("street-intersections <columns> <rows>", ["s", "s"], "Count crossings of internal orthogonal streets.", (c,r)=>(c-1)*(r-1)),
-    command("street-length <columns> <rows> <parcel-width> <parcel-depth> <street-width>", ["s", "s", "p", "p", "q"], "Sum full centerline lengths of internal streets including crossings twice.", (c,r,w,d,s)=>(c-1)*(r*d+(r-1)*s)+(r-1)*(c*w+(c-1)*s)),
-    command("parcel-origins <columns> <rows> <width> <depth> <street>", ["s", "s", "p", "p", "q"], "List lower-left origins row-major.", (c,r,w,d,s)=>sequence(c*r,i=>[(i%c)*(w+s),wholeFloor(i/c)*(d+s)])),
-    command("parcel-centers <columns> <rows> <width> <depth> <street>", ["s", "s", "p", "p", "q"], "List parcel center coordinates row-major.", (c,r,w,d,s)=>sequence(c*r,i=>[(i%c)*(w+s)+w/2,wholeFloor(i/c)*(d+s)+d/2])),
-    command("setback-area <width> <depth> <setback>", ["p", "p", "q"], "Buildable rectangle area after equal edge setbacks.", (w,d,s)=>{demand(2*s<=Math.min(w,d));return (w-2*s)*(d-2*s);}),
-    command("setback-loss <width> <depth> <setback>", ["p", "p", "q"], "Fraction of parcel lost to equal edge setbacks.", (w,d,s)=>{demand(2*s<=Math.min(w,d));return 1-(w-2*s)*(d-2*s)/(w*d);}),
-    command("courtyard-layout <outer-width> <outer-depth> <wing-width>", ["p", "p", "p"], "Dimensions and area of courtyard within uniform perimeter wings.", (w,d,t)=>{demand(2*t<=Math.min(w,d));return {width:w-2*t,depth:d-2*t,area:(w-2*t)*(d-2*t)};}),
-    command("perimeter-building <outer-width> <outer-depth> <wing-width> <stories>", ["p", "p", "p", "s"], "Gross floor area of rectangular ring building.", (w,d,t,n)=>{demand(2*t<=Math.min(w,d));return (w*d-(w-2*t)*(d-2*t))*n;}),
-    command("coverage <building-area> <parcel-area>", ["q", "p"], "Building footprint share of parcel area.", (b,p)=>{demand(b<=p);return b/p;}),
-    command("floor-ratio <floor-area> <parcel-area>", ["q", "p"], "Gross floor area per parcel area.", (f,p)=>f/p),
-    command("story-budget <floor-area-target> <footprint>", ["q", "p"], "Minimum whole stories for a gross floor area target.", (f,p)=>wholeCeil(f/p)),
-    command("green-area <district-area> <building-area> <street-area>", ["p", "q", "q"], "Residual unallocated open area after disjoint buildings and streets.", (d,b,s)=>{demand(b+s<=d);return d-b-s;}),
-    command("frontage <columns> <rows> <parcel-width>", ["s", "s", "p"], "Aggregate one-edge frontage of all parcels.", (c,r,w)=>c*r*w),
-    command("frontage-lots <edge-length> <lot-frontage> <end-reserve>", ["p", "p", "q"], "Count whole lots after symmetric end reserves.", (e,l,r)=>{demand(2*r<=e);return wholeFloor((e-2*r)/l);}),
-    command("corner-parcels <columns> <rows>", ["s", "s"], "Count unique parcels at grid corners, including degenerate grids.", (c,r)=>Math.min(2,c)*Math.min(2,r)),
-    command("edge-parcels <columns> <rows>", ["s", "s"], "Count unique grid-boundary parcels.", (c,r)=>c*r-Math.max(0,c-2)*Math.max(0,r-2)),
-    command("interior-parcels <columns> <rows>", ["s", "s"], "Count parcels not touching district boundary.", (c,r)=>Math.max(0,c-2)*Math.max(0,r-2)),
-    command("checker-parcels <columns> <rows>", ["s", "s"], "Count alternating even and odd grid parcel classes.", (c,r)=>({even:wholeCeil(c*r/2),odd:wholeFloor(c*r/2)})),
-    command("phase-rows <columns> <rows> <rows-per-phase>", ["s", "s", "s"], "List parcel counts for consecutive construction row phases.", (c,r,n)=>sequence(wholeCeil(r/n),i=>Math.min(n,r-i*n)*c)),
-    command("utility-trunk <columns> <rows> <parcel-width> <parcel-depth> <street-width>", ["s", "s", "p", "p", "q"], "Length of one horizontal spine plus vertical branch centerlines at parcel centers.", (c,r,w,d,s)=>c*w+(c-1)*s+c*((r-1)*(d+s))),
-    command("service-radius <parcel-width> <parcel-depth>", ["p", "p"], "Farthest parcel-corner distance from its center.", (w,d)=>Math.hypot(w,d)/2),
-  ] },
+  {
+    name: 'vector',
+    note: 'Offline continuous 3D vector calculations. Coordinates use [x,y,z]; directions and projections do not establish navigability. Zero directions are rejected where a direction is required.',
+    commands: [
+      command('add <a> <b>', ['points3', 'points3'], 'Add corresponding vectors.', (a, b) => pair(a, b, addV)),
+      command('subtract <a> <b>', ['points3', 'points3'], 'Subtract corresponding vectors.', (a, b) =>
+        pair(a, b, subV),
+      ),
+      command('scale <vectors> <factor>', ['points3', 'n'], 'Scale vectors by a signed factor.', (a, f) =>
+        a.map((v) => mulV(v, f)),
+      ),
+      command('dot <a> <b>', ['points3', 'points3'], 'Compute paired scalar products.', (a, b) => pair(a, b, dot)),
+      command('cross <a> <b>', ['points3', 'points3'], 'Compute paired right-handed vector products.', (a, b) =>
+        pair(a, b, cross),
+      ),
+      command('length <vectors>', ['points3'], 'Measure vector magnitudes.', (a) => a.map(norm)),
+      command('normalize <vectors>', ['points3'], 'Normalize nonzero directions.', (a) => a.map(unit)),
+      command('project <vectors> <axis>', ['points3', 'points3'], 'Project vectors onto one nonzero axis.', (a, b) => {
+        const u = unit(one(b));
+        return a.map((v) => mulV(u, dot(v, u)));
+      }),
+      command(
+        'reject <vectors> <axis>',
+        ['points3', 'points3'],
+        'Remove components along one nonzero axis.',
+        (a, b) => {
+          const u = unit(one(b));
+          return a.map((v) => subV(v, mulV(u, dot(v, u))));
+        },
+      ),
+      command('angle <a> <b>', ['points3', 'points3'], 'Measure paired unsigned angles in degrees.', (a, b) =>
+        pair(a, b, (v, w) => (Math.acos(clamp(dot(unit(v), unit(w)), -1, 1)) * 180) / Math.PI),
+      ),
+      command(
+        'interpolate <a> <b> <fraction>',
+        ['points3', 'points3', 'r'],
+        'Interpolate paired endpoints.',
+        (a, b, t) => pair(a, b, (v, w) => addV(mulV(v, 1 - t), mulV(w, t))),
+      ),
+      command('component-product <a> <b>', ['points3', 'points3'], 'Multiply paired vector components.', (a, b) =>
+        pair(a, b, (v, w) => v.map((x, i) => x * w[i])),
+      ),
+      command('component-min <a> <b>', ['points3', 'points3'], 'Take paired component minima.', (a, b) =>
+        pair(a, b, (v, w) => v.map((x, i) => Math.min(x, w[i]))),
+      ),
+      command('component-max <a> <b>', ['points3', 'points3'], 'Take paired component maxima.', (a, b) =>
+        pair(a, b, (v, w) => v.map((x, i) => Math.max(x, w[i]))),
+      ),
+      command(
+        'cap-length <vectors> <maximum>',
+        ['points3', 'q'],
+        'Cap magnitudes without changing directions.',
+        (a, m) => a.map((v) => (norm(v) > m ? mulV(v, m / norm(v)) : v)),
+      ),
+      command(
+        'reflect <vectors> <normal>',
+        ['points3', 'points3'],
+        'Reflect directions across a plane through the origin.',
+        (a, b) => {
+          const u = unit(one(b));
+          return a.map((v) => subV(v, mulV(u, 2 * dot(v, u))));
+        },
+      ),
+      command(
+        'plane-distance <points> <normal> <offset>',
+        ['points3', 'points3', 'n'],
+        'Signed distance to unit-normal plane n dot p = offset.',
+        (a, b, d) => {
+          const u = unit(one(b));
+          return a.map((v) => dot(v, u) - d);
+        },
+      ),
+      command(
+        'plane-project <points> <normal> <offset>',
+        ['points3', 'points3', 'n'],
+        'Project points to unit-normal plane n dot p = offset.',
+        (a, b, d) => {
+          const u = unit(one(b));
+          return a.map((v) => subV(v, mulV(u, dot(v, u) - d)));
+        },
+      ),
+      command('triangle-normal <vertices>', ['points3'], 'Unit normal of exactly three noncollinear vertices.', (a) => {
+        demand(a.length === 3);
+        return unit(cross(subV(a[1], a[0]), subV(a[2], a[0])));
+      }),
+      command('triangle-area <vertices>', ['points3'], 'Continuous area of exactly three vertices.', (a) => {
+        demand(a.length === 3);
+        return norm(cross(subV(a[1], a[0]), subV(a[2], a[0]))) / 2;
+      }),
+      command('tetra-volume <vertices>', ['points3'], 'Unsigned volume of exactly four vertices.', (a) => {
+        demand(a.length === 4);
+        return Math.abs(dot(subV(a[1], a[0]), cross(subV(a[2], a[0]), subV(a[3], a[0])))) / 6;
+      }),
+      command(
+        'triple-product <vectors>',
+        ['points3'],
+        'Signed scalar triple product of exactly three vectors.',
+        (a) => {
+          demand(a.length === 3);
+          return dot(a[0], cross(a[1], a[2]));
+        },
+      ),
+      command(
+        'parallel <a> <b> <tolerance>',
+        ['points3', 'points3', 'r'],
+        'Test paired nonzero directions by sine-angle tolerance.',
+        (a, b, t) => pair(a, b, (v, w) => norm(cross(unit(v), unit(w))) <= t),
+      ),
+      command(
+        'orthogonal <a> <b> <tolerance>',
+        ['points3', 'points3', 'r'],
+        'Test paired nonzero directions by absolute cosine tolerance.',
+        (a, b, t) => pair(a, b, (v, w) => Math.abs(dot(unit(v), unit(w))) <= t),
+      ),
+      command('elevation <vectors>', ['points3'], 'Compute signed elevation above the X/Z plane in degrees.', (a) =>
+        a.map((v) => {
+          demand(norm(v) > 0);
+          return (Math.atan2(v[1], Math.hypot(v[0], v[2])) * 180) / Math.PI;
+        }),
+      ),
+    ],
+  },
+  {
+    name: 'voxel',
+    note: 'Offline sets of integer [x,y,z] cells. Duplicate cells collapse; faces use six orthogonal neighbors. Growth and enumeration are limited to 1000 cells; no world blocks are inspected.',
+    commands: [
+      command('unique <cells>', ['points3'], 'Canonicalize duplicate integer cells.', (a) => cells(a)),
+      command('union <a> <b>', ['points3', 'points3'], 'Union two occupied cell sets.', (a, b) =>
+        boundedCells([...cells(a), ...cells(b)]),
+      ),
+      command('intersection <a> <b>', ['points3', 'points3'], 'Keep cells shared by both sets.', (a, b) =>
+        filterCells(a, b, true),
+      ),
+      command('difference <a> <b>', ['points3', 'points3'], 'Remove cells present in the second set.', (a, b) =>
+        filterCells(a, b, false),
+      ),
+      command('exclusive <a> <b>', ['points3', 'points3'], 'Keep cells present in exactly one set.', (a, b) =>
+        boundedCells([...filterCells(a, b, false), ...filterCells(b, a, false)]),
+      ),
+      command('face-count <cells>', ['points3'], 'Count faces adjacent to unoccupied cells.', (a) => surface(cells(a))),
+      command('internal-faces <cells>', ['points3'], 'Count shared face pairs once.', (a) => {
+        const c = cells(a);
+        return (6 * c.length - surface(c)) / 2;
+      }),
+      command('bounds-volume <cells>', ['points3'], 'Count cells in the inclusive bounding cuboid.', (a) => {
+        const b = bounds(cells(a));
+        return b.max.reduce((v, x, i) => v * (x - b.min[i] + 1), 1);
+      }),
+      command('fill-fraction <cells>', ['points3'], 'Occupied fraction of inclusive bounding cuboid.', (a) => {
+        const c = cells(a),
+          b = bounds(c);
+        return c.length / b.max.reduce((v, x, i) => v * (x - b.min[i] + 1), 1);
+      }),
+      command('components <cells>', ['points3'], 'Partition cells into six-neighbor connected components.', (a) =>
+        components(cells(a)),
+      ),
+      command(
+        'neighbor-counts <cells>',
+        ['points3'],
+        'Count occupied orthogonal neighbors for each canonical cell.',
+        (a) => {
+          const c = cells(a),
+            s = new Set(c.map(key));
+          return c.map((v) => neighbors(v).filter((w) => s.has(key(w))).length);
+        },
+      ),
+      command('boundary-cells <cells>', ['points3'], 'Select occupied cells with any exposed face.', (a) => {
+        const c = cells(a),
+          s = new Set(c.map(key));
+        return c.filter((v) => neighbors(v).some((w) => !s.has(key(w))));
+      }),
+      command('layer-counts <cells>', ['points3'], 'Count occupied cells by ascending Y layer.', (a) =>
+        hist(cells(a).map((v) => v[1])),
+      ),
+      command('column-counts <cells>', ['points3'], 'Count occupied cells by X/Z column.', (a) => {
+        const m = new Map();
+        for (const v of cells(a)) {
+          const k = JSON.stringify([v[0], v[2]]);
+          m.set(k, (m.get(k) || 0) + 1);
+        }
+        return [...m].map(([k, n]) => [...JSON.parse(k), n]);
+      }),
+      command('bottom-cells <cells>', ['points3'], 'Select cells with no occupied neighbor immediately below.', (a) => {
+        const c = cells(a),
+          s = new Set(c.map(key));
+        return c.filter(([x, y, z]) => !s.has(key([x, y - 1, z])));
+      }),
+      command('centroid <cells>', ['points3'], 'Mean center of unique occupied cells.', (a) => meanV(cells(a))),
+      command('dilate <cells>', ['points3'], 'Add all six-neighbor cells by one Manhattan step.', (a) =>
+        boundedCells(cells(a).flatMap((v) => [v, ...neighbors(v)])),
+      ),
+      command('erode <cells>', ['points3'], 'Keep cells surrounded on all six faces.', (a) => {
+        const c = cells(a),
+          s = new Set(c.map(key));
+        return c.filter((v) => neighbors(v).every((w) => s.has(key(w))));
+      }),
+      command(
+        'translate <cells> <dx> <dy> <dz>',
+        ['points3', 'i', 'i', 'i'],
+        'Translate integer occupied cells.',
+        (a, x, y, z) => cells(a).map((v) => addV(v, [x, y, z])),
+      ),
+      command('top-cells <cells>', ['points3'], 'Select cells with no occupied neighbor immediately above.', (a) => {
+        const c = cells(a),
+          s = new Set(c.map(key));
+        return c.filter(([x, y, z]) => !s.has(key([x, y + 1, z])));
+      }),
+      command('slice-y <cells> <y>', ['points3', 'i'], 'Extract one horizontal integer layer.', (a, y) =>
+        cells(a).filter((v) => v[1] === y),
+      ),
+      command(
+        'clip-box <cells> <corners>',
+        ['points3', 'points3'],
+        'Clip cells to two ordered inclusive cuboid corners.',
+        (a, b) => {
+          const [lo, hi] = box(b);
+          return cells(a).filter((v) => v.every((n, i) => n >= lo[i] && n <= hi[i]));
+        },
+      ),
+      command('fill-box <corners>', ['points3'], 'Enumerate all integer cells between two ordered corners.', (a) => {
+        const [lo, hi] = box(a),
+          d = hi.map((v, i) => v - lo[i] + 1);
+        return sequence(d[0] * d[1] * d[2], (i) => [
+          lo[0] + (i % d[0]),
+          lo[1] + (wholeFloor(i / d[0]) % d[1]),
+          lo[2] + wholeFloor(i / (d[0] * d[1])),
+        ]);
+      }),
+      command(
+        'overlap-fraction <a> <b>',
+        ['points3', 'points3'],
+        'Compute intersection over union for occupied sets.',
+        (a, b) => {
+          const common = filterCells(a, b, true).length;
+          return common / (cells(a).length + cells(b).length - common);
+        },
+      ),
+      command(
+        'disconnected-count <cells>',
+        ['points3'],
+        'Count cells outside the largest six-neighbor component.',
+        (a) => {
+          const c = cells(a);
+          return c.length - Math.max(...components(c).map((v) => v.length));
+        },
+      ),
+    ],
+  },
+  {
+    name: 'tunnel',
+    note: 'Offline rectangular tunnel takeoffs. Width/height are clear interior cell dimensions, wall thickness is explicit, length counts cross-section slices. Openings and terrain are not observed; these quantities do not execute mining or building.',
+    commands: [
+      command(
+        'excavate <width> <height> <length>',
+        ['s', 's', 'c'],
+        'Count clear rectangular excavation cells.',
+        (w, h, l) => w * h * l,
+      ),
+      command(
+        'lining <width> <height> <length> <thickness>',
+        ['s', 's', 'c', 's'],
+        'Count complete outer rectangular lining excluding end caps.',
+        (w, h, l, t) => ((w + 2 * t) * (h + 2 * t) - w * h) * l,
+      ),
+      command(
+        'floor-strip <width> <length> <thickness>',
+        ['s', 'c', 's'],
+        'Count floor material under clear width.',
+        (w, l, t) => w * l * t,
+      ),
+      command(
+        'ceiling-strip <width> <length> <overhang>',
+        ['s', 'c', 'c'],
+        'Count one-cell ceiling including side overhang.',
+        (w, l, o) => (w + 2 * o) * l,
+      ),
+      command(
+        'sidewalls <height> <length> <thickness>',
+        ['s', 'c', 's'],
+        'Count two straight sidewalls excluding floor and ceiling.',
+        (h, l, t) => 2 * h * l * t,
+      ),
+      command(
+        'portal-ring <width> <height> <thickness>',
+        ['s', 's', 's'],
+        'Count lining in one portal cross section.',
+        (w, h, t) => (w + 2 * t) * (h + 2 * t) - w * h,
+      ),
+      command(
+        'end-caps <width> <height> <thickness> <caps>',
+        ['s', 's', 's', 'c'],
+        'Count solid clear-opening closure cells.',
+        (w, h, t, c) => w * h * t * c,
+      ),
+      command(
+        'cross-section <width> <height> <thickness>',
+        ['s', 's', 'c'],
+        'Report outer cross-section dimensions.',
+        (w, h, t) => [w + 2 * t, h + 2 * t],
+      ),
+      command(
+        'support-count <length> <spacing>',
+        ['s', 's'],
+        'Count endpoint-inclusive support frames.',
+        (l, s) => wholeCeil((l - 1) / s) + 1,
+      ),
+      command(
+        'support-positions <length> <spacing>',
+        ['s', 's'],
+        'List endpoint-inclusive support slice indices.',
+        (l, s) => sequence(wholeCeil((l - 1) / s) + 1, (i) => Math.min(i * s, l - 1)),
+      ),
+      command(
+        'support-material <width> <height> <frames>',
+        ['s', 's', 'c'],
+        'Count U-shaped one-cell frames: two posts plus header.',
+        (w, h, f) => (2 * h + w + 2) * f,
+      ),
+      command(
+        'clear-width <outer-width> <lining>',
+        ['s', 'c'],
+        'Subtract two lining widths and reject blocked interiors.',
+        (w, t) => {
+          demand(w > 2 * t);
+          return w - 2 * t;
+        },
+      ),
+      command(
+        'clear-height <outer-height> <floor> <ceiling>',
+        ['s', 'c', 'c'],
+        'Subtract floor and ceiling from outer height.',
+        (h, f, c) => {
+          demand(h > f + c);
+          return h - f - c;
+        },
+      ),
+      command(
+        'parallel-bores <bores> <width> <separation>',
+        ['s', 's', 'c'],
+        'Compute total clear-bore and separator width.',
+        (n, w, s) => n * w + (n - 1) * s,
+      ),
+      command(
+        'cross-passages <length> <spacing> <bores> <separation> <height>',
+        ['s', 's', 's', 's', 's'],
+        'Count excavation in internal cross passages at regular nonendpoint stations.',
+        (l, s, b, d, h) => wholeFloor(Math.max(0, l - 2) / s) * (b - 1) * d * h,
+      ),
+      command(
+        'drain <length> <width> <depth>',
+        ['c', 's', 's'],
+        'Count cells in a rectangular below-floor drain.',
+        (l, w, d) => l * w * d,
+      ),
+      command(
+        'walkway-share <width> <walkways> <walkway-width>',
+        ['s', 'c', 's'],
+        'Compute remaining clear travel width after side walkways.',
+        (w, n, s) => {
+          demand(n * s <= w);
+          return { remaining: w - n * s, walkwayFraction: (n * s) / w };
+        },
+      ),
+      command(
+        'grade-rise <length> <rise-per-slice>',
+        ['c', 'n'],
+        'Compute supplied linear elevation change.',
+        (l, g) => l * g,
+      ),
+      command(
+        'ramp-slices <rise> <maximum-rise>',
+        ['q', 'p'],
+        'Round required horizontal slices for supplied grade limit.',
+        (r, g) => wholeCeil(r / g),
+      ),
+      command(
+        'headroom <ceiling-y> <floor-y> <required>',
+        ['n', 'n', 'p'],
+        'Report signed continuous headroom margin.',
+        (c, f, r) => {
+          demand(c >= f);
+          return c - f - r;
+        },
+      ),
+      command(
+        'haul-work <slice-volume> <length>',
+        ['q', 'c'],
+        'Sum cell-distance hauling to entry from slice centers.',
+        (v, l) => (v * l * l) / 2,
+      ),
+      command(
+        'two-end-haul <slice-volume> <length>',
+        ['q', 's'],
+        'Sum integer-slice hauling to nearest endpoint.',
+        (v, l) => v * wholeFloor((l - 1) ** 2 / 4),
+      ),
+      command(
+        'spoil-trips <volume> <capacity>',
+        ['c', 's'],
+        'Round up trips for supplied spoil carrying capacity.',
+        (v, c) => wholeCeil(v / c),
+      ),
+      command(
+        'progress <completed-slices> <length>',
+        ['c', 's'],
+        'Report tunnel completion fraction and uncut slices.',
+        (c, l) => {
+          demand(c <= l);
+          return { fraction: c / l, remaining: l - c };
+        },
+      ),
+      command(
+        'work-window <length> <slices-per-minute> <setup-minutes>',
+        ['c', 'p', 'q'],
+        'Estimate active excavation minutes plus one setup.',
+        (l, r, s) => (l === 0 ? 0 : s + l / r),
+      ),
+    ],
+  },
+  {
+    name: 'bridgeplan',
+    note: 'Offline bridge layout and material estimates from caller dimensions. Span partitions and loads are arithmetic only and establish neither structural stability nor in-game build feasibility. No blocks are placed.',
+    commands: [
+      command(
+        'deck-cells <length> <width> <thickness>',
+        ['s', 's', 's'],
+        'Count a rectangular deck.',
+        (l, w, t) => l * w * t,
+      ),
+      command(
+        'abutment-cells <width> <height> <depth>',
+        ['s', 's', 's'],
+        'Count two solid rectangular abutments.',
+        (w, h, d) => 2 * w * h * d,
+      ),
+      command(
+        'span-count <distance> <maximum-span>',
+        ['p', 'p'],
+        'Round a continuous gap into bounded spans.',
+        (d, m) => wholeCeil(d / m),
+      ),
+      command(
+        'equal-spans <distance> <maximum-span>',
+        ['p', 'p'],
+        'List equalized spans that satisfy the supplied maximum.',
+        (d, m) => {
+          const n = wholeCeil(d / m);
+          return sequence(n, () => d / n);
+        },
+      ),
+      command('pier-count <spans>', ['s'], 'Count internal piers between endpoint supports.', (n) => n - 1),
+      command('pier-stations <distance> <spans>', ['p', 's'], 'List internal equally spaced pier chainages.', (d, n) =>
+        sequence(n - 1, (i) => ((i + 1) * d) / n),
+      ),
+      command(
+        'pier-volume <heights> <width> <depth>',
+        ['L', 'p', 'p'],
+        'Sum rectangular pier volumes from supplied heights.',
+        (h, w, d) => sum(h) * w * d,
+      ),
+      command(
+        'rail-cells <length> <rail-height> <sides>',
+        ['s', 's', 'c'],
+        'Count solid side railing cells excluding end returns.',
+        (l, h, s) => l * h * s,
+      ),
+      command(
+        'post-count <length> <spacing> <sides>',
+        ['s', 's', 's'],
+        'Count endpoint-inclusive posts along selected sides.',
+        (l, s, n) => (wholeCeil((l - 1) / s) + 1) * n,
+      ),
+      command(
+        'post-volume <length> <spacing> <height> <sides>',
+        ['s', 's', 's', 's'],
+        'Count one-cell vertical post columns.',
+        (l, s, h, n) => (wholeCeil((l - 1) / s) + 1) * h * n,
+      ),
+      command(
+        'underbeam <length> <beams> <depth>',
+        ['s', 's', 's'],
+        'Count continuous one-cell-wide underdeck beams.',
+        (l, n, d) => l * n * d,
+      ),
+      command(
+        'crossbeams <length> <spacing> <width>',
+        ['s', 's', 's'],
+        'Count one-cell transverse beams at endpoint-inclusive stations.',
+        (l, s, w) => (wholeCeil((l - 1) / s) + 1) * w,
+      ),
+      command(
+        'clearance <deck-bottom> <highest-obstacle> <minimum>',
+        ['n', 'n', 'q'],
+        'Report signed vertical clearance margin.',
+        (d, o, m) => d - o - m,
+      ),
+      command(
+        'approach-length <deck-y> <ground-y> <maximum-grade>',
+        ['n', 'n', 'p'],
+        'Estimate minimum continuous approach run.',
+        (d, g, m) => Math.abs(d - g) / m,
+      ),
+      command(
+        'approach-fill <width> <run> <rise>',
+        ['p', 'q', 'q'],
+        'Estimate triangular-prism approach fill.',
+        (w, r, h) => (w * r * h) / 2,
+      ),
+      command(
+        'deck-slope <start-y> <end-y> <run>',
+        ['n', 'n', 'p'],
+        'Compute signed deck rise per horizontal unit.',
+        (s, e, r) => (e - s) / r,
+      ),
+      command('sloped-length <run> <rise>', ['q', 'n'], 'Compute continuous sloped deck length.', (r, h) =>
+        Math.hypot(r, h),
+      ),
+      command(
+        'expansion-gaps <length> <section-length> <gap>',
+        ['p', 'p', 'q'],
+        'Count internal expansion joints and aggregate gap width.',
+        (l, s, g) => {
+          const joints = wholeCeil(l / s) - 1;
+          return { joints, totalGap: joints * g };
+        },
+      ),
+      command(
+        'deck-panels <length> <width> <panel-length> <panel-width>',
+        ['s', 's', 's', 's'],
+        'Count axis-aligned rectangular panels with edge trimming.',
+        (l, w, a, b) => wholeCeil(l / a) * wholeCeil(w / b),
+      ),
+      command(
+        'panel-waste <length> <width> <panel-length> <panel-width>',
+        ['s', 's', 's', 's'],
+        'Compute purchased panel area beyond deck area.',
+        (l, w, a, b) => wholeCeil(l / a) * wholeCeil(w / b) * a * b - l * w,
+      ),
+      command(
+        'tributary-load <spans> <load-per-length>',
+        ['P', 'q'],
+        'Allocate uniform span loads to adjacent supports by halves.',
+        (s, q) => sequence(s.length + 1, (i) => (((s[i - 1] || 0) + (s[i] || 0)) * q) / 2),
+      ),
+      command(
+        'load-total <length> <width> <load-per-area>',
+        ['p', 'p', 'q'],
+        'Multiply supplied uniform surface load by area.',
+        (l, w, q) => l * w * q,
+      ),
+      command(
+        'cantilever-share <overhang> <supported-length>',
+        ['q', 'p'],
+        'Compute overhang fraction of total longitudinal extent.',
+        (o, s) => o / (o + s),
+      ),
+      command(
+        'material-reserve <deck> <supports> <reserve-fraction>',
+        ['c', 'c', 'r'],
+        'Add rounded reserve to explicit deck and support counts.',
+        (d, s, r) => wholeCeil((d + s) * (1 + r)),
+      ),
+      command(
+        'build-hours <cells> <cells-per-hour> <mobilization>',
+        ['c', 'p', 'q'],
+        'Estimate placement hours plus one mobilization for nonempty work.',
+        (c, r, m) => (c ? c / r + m : 0),
+      ),
+    ],
+  },
+  {
+    name: 'roofplan',
+    note: 'Offline continuous roof takeoffs unless a command explicitly says cells. Width and length include only caller-supplied extents; no placement, weather, collision, recipe, or structural behavior is assumed.',
+    commands: [
+      command(
+        'gable-rise <width> <pitch>',
+        ['p', 'q'],
+        'Rise of a centered gable with supplied rise/run pitch.',
+        (w, p) => (w * p) / 2,
+      ),
+      command('gable-rafter <width> <rise>', ['p', 'q'], 'Length from eave to centered ridge.', (w, h) =>
+        Math.hypot(w / 2, h),
+      ),
+      command(
+        'gable-surface <width> <length> <rise>',
+        ['p', 'p', 'q'],
+        'Combined area of two gable roof planes.',
+        (w, l, h) => 2 * l * Math.hypot(w / 2, h),
+      ),
+      command('gable-end <width> <rise>', ['p', 'q'], 'Area of one triangular gable wall.', (w, h) => (w * h) / 2),
+      command(
+        'gable-volume <width> <length> <rise>',
+        ['p', 'p', 'q'],
+        'Enclosed triangular-prism attic volume.',
+        (w, l, h) => (w * l * h) / 2,
+      ),
+      command(
+        'shed-surface <width> <length> <rise>',
+        ['p', 'p', 'q'],
+        'Area of one rectangular sloping shed plane.',
+        (w, l, h) => l * Math.hypot(w, h),
+      ),
+      command(
+        'shed-volume <width> <length> <low-height> <rise>',
+        ['p', 'p', 'q', 'q'],
+        'Volume below a shed roof above a flat datum.',
+        (w, l, b, h) => w * l * (b + h / 2),
+      ),
+      command(
+        'hip-ridge <width> <length>',
+        ['p', 'p'],
+        'Equal-pitch hip roof ridge length with length at least width.',
+        (w, l) => {
+          demand(l >= w);
+          return l - w;
+        },
+      ),
+      command(
+        'hip-surface <width> <length> <rise>',
+        ['p', 'p', 'q'],
+        'Surface area of equal-pitch hip roof on a rectangle.',
+        (w, l, h) => {
+          demand(l >= w);
+          return 2 * l * Math.hypot(w / 2, h);
+        },
+      ),
+      command(
+        'pyramid-surface <side> <rise>',
+        ['p', 'q'],
+        'Lateral surface area of a square pyramid roof.',
+        (s, h) => 2 * s * Math.hypot(s / 2, h),
+      ),
+      command(
+        'pyramid-volume <side> <rise>',
+        ['p', 'q'],
+        'Volume under a square pyramid roof.',
+        (s, h) => (s * s * h) / 3,
+      ),
+      command(
+        'overhang-footprint <width> <length> <overhang>',
+        ['p', 'p', 'q'],
+        'Projected footprint including equal overhang on all sides.',
+        (w, l, o) => (w + 2 * o) * (l + 2 * o),
+      ),
+      command('eave-length <width> <length>', ['p', 'p'], 'Total horizontal eave perimeter.', (w, l) => 2 * (w + l)),
+      command('ridge-cap <ridge-length> <unit-length>', ['q', 'p'], 'Round ridge length to whole cap units.', (l, u) =>
+        wholeCeil(l / u),
+      ),
+      command(
+        'tile-order <surface-area> <coverage> <waste>',
+        ['q', 'p', 'r'],
+        'Round supplied net coverage and waste into whole tiles.',
+        (a, c, w) => wholeCeil((a * (1 + w)) / c),
+      ),
+      command(
+        'course-count <slope-length> <exposure>',
+        ['q', 'p'],
+        'Round slope length to exposed tile courses.',
+        (l, e) => wholeCeil(l / e),
+      ),
+      command(
+        'course-overlap <tile-length> <exposure>',
+        ['p', 'p'],
+        'Compute longitudinal overlap between adjacent courses.',
+        (t, e) => {
+          demand(e <= t);
+          return t - e;
+        },
+      ),
+      command(
+        'batten-length <ridge-length> <courses> <sides>',
+        ['q', 'c', 's'],
+        'Sum continuous battens along each roof course.',
+        (l, c, s) => l * c * s,
+      ),
+      command(
+        'rafter-count <length> <spacing> <sides>',
+        ['p', 'p', 's'],
+        'Count endpoint-inclusive rafters along selected roof sides.',
+        (l, s, n) => (wholeCeil(l / s) + 1) * n,
+      ),
+      command(
+        'rafter-stock <width> <rise> <count>',
+        ['p', 'q', 'c'],
+        'Sum stock length for equal gable half-span rafters.',
+        (w, h, n) => Math.hypot(w / 2, h) * n,
+      ),
+      command(
+        'gutter-fall <length> <gradient>',
+        ['q', 'q'],
+        'Vertical fall for supplied gutter gradient.',
+        (l, g) => l * g,
+      ),
+      command(
+        'outlet-count <area> <area-per-outlet>',
+        ['q', 'p'],
+        'Round projected catchment area into outlets using supplied capacity.',
+        (a, c) => wholeCeil(a / c),
+      ),
+      command(
+        'rain-volume <projected-area> <rain-depth> <capture-fraction>',
+        ['q', 'q', 'r'],
+        'Ideal captured volume from matching area/depth units.',
+        (a, d, c) => a * d * c,
+      ),
+      command(
+        'stepped-profile <half-width> <rise>',
+        ['s', 'c'],
+        'List floor-rounded gable heights from eave through ridge.',
+        (w, h) => sequence(w + 1, (i) => wholeFloor((i * h) / w)),
+      ),
+      command(
+        'attic-clear-width <width> <rise> <required-height>',
+        ['p', 'p', 'q'],
+        'Width with sufficient headroom under a centered triangular gable.',
+        (w, h, r) => w * Math.max(0, 1 - r / h),
+      ),
+    ],
+  },
+  {
+    name: 'facade',
+    note: 'Offline wall and opening layouts. Coordinates are continuous wall-local [horizontal,vertical]; counts use explicit dimensions. Openings must fit where documented; layouts are never placed in Minecraft.',
+    commands: [
+      command('opening-area <widths> <heights>', ['P', 'P'], 'Sum rectangular opening areas.', (w, h) => {
+        same(w, h);
+        return sum(w.map((v, i) => v * h[i]));
+      }),
+      command(
+        'net-wall <width> <height> <opening-area>',
+        ['p', 'p', 'q'],
+        'Subtract explicit total opening area, rejecting excess.',
+        (w, h, o) => {
+          demand(o <= w * h);
+          return w * h - o;
+        },
+      ),
+      command(
+        'window-columns <wall-width> <margin> <window-width> <gap>',
+        ['p', 'q', 'p', 'q'],
+        'Maximum equally gapped windows between margins.',
+        (w, m, a, g) => {
+          demand(w >= 2 * m);
+          return Math.max(0, wholeFloor((w - 2 * m + g) / (a + g)));
+        },
+      ),
+      command(
+        'window-rows <wall-height> <sill> <head-margin> <window-height> <gap>',
+        ['p', 'q', 'q', 'p', 'q'],
+        'Maximum rows above a sill and below a head margin.',
+        (h, s, m, a, g) => {
+          demand(h >= s + m);
+          return Math.max(0, wholeFloor((h - s - m + g) / (a + g)));
+        },
+      ),
+      command(
+        'centered-start <wall-width> <count> <opening-width> <gap>',
+        ['p', 's', 'p', 'q'],
+        'Left offset for a centered row of openings.',
+        (w, n, a, g) => {
+          const used = n * a + (n - 1) * g;
+          demand(used <= w);
+          return (w - used) / 2;
+        },
+      ),
+      command(
+        'equal-gaps <wall-width> <count> <opening-width>',
+        ['p', 's', 'p'],
+        'Equal gaps including both wall ends.',
+        (w, n, a) => {
+          demand(n * a <= w);
+          return (w - n * a) / (n + 1);
+        },
+      ),
+      command(
+        'window-centers <start> <count> <width> <gap> <sill> <height>',
+        ['n', 's', 'p', 'q', 'n', 'p'],
+        'List center coordinates of a horizontal window row.',
+        (x, n, w, g, y, h) => sequence(n, (i) => [x + i * (w + g) + w / 2, y + h / 2]),
+      ),
+      command(
+        'frame-perimeter <width> <height> <count>',
+        ['p', 'p', 'c'],
+        'Total continuous frame centerline perimeter.',
+        (w, h, n) => 2 * (w + h) * n,
+      ),
+      command(
+        'frame-ring <width> <height> <thickness> <count>',
+        ['p', 'p', 'p', 'c'],
+        'Area of outer frame rings around clear openings.',
+        (w, h, t, n) => ((w + 2 * t) * (h + 2 * t) - w * h) * n,
+      ),
+      command(
+        'sill-stock <width> <overhang> <count>',
+        ['p', 'q', 'c'],
+        'Total sill length including both side overhangs.',
+        (w, o, n) => (w + 2 * o) * n,
+      ),
+      command(
+        'lintel-order <width> <bearing> <count> <stock-length>',
+        ['p', 'q', 'c', 'p'],
+        'Order whole unjoined lintel members cut from supplied stock lengths.',
+        (w, b, n, s) => {
+          const member = w + 2 * b;
+          demand(member <= s);
+          const perStock = wholeFloor(s / member),
+            stocks = wholeCeil(n / perStock);
+          return { stocks, waste: stocks * s - n * member };
+        },
+      ),
+      command(
+        'mullion-stock <height> <divisions> <windows>',
+        ['p', 's', 'c'],
+        'Vertical mullion length for equal panes per window.',
+        (h, d, n) => h * (d - 1) * n,
+      ),
+      command(
+        'transom-stock <width> <rows> <windows>',
+        ['p', 's', 'c'],
+        'Horizontal transom length for equal pane rows.',
+        (w, r, n) => w * (r - 1) * n,
+      ),
+      command(
+        'pane-size <width> <height> <columns> <rows> <bar-width>',
+        ['p', 'p', 's', 's', 'q'],
+        'Clear pane dimensions after internal bars.',
+        (w, h, c, r, b) => {
+          demand(w > (c - 1) * b && h > (r - 1) * b);
+          return [(w - (c - 1) * b) / c, (h - (r - 1) * b) / r];
+        },
+      ),
+      command(
+        'glazing-fraction <wall-area> <glazed-area>',
+        ['p', 'q'],
+        'Compute wall glazing fraction, rejecting excess.',
+        (w, g) => {
+          demand(g <= w);
+          return g / w;
+        },
+      ),
+      command(
+        'pier-minimum <wall-width> <openings> <opening-width> <minimum>',
+        ['p', 's', 'p', 'p'],
+        'Check equal solid pier widths against a supplied minimum.',
+        (w, n, a, m) => {
+          demand(n * a < w);
+          const width = (w - n * a) / (n + 1);
+          return { width, passes: width >= m };
+        },
+      ),
+      command('bay-width <wall-width> <bays>', ['p', 's'], 'Compute equal facade bay width.', (w, n) => w / n),
+      command('bay-boundaries <wall-width> <bays>', ['p', 's'], 'List local equal bay divider coordinates.', (w, n) =>
+        sequence(n + 1, (i) => (i * w) / n),
+      ),
+      command(
+        'story-datums <base-y> <story-heights>',
+        ['n', 'P'],
+        'List base and cumulative story elevations.',
+        (y, h) => {
+          let n = y;
+          return [y, ...h.map((v) => (n += v))];
+        },
+      ),
+      command(
+        'spandrel-height <story-height> <sill-height> <window-height>',
+        ['p', 'q', 'p'],
+        'Compute remaining height above a window in one story.',
+        (s, b, h) => {
+          demand(b + h <= s);
+          return s - b - h;
+        },
+      ),
+      command(
+        'cladding-panels <width> <height> <panel-width> <panel-height>',
+        ['p', 'p', 'p', 'p'],
+        'Count axis-aligned cladding panels with edge cutting.',
+        (w, h, a, b) => wholeCeil(w / a) * wholeCeil(h / b),
+      ),
+      command(
+        'joint-length <columns> <rows> <panel-width> <panel-height>',
+        ['s', 's', 'p', 'p'],
+        'Total internal panel seam length on an untrimmed rectangular array.',
+        (c, r, w, h) => (c - 1) * r * h + (r - 1) * c * w,
+      ),
+      command(
+        'reveal-area <width> <height> <depth> <count>',
+        ['p', 'p', 'q', 'c'],
+        'Area of four internal reveals around clear openings.',
+        (w, h, d, n) => 2 * (w + h) * d * n,
+      ),
+      command(
+        'door-threshold <door-widths> <depth>',
+        ['P', 'p'],
+        'Total threshold surface area for supplied doors.',
+        (w, d) => sum(w) * d,
+      ),
+      command(
+        'accent-band <perimeter> <band-height> <bands>',
+        ['p', 'p', 'c'],
+        'Surface area of supplied horizontal accent bands.',
+        (p, h, n) => p * h * n,
+      ),
+    ],
+  },
+  {
+    name: 'spiral',
+    note: 'Offline ideal polar spirals and helices. Angles are degrees; radial growth is supplied units per full revolution. Samples are bounded to 1000 points and are geometric layouts, never routes proven traversable.',
+    commands: [
+      command(
+        'arch-radius <initial> <growth> <turns>',
+        ['q', 'n', 'q'],
+        'Radius after a supplied number of Archimedean turns.',
+        (r, g, t) => {
+          demand(r + g * t >= 0);
+          return r + g * t;
+        },
+      ),
+      command(
+        'arch-point <initial> <growth> <turns>',
+        ['q', 'n', 'q'],
+        'X/Z coordinate at a nonnegative Archimedean turn.',
+        (r, g, t) => {
+          const radius = r + g * t;
+          demand(radius >= 0);
+          return [radius * Math.cos(t * 2 * Math.PI), radius * Math.sin(t * 2 * Math.PI)];
+        },
+      ),
+      command(
+        'arch-samples <initial> <growth> <turns> <segments>',
+        ['q', 'n', 'q', 's'],
+        'Endpoint-inclusive samples of an Archimedean spiral.',
+        (r, g, t, n) => {
+          demand(Math.min(r, r + g * t) >= 0);
+          return sequence(n + 1, (i) => {
+            const u = (t * i) / n,
+              v = r + g * u;
+            return [v * Math.cos(u * 2 * Math.PI), v * Math.sin(u * 2 * Math.PI)];
+          });
+        },
+      ),
+      command('turn-spacing <growth>', ['n'], 'Absolute radial spacing between full revolutions.', (g) => Math.abs(g)),
+      command(
+        'turns-to-radius <initial> <target> <growth>',
+        ['q', 'q', 'n'],
+        'Solve outward or inward spiral turns to a radius.',
+        (r, t, g) => {
+          demand(g !== 0 && (t - r) / g >= 0);
+          return (t - r) / g;
+        },
+      ),
+      command(
+        'annulus-area <inner> <outer>',
+        ['q', 'p'],
+        'Area swept between inner and outer spiral radii.',
+        (a, b) => {
+          demand(b >= a);
+          return Math.PI * (b * b - a * a);
+        },
+      ),
+      command('helix-rise <turns> <pitch>', ['q', 'n'], 'Signed height after supplied helix turns.', (t, p) => t * p),
+      command('helix-turns <rise> <pitch>', ['n', 'n'], 'Solve nonnegative turn count for a signed pitch.', (r, p) => {
+        demand(p !== 0 && r / p >= 0);
+        return r / p;
+      }),
+      command(
+        'helix-length <radius> <pitch> <turns>',
+        ['q', 'n', 'q'],
+        'Continuous constant-radius helix arc length.',
+        (r, p, t) => Math.hypot(2 * Math.PI * r, p) * t,
+      ),
+      command(
+        'helix-grade <radius> <pitch>',
+        ['p', 'n'],
+        'Signed rise divided by horizontal circumference.',
+        (r, p) => p / (2 * Math.PI * r),
+      ),
+      command(
+        'helix-point <radius> <pitch> <turns>',
+        ['q', 'n', 'q'],
+        'X/Y/Z coordinate on a constant-radius helix.',
+        (r, p, t) => [r * Math.cos(t * 2 * Math.PI), p * t, r * Math.sin(t * 2 * Math.PI)],
+      ),
+      command(
+        'helix-samples <radius> <pitch> <turns> <segments>',
+        ['q', 'n', 'q', 's'],
+        'Endpoint-inclusive helix coordinate samples.',
+        (r, p, t, n) =>
+          sequence(n + 1, (i) => {
+            const u = (t * i) / n;
+            return [r * Math.cos(u * 2 * Math.PI), p * u, r * Math.sin(u * 2 * Math.PI)];
+          }),
+      ),
+      command('helix-step-angle <steps-per-turn>', ['s'], 'Angular advance of equal subdivisions.', (n) => 360 / n),
+      command(
+        'helix-step-rise <pitch> <steps-per-turn>',
+        ['n', 's'],
+        'Vertical advance per equal subdivision.',
+        (p, n) => p / n,
+      ),
+      command(
+        'helix-step-chord <radius> <pitch> <steps-per-turn>',
+        ['q', 'n', 's'],
+        'Straight 3D chord length between adjacent equal subdivisions.',
+        (r, p, n) => Math.hypot(2 * r * Math.sin(Math.PI / n), p / n),
+      ),
+      command(
+        'headroom-pitch <clear-height> <deck-thickness>',
+        ['p', 'q'],
+        'Minimum turn pitch from supplied vertical clearances.',
+        (h, d) => h + d,
+      ),
+      command(
+        'headroom-margin <pitch> <deck-thickness> <required>',
+        ['q', 'q', 'q'],
+        'Signed vertical separation margin between stacked turns.',
+        (p, d, h) => p - d - h,
+      ),
+      command(
+        'inner-radius <outer-radius> <walk-width>',
+        ['p', 'p'],
+        'Compute remaining central void radius.',
+        (r, w) => {
+          demand(w <= r);
+          return r - w;
+        },
+      ),
+      command(
+        'walking-radius <inner-radius> <width> <fraction>',
+        ['q', 'p', 'r'],
+        'Radius of a supplied position across a spiral walkway.',
+        (r, w, f) => r + w * f,
+      ),
+      command(
+        'ring-deck-area <inner-radius> <width> <turns>',
+        ['q', 'p', 'q'],
+        'Horizontal annulus area repeated per turn, ignoring slope.',
+        (r, w, t) => Math.PI * ((r + w) ** 2 - r * r) * t,
+      ),
+      command('post-angles <posts> <offset>', ['s', 'n'], 'Even angular positions around one turn.', (n, o) =>
+        sequence(n, (i) => o + (360 * i) / n),
+      ),
+      command(
+        'rise-stations <total-rise> <maximum-step>',
+        ['q', 'p'],
+        'Count equal-rise subdivisions for a target ascent.',
+        (h, m) => wholeCeil(h / m),
+      ),
+      command(
+        'angular-speed <turns-per-minute>',
+        ['q'],
+        'Convert turns per minute to degrees per second.',
+        (t) => t * 6,
+      ),
+      command(
+        'helix-travel <radius> <pitch> <turns> <speed>',
+        ['q', 'n', 'q', 'p'],
+        'Ideal travel time along a continuous helix.',
+        (r, p, t, s) => (Math.hypot(2 * Math.PI * r, p) * t) / s,
+      ),
+      command(
+        'radial-clearance <growth> <corridor-width>',
+        ['n', 'p'],
+        'Signed radial margin between adjacent full spiral turns.',
+        (g, w) => Math.abs(g) - w,
+      ),
+    ],
+  },
+  {
+    name: 'symmetry',
+    note: 'Offline 3D reflection, rotation, orbits, and symmetry checks on supplied points. Equality checks use supplied absolute tolerance; no collision, block legality, or world state is evaluated.',
+    commands: [
+      command('mirror-x <points> <plane-x>', ['points3', 'n'], 'Reflect points across x = plane-x.', (a, x) =>
+        a.map((v) => [2 * x - v[0], v[1], v[2]]),
+      ),
+      command('mirror-y <points> <plane-y>', ['points3', 'n'], 'Reflect points across y = plane-y.', (a, y) =>
+        a.map((v) => [v[0], 2 * y - v[1], v[2]]),
+      ),
+      command('mirror-z <points> <plane-z>', ['points3', 'n'], 'Reflect points across z = plane-z.', (a, z) =>
+        a.map((v) => [v[0], v[1], 2 * z - v[2]]),
+      ),
+      command('invert <points> <center>', ['points3', 'points3'], 'Point reflection about one center.', (a, c) => {
+        const v = one(c);
+        return a.map((p) => subV(mulV(v, 2), p));
+      }),
+      command('quarter-y <points>', ['points3'], 'Rotate positive ninety degrees about Y.', (a) =>
+        a.map(([x, y, z]) => [z, y, -x]),
+      ),
+      command('quarter-x <points>', ['points3'], 'Rotate positive ninety degrees about X.', (a) =>
+        a.map(([x, y, z]) => [x, -z, y]),
+      ),
+      command('quarter-z <points>', ['points3'], 'Rotate positive ninety degrees about Z.', (a) =>
+        a.map(([x, y, z]) => [-y, x, z]),
+      ),
+      command('swap-xy <points>', ['points3'], 'Reflect across diagonal plane x = y.', (a) =>
+        a.map(([x, y, z]) => [y, x, z]),
+      ),
+      command('swap-xz <points>', ['points3'], 'Reflect across diagonal plane x = z.', (a) =>
+        a.map(([x, y, z]) => [z, y, x]),
+      ),
+      command('swap-yz <points>', ['points3'], 'Reflect across diagonal plane y = z.', (a) =>
+        a.map(([x, y, z]) => [x, z, y]),
+      ),
+      command('orbit-four <point>', ['points3'], 'Fourfold Y-axis orbit of one point.', (a) => {
+        const [x, y, z] = one(a);
+        return [
+          [x, y, z],
+          [z, y, -x],
+          [-x, y, -z],
+          [-z, y, x],
+        ];
+      }),
+      command('orbit-eight <point>', ['points3'], 'Distinct sign-reflection orbit across all origin planes.', (a) => {
+        const v = one(a);
+        return distinct(sequence(8, (i) => v.map((n, j) => (i & (1 << j) ? -n : n))));
+      }),
+      command(
+        'radial-orbit <point> <copies>',
+        ['points3', 's'],
+        'Equally rotated copies about Y including original.',
+        (a, n) => {
+          const v = one(a);
+          return sequence(n, (i) => rotateY(v, (360 * i) / n));
+        },
+      ),
+      command(
+        'screw-orbit <point> <copies> <angle> <rise>',
+        ['points3', 's', 'n', 'n'],
+        'Repeated Y-axis rotation combined with vertical translation.',
+        (a, n, d, h) => {
+          const v = one(a);
+          return sequence(n, (i) => addV(rotateY(v, d * i), [0, h * i, 0]));
+        },
+      ),
+      command(
+        'glide-x <points> <plane-x> <dy> <dz>',
+        ['points3', 'n', 'n', 'n'],
+        'Reflect across an X-plane then translate within that plane.',
+        (a, x, y, z) => a.map((v) => [2 * x - v[0], v[1] + y, v[2] + z]),
+      ),
+      command('rotate-y <points> <degrees>', ['points3', 'n'], 'Rotate point list around Y through origin.', (a, d) =>
+        a.map((v) => rotateY(v, d)),
+      ),
+      command(
+        'x-symmetric <points> <plane-x> <tolerance>',
+        ['points3', 'n', 'q'],
+        'Check whether every point has a reflected partner across an X-plane.',
+        (a, x, t) =>
+          matches(
+            a,
+            a.map((v) => [2 * x - v[0], v[1], v[2]]),
+            t,
+          ),
+      ),
+      command(
+        'y-symmetric <points> <plane-y> <tolerance>',
+        ['points3', 'n', 'q'],
+        'Check reflected partners across a Y-plane.',
+        (a, y, t) =>
+          matches(
+            a,
+            a.map((v) => [v[0], 2 * y - v[1], v[2]]),
+            t,
+          ),
+      ),
+      command(
+        'z-symmetric <points> <plane-z> <tolerance>',
+        ['points3', 'n', 'q'],
+        'Check reflected partners across a Z-plane.',
+        (a, z, t) =>
+          matches(
+            a,
+            a.map((v) => [v[0], v[1], 2 * z - v[2]]),
+            t,
+          ),
+      ),
+      command(
+        'rotational-check <points> <degrees> <tolerance>',
+        ['points3', 'n', 'q'],
+        'Check point-set invariance under a supplied Y rotation.',
+        (a, d, t) =>
+          matches(
+            a,
+            a.map((v) => rotateY(v, d)),
+            t,
+          ),
+      ),
+      command(
+        'central-check <points> <center> <tolerance>',
+        ['points3', 'points3', 'q'],
+        'Check point-set invariance under point reflection.',
+        (a, c, t) => {
+          const v = one(c);
+          return matches(
+            a,
+            a.map((p) => subV(mulV(v, 2), p)),
+            t,
+          );
+        },
+      ),
+      command(
+        'pair-midpoints <a> <b>',
+        ['points3', 'points3'],
+        'Compute centers that would make paired points centrally symmetric.',
+        (a, b) => pair(a, b, (v, w) => mulV(addV(v, w), 0.5)),
+      ),
+      command(
+        'missing-x <points> <plane-x> <tolerance>',
+        ['points3', 'n', 'q'],
+        'List reflected X-plane partners absent from the supplied set.',
+        (a, x, t) =>
+          distinct(a.map((v) => [2 * x - v[0], v[1], v[2]]).filter((v) => !a.some((p) => norm(subV(v, p)) <= t))),
+      ),
+      command(
+        'fundamental-x <points> <plane-x>',
+        ['points3', 'n'],
+        'Select the closed right half-space of an X-reflection layout.',
+        (a, x) => a.filter((v) => v[0] >= x),
+      ),
+      command(
+        'symmetry-error <points> <plane-x>',
+        ['points3', 'n'],
+        'Maximum nearest-partner error after X reflection.',
+        (a, x) => Math.max(...a.map((v) => Math.min(...a.map((p) => norm(subV([2 * x - v[0], v[1], v[2]], p)))))),
+      ),
+    ],
+  },
+  {
+    name: 'landmark',
+    note: 'Offline coordinate survey calculations on caller-supplied [x,y,z] landmarks. Range and bearing geometry ignores occlusion, terrain, measurement uncertainty unless explicit, and dimension transitions. No observations are fetched.',
+    commands: [
+      command('ranges <origin> <landmarks>', ['points3', 'points3'], 'Compute 3D ranges from one origin.', (o, a) => {
+        const p = one(o);
+        return a.map((v) => norm(subV(v, p)));
+      }),
+      command(
+        'horizontal-ranges <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Compute horizontal ranges from one origin.',
+        (o, a) => {
+          const p = one(o);
+          return a.map((v) => Math.hypot(v[0] - p[0], v[2] - p[2]));
+        },
+      ),
+      command(
+        'vertical-offsets <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Compute signed landmark height differences.',
+        (o, a) => {
+          const p = one(o);
+          return a.map((v) => v[1] - p[1]);
+        },
+      ),
+      command(
+        'nearest-index <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Return first nearest landmark index, zero-based.',
+        (o, a) => {
+          const p = one(o),
+            d = a.map((v) => norm(subV(v, p)));
+          return d.indexOf(Math.min(...d));
+        },
+      ),
+      command(
+        'farthest-index <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Return first farthest landmark index, zero-based.',
+        (o, a) => {
+          const p = one(o),
+            d = a.map((v) => norm(subV(v, p)));
+          return d.indexOf(Math.max(...d));
+        },
+      ),
+      command(
+        'range-filter <origin> <landmarks> <minimum> <maximum>',
+        ['points3', 'points3', 'q', 'q'],
+        'Select landmarks within a closed 3D range band.',
+        (o, a, l, h) => {
+          demand(h >= l);
+          const p = one(o);
+          return a.filter((v) => {
+            const d = norm(subV(v, p));
+            return d >= l && d <= h;
+          });
+        },
+      ),
+      command(
+        'sort-range <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Sort landmarks by 3D distance with stable ties.',
+        (o, a) => {
+          const p = one(o);
+          return [...a].sort((v, w) => norm(subV(v, p)) - norm(subV(w, p)));
+        },
+      ),
+      command(
+        'range-margin <origin> <landmarks> <maximum>',
+        ['points3', 'points3', 'q'],
+        'Report signed range margins to a supplied maximum.',
+        (o, a, m) => {
+          const p = one(o);
+          return a.map((v) => m - norm(subV(v, p)));
+        },
+      ),
+      command(
+        'elevation-angles <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Signed sight elevation angles above horizontal.',
+        (o, a) => {
+          const p = one(o);
+          return a.map((v) => {
+            const d = subV(v, p);
+            demand(norm(d) > 0);
+            return (Math.atan2(d[1], Math.hypot(d[0], d[2])) * 180) / Math.PI;
+          });
+        },
+      ),
+      command(
+        'sight-grade <origin> <landmarks>',
+        ['points3', 'points3'],
+        'Signed vertical over horizontal sight slopes.',
+        (o, a) => {
+          const p = one(o);
+          return a.map((v) => {
+            const d = subV(v, p),
+              h = Math.hypot(d[0], d[2]);
+            demand(h > 0);
+            return d[1] / h;
+          });
+        },
+      ),
+      command(
+        'height-from-angle <horizontal-range> <degrees> <eye-y>',
+        ['q', 'n', 'n'],
+        'Infer landmark height from supplied sight angle and horizontal range.',
+        (r, d, y) => {
+          demand(Math.abs(d) < 90);
+          return y + r * Math.tan((d * Math.PI) / 180);
+        },
+      ),
+      command(
+        'range-from-height <height-difference> <degrees>',
+        ['n', 'n'],
+        'Infer positive horizontal range from height difference and sight angle.',
+        (h, d) => {
+          demand(Math.abs(d) < 90 && d !== 0);
+          const r = h / Math.tan((d * Math.PI) / 180);
+          demand(r >= 0);
+          return r;
+        },
+      ),
+      command('baseline <landmarks>', ['points3'], 'Length of a baseline defined by exactly two landmarks.', (a) => {
+        demand(a.length === 2);
+        return norm(subV(a[1], a[0]));
+      }),
+      command('baseline-midpoint <landmarks>', ['points3'], 'Midpoint of exactly two survey landmarks.', (a) => {
+        demand(a.length === 2);
+        return mulV(addV(a[0], a[1]), 0.5);
+      }),
+      command(
+        'baseline-fraction <landmarks> <point>',
+        ['points3', 'points3'],
+        'Unclamped projection fraction along a nonzero landmark baseline.',
+        (a, b) => {
+          demand(a.length === 2);
+          const v = subV(a[1], a[0]);
+          demand(dot(v, v) > 0);
+          return dot(subV(one(b), a[0]), v) / dot(v, v);
+        },
+      ),
+      command(
+        'baseline-offset <landmarks> <point>',
+        ['points3', 'points3'],
+        'Perpendicular distance to the infinite landmark baseline.',
+        (a, b) => {
+          demand(a.length === 2);
+          const v = unit(subV(a[1], a[0]));
+          return norm(cross(subV(one(b), a[0]), v));
+        },
+      ),
+      command(
+        'sight-interpolate <landmarks> <fraction>',
+        ['points3', 'r'],
+        'Point at supplied fraction along two landmark endpoints.',
+        (a, t) => {
+          demand(a.length === 2);
+          return addV(mulV(a[0], 1 - t), mulV(a[1], t));
+        },
+      ),
+      command(
+        'trilaterate-flat <baseline> <first-range> <second-range>',
+        ['p', 'q', 'q'],
+        'Two X/Z solutions relative to landmarks at (0,0) and (baseline,0).',
+        (b, r, s) => {
+          const x = (r * r - s * s + b * b) / (2 * b),
+            z2 = r * r - x * x;
+          demand(z2 >= -1e-8);
+          const z = Math.sqrt(Math.max(0, z2));
+          return [
+            [x, z],
+            [x, -z],
+          ];
+        },
+      ),
+      command(
+        'bearing-cross <origins> <first-degrees> <second-degrees>',
+        ['points2', 'n', 'n'],
+        'Intersect two infinite X/Z bearing lines; zero degrees is +X.',
+        (o, a, b) => {
+          demand(o.length === 2);
+          const u = [Math.cos((a * Math.PI) / 180), Math.sin((a * Math.PI) / 180)],
+            v = [Math.cos((b * Math.PI) / 180), Math.sin((b * Math.PI) / 180)],
+            d = u[0] * v[1] - u[1] * v[0];
+          demand(Math.abs(d) > 1e-10);
+          const p = [o[1][0] - o[0][0], o[1][1] - o[0][1]],
+            t = (p[0] * v[1] - p[1] * v[0]) / d;
+          return [o[0][0] + t * u[0], o[0][1] + t * u[1]];
+        },
+      ),
+      command(
+        'weighted-fix <landmarks> <weights>',
+        ['points3', 'L'],
+        'Compute weighted mean position from explicit nonnegative weights.',
+        (a, w) => {
+          same(a, w);
+          const t = sum(w);
+          demand(t > 0);
+          return [0, 1, 2].map((i) => sum(a.map((v, j) => v[i] * w[j])) / t);
+        },
+      ),
+      command(
+        'measurement-residuals <estimate> <landmarks> <ranges>',
+        ['points3', 'points3', 'L'],
+        'Subtract measured ranges from predicted 3D ranges.',
+        (e, a, r) => {
+          same(a, r);
+          const p = one(e);
+          return a.map((v, i) => norm(subV(v, p)) - r[i]);
+        },
+      ),
+      command(
+        'range-rms <estimate> <landmarks> <ranges>',
+        ['points3', 'points3', 'L'],
+        'RMS residual over explicit measured landmark ranges.',
+        (e, a, r) => {
+          same(a, r);
+          const p = one(e);
+          return Math.sqrt(sum(a.map((v, i) => (norm(subV(v, p)) - r[i]) ** 2)) / a.length);
+        },
+      ),
+      command(
+        'sphere-shell <range> <error>',
+        ['q', 'q'],
+        'Inner and outer radii for an absolute range error.',
+        (r, e) => [Math.max(0, r - e), r + e],
+      ),
+      command(
+        'angular-width <object-width> <range>',
+        ['q', 'p'],
+        'Ideal angular width of centered perpendicular object in degrees.',
+        (w, r) => (2 * Math.atan(w / (2 * r)) * 180) / Math.PI,
+      ),
+      command(
+        'range-ratio <first-range> <second-range>',
+        ['q', 'p'],
+        'Relative scale of two supplied landmark ranges.',
+        (a, b) => a / b,
+      ),
+    ],
+  },
+  {
+    name: 'district',
+    note: 'Offline rectangular district and parcel estimates. Road strips and parcels are explicitly abstract rectangles; counts ignore terrain, existing blocks, ownership, connectivity, and game mechanics. No construction is executed.',
+    commands: [
+      command('parcel-count <columns> <rows>', ['s', 's'], 'Count regular grid parcels.', (c, r) => c * r),
+      command(
+        'parcel-area <width> <depth> <columns> <rows>',
+        ['p', 'p', 's', 's'],
+        'Area of each equal parcel without roads.',
+        (w, d, c, r) => (w * d) / (c * r),
+      ),
+      command(
+        'street-footprint <columns> <rows> <parcel-width> <parcel-depth> <street-width>',
+        ['s', 's', 'p', 'p', 'q'],
+        'Compute extent with internal streets only.',
+        (c, r, w, d, s) => [c * w + (c - 1) * s, r * d + (r - 1) * s],
+      ),
+      command(
+        'street-area <columns> <rows> <parcel-width> <parcel-depth> <street-width>',
+        ['s', 's', 'p', 'p', 'q'],
+        'Compute union area of internal streets without double-counting intersections.',
+        (c, r, w, d, s) => (c * w + (c - 1) * s) * (r * d + (r - 1) * s) - c * r * w * d,
+      ),
+      command(
+        'street-intersections <columns> <rows>',
+        ['s', 's'],
+        'Count crossings of internal orthogonal streets.',
+        (c, r) => (c - 1) * (r - 1),
+      ),
+      command(
+        'street-length <columns> <rows> <parcel-width> <parcel-depth> <street-width>',
+        ['s', 's', 'p', 'p', 'q'],
+        'Sum full centerline lengths of internal streets including crossings twice.',
+        (c, r, w, d, s) => (c - 1) * (r * d + (r - 1) * s) + (r - 1) * (c * w + (c - 1) * s),
+      ),
+      command(
+        'parcel-origins <columns> <rows> <width> <depth> <street>',
+        ['s', 's', 'p', 'p', 'q'],
+        'List lower-left origins row-major.',
+        (c, r, w, d, s) => sequence(c * r, (i) => [(i % c) * (w + s), wholeFloor(i / c) * (d + s)]),
+      ),
+      command(
+        'parcel-centers <columns> <rows> <width> <depth> <street>',
+        ['s', 's', 'p', 'p', 'q'],
+        'List parcel center coordinates row-major.',
+        (c, r, w, d, s) => sequence(c * r, (i) => [(i % c) * (w + s) + w / 2, wholeFloor(i / c) * (d + s) + d / 2]),
+      ),
+      command(
+        'setback-area <width> <depth> <setback>',
+        ['p', 'p', 'q'],
+        'Buildable rectangle area after equal edge setbacks.',
+        (w, d, s) => {
+          demand(2 * s <= Math.min(w, d));
+          return (w - 2 * s) * (d - 2 * s);
+        },
+      ),
+      command(
+        'setback-loss <width> <depth> <setback>',
+        ['p', 'p', 'q'],
+        'Fraction of parcel lost to equal edge setbacks.',
+        (w, d, s) => {
+          demand(2 * s <= Math.min(w, d));
+          return 1 - ((w - 2 * s) * (d - 2 * s)) / (w * d);
+        },
+      ),
+      command(
+        'courtyard-layout <outer-width> <outer-depth> <wing-width>',
+        ['p', 'p', 'p'],
+        'Dimensions and area of courtyard within uniform perimeter wings.',
+        (w, d, t) => {
+          demand(2 * t <= Math.min(w, d));
+          return { width: w - 2 * t, depth: d - 2 * t, area: (w - 2 * t) * (d - 2 * t) };
+        },
+      ),
+      command(
+        'perimeter-building <outer-width> <outer-depth> <wing-width> <stories>',
+        ['p', 'p', 'p', 's'],
+        'Gross floor area of rectangular ring building.',
+        (w, d, t, n) => {
+          demand(2 * t <= Math.min(w, d));
+          return (w * d - (w - 2 * t) * (d - 2 * t)) * n;
+        },
+      ),
+      command(
+        'coverage <building-area> <parcel-area>',
+        ['q', 'p'],
+        'Building footprint share of parcel area.',
+        (b, p) => {
+          demand(b <= p);
+          return b / p;
+        },
+      ),
+      command(
+        'floor-ratio <floor-area> <parcel-area>',
+        ['q', 'p'],
+        'Gross floor area per parcel area.',
+        (f, p) => f / p,
+      ),
+      command(
+        'story-budget <floor-area-target> <footprint>',
+        ['q', 'p'],
+        'Minimum whole stories for a gross floor area target.',
+        (f, p) => wholeCeil(f / p),
+      ),
+      command(
+        'green-area <district-area> <building-area> <street-area>',
+        ['p', 'q', 'q'],
+        'Residual unallocated open area after disjoint buildings and streets.',
+        (d, b, s) => {
+          demand(b + s <= d);
+          return d - b - s;
+        },
+      ),
+      command(
+        'frontage <columns> <rows> <parcel-width>',
+        ['s', 's', 'p'],
+        'Aggregate one-edge frontage of all parcels.',
+        (c, r, w) => c * r * w,
+      ),
+      command(
+        'frontage-lots <edge-length> <lot-frontage> <end-reserve>',
+        ['p', 'p', 'q'],
+        'Count whole lots after symmetric end reserves.',
+        (e, l, r) => {
+          demand(2 * r <= e);
+          return wholeFloor((e - 2 * r) / l);
+        },
+      ),
+      command(
+        'corner-parcels <columns> <rows>',
+        ['s', 's'],
+        'Count unique parcels at grid corners, including degenerate grids.',
+        (c, r) => Math.min(2, c) * Math.min(2, r),
+      ),
+      command(
+        'edge-parcels <columns> <rows>',
+        ['s', 's'],
+        'Count unique grid-boundary parcels.',
+        (c, r) => c * r - Math.max(0, c - 2) * Math.max(0, r - 2),
+      ),
+      command(
+        'interior-parcels <columns> <rows>',
+        ['s', 's'],
+        'Count parcels not touching district boundary.',
+        (c, r) => Math.max(0, c - 2) * Math.max(0, r - 2),
+      ),
+      command(
+        'checker-parcels <columns> <rows>',
+        ['s', 's'],
+        'Count alternating even and odd grid parcel classes.',
+        (c, r) => ({ even: wholeCeil((c * r) / 2), odd: wholeFloor((c * r) / 2) }),
+      ),
+      command(
+        'phase-rows <columns> <rows> <rows-per-phase>',
+        ['s', 's', 's'],
+        'List parcel counts for consecutive construction row phases.',
+        (c, r, n) => sequence(wholeCeil(r / n), (i) => Math.min(n, r - i * n) * c),
+      ),
+      command(
+        'utility-trunk <columns> <rows> <parcel-width> <parcel-depth> <street-width>',
+        ['s', 's', 'p', 'p', 'q'],
+        'Length of one horizontal spine plus vertical branch centerlines at parcel centers.',
+        (c, r, w, d, s) => c * w + (c - 1) * s + c * ((r - 1) * (d + s)),
+      ),
+      command(
+        'service-radius <parcel-width> <parcel-depth>',
+        ['p', 'p'],
+        'Farthest parcel-corner distance from its center.',
+        (w, d) => Math.hypot(w, d) / 2,
+      ),
+    ],
+  },
 ];

@@ -9,7 +9,9 @@ import { DemoDriver } from '../src/demo-driver.js';
 import { startBridge } from '../src/bridge-server.js';
 import { testDirectory } from './helpers.js';
 
-test('CLI verification returns exit 2 for a false success claim and exit 0 for observed criteria', { timeout: 15_000 }, async t => {
+test('CLI verification returns exit 2 for a false success claim and exit 0 for observed criteria', {
+  timeout: 15_000,
+}, async (t) => {
   const directory = await testDirectory(t, 'agent-cli-');
   const discoveryPath = join(directory, 'bridge.json');
   const driver = new DemoDriver();
@@ -31,20 +33,44 @@ test('CLI verification returns exit 2 for a false success claim and exit 0 for o
     response.writeHead(200, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify({ message: { content: JSON.stringify(decisions.shift()) } }));
   });
-  await new Promise(resolve => model.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) => model.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     await bridge.close();
     model.closeAllConnections();
-    await new Promise(resolve => model.close(resolve));
+    await new Promise((resolve) => model.close(resolve));
   });
-  const run = (...extra) => new Promise(resolve => execFile(process.execPath, [join(projectRoot, 'src/cli.js'), '--bridge', discoveryPath,
-    'agent', 'Collect eight additional oak logs and return home', '--model', 'mock', '--ollama', `http://127.0.0.1:${model.address().port}`,
-    '--verify-collect', 'oak_log:8', '--verify-home', ...extra], { timeout: 10_000 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+  const run = (...extra) =>
+    new Promise((resolve) =>
+      execFile(
+        process.execPath,
+        [
+          join(projectRoot, 'src/cli.js'),
+          '--bridge',
+          discoveryPath,
+          'agent',
+          'Collect eight additional oak logs and return home',
+          '--model',
+          'mock',
+          '--ollama',
+          `http://127.0.0.1:${model.address().port}`,
+          '--verify-collect',
+          'oak_log:8',
+          '--verify-home',
+          ...extra,
+        ],
+        { timeout: 10_000 },
+        (error, stdout, stderr) => resolve({ error, stdout, stderr }),
+      ),
+    );
   const falseClaim = await run();
   assert.equal(falseClaim.error?.code, 2, falseClaim.stderr);
   assert.equal(JSON.parse(falseClaim.stdout).status, 'criteria_unmet');
   assert.equal(harness.observe().mode, 'manual');
-  decisions = [{ type: 'collect', block: 'oak_log', count: 8 }, { type: 'home' }, { type: 'done', reason: 'Returned with the logs.' }];
+  decisions = [
+    { type: 'collect', block: 'oak_log', count: 8 },
+    { type: 'home' },
+    { type: 'done', reason: 'Returned with the logs.' },
+  ];
   const completed = await run('--no-thinking');
   assert.equal(completed.error, null, completed.stderr);
   const result = JSON.parse(completed.stdout);
@@ -55,8 +81,7 @@ test('CLI verification returns exit 2 for a false success claim and exit 0 for o
   assert.equal(harness.observe().mode, 'manual');
 });
 
-
-test('CLI exposes final-state criteria and returns exit 2 at a step limit', { timeout: 15_000 }, async t => {
+test('CLI exposes final-state criteria and returns exit 2 at a step limit', { timeout: 15_000 }, async (t) => {
   const directory = await testDirectory(t, 'criteria-cli-');
   const driver = new DemoDriver();
   driver.home = { ...driver.player.position };
@@ -69,17 +94,49 @@ test('CLI exposes final-state criteria and returns exit 2 at a step limit', { ti
     response.setHeader('Content-Type', 'application/json');
     response.end(JSON.stringify({ message: { content: JSON.stringify(decision) } }));
   });
-  await new Promise(resolve => model.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) => model.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     await bridge.close();
     model.closeAllConnections();
-    await new Promise(resolve => model.close(resolve));
+    await new Promise((resolve) => model.close(resolve));
   });
-  const run = (...flags) => new Promise(resolve => execFile(process.execPath, [join(projectRoot, 'src/cli.js'), '--bridge', discoveryPath,
-    'agent', 'Check the final state', '--model', 'mock', '--steps', '1', '--ollama', `http://127.0.0.1:${model.address().port}`, ...flags],
-    { timeout: 10_000 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
-  const passed = await run('--verify-health', '20', '--verify-hunger', '14', '--verify-at', '0,64,0,0',
-    '--verify-inventory', 'bread:8', '--verify-max-threats', '0', '--verify-home', '--verify-home-radius', '0');
+  const run = (...flags) =>
+    new Promise((resolve) =>
+      execFile(
+        process.execPath,
+        [
+          join(projectRoot, 'src/cli.js'),
+          '--bridge',
+          discoveryPath,
+          'agent',
+          'Check the final state',
+          '--model',
+          'mock',
+          '--steps',
+          '1',
+          '--ollama',
+          `http://127.0.0.1:${model.address().port}`,
+          ...flags,
+        ],
+        { timeout: 10_000 },
+        (error, stdout, stderr) => resolve({ error, stdout, stderr }),
+      ),
+    );
+  const passed = await run(
+    '--verify-health',
+    '20',
+    '--verify-hunger',
+    '14',
+    '--verify-at',
+    '0,64,0,0',
+    '--verify-inventory',
+    'bread:8',
+    '--verify-max-threats',
+    '0',
+    '--verify-home',
+    '--verify-home-radius',
+    '0',
+  );
   assert.equal(passed.error, null, passed.stderr);
   const result = JSON.parse(passed.stdout);
   assert.equal(result.status, 'criteria_met');

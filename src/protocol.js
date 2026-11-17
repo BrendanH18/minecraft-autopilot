@@ -1,41 +1,57 @@
 import { z } from 'zod';
 
-export const positionSchema = z.object({
-  x: z.number().finite().min(-29_999_984).max(29_999_984),
-  y: z.number().finite().min(-64).max(320),
-  z: z.number().finite().min(-29_999_984).max(29_999_984),
-}).strict();
+export const positionSchema = z
+  .object({
+    x: z.number().finite().min(-29_999_984).max(29_999_984),
+    y: z.number().finite().min(-64).max(320),
+    z: z.number().finite().min(-29_999_984).max(29_999_984),
+  })
+  .strict();
 
 /** The most containers one scoped inspect_storage may name. */
 export const MAX_INSPECT_CONTAINERS = 16;
 /** A container's block coordinates. */
-export const containerPositionSchema = z.object({
-  x: z.number().int().min(-29_999_984).max(29_999_984),
-  y: z.number().int().min(-64).max(320),
-  z: z.number().int().min(-29_999_984).max(29_999_984),
-}).strict();
+export const containerPositionSchema = z
+  .object({
+    x: z.number().int().min(-29_999_984).max(29_999_984),
+    y: z.number().int().min(-64).max(320),
+    z: z.number().int().min(-29_999_984).max(29_999_984),
+  })
+  .strict();
 
 export const actionSchema = z.discriminatedUnion('type', [
   positionSchema.extend({ type: z.literal('goto') }),
   z.object({ type: z.literal('home') }).strict(),
   z.object({ type: z.literal('set_home') }).strict(),
-  z.object({
-    type: z.literal('collect'),
-    block: z.string().regex(/^(?:minecraft:)?[a-z0-9_]+$/).max(100),
-    count: z.number().int().min(1).max(64),
-  }).strict(),
+  z
+    .object({
+      type: z.literal('collect'),
+      block: z
+        .string()
+        .regex(/^(?:minecraft:)?[a-z0-9_]+$/)
+        .max(100),
+      count: z.number().int().min(1).max(64),
+    })
+    .strict(),
   z.object({ type: z.literal('eat') }).strict(),
-  z.object({
-    type: z.literal('inspect_storage'),
-    // Omitted reopens every container known this session; a list reopens only those integer block positions.
-    containers: z.array(containerPositionSchema).min(1).max(MAX_INSPECT_CONTAINERS).optional(),
-  }).strict(),
-  z.object({
-    type: z.literal('deposit'),
-    item: z.string().regex(/^(?:minecraft:)?[a-z0-9_]+$/).max(100),
-    // Omitted count deposits every matching item; a full inventory holds at most 36 stacks of 64.
-    count: z.number().int().min(1).max(2304).optional(),
-  }).strict(),
+  z
+    .object({
+      type: z.literal('inspect_storage'),
+      // Omitted reopens every container known this session; a list reopens only those integer block positions.
+      containers: z.array(containerPositionSchema).min(1).max(MAX_INSPECT_CONTAINERS).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('deposit'),
+      item: z
+        .string()
+        .regex(/^(?:minecraft:)?[a-z0-9_]+$/)
+        .max(100),
+      // Omitted count deposits every matching item; a full inventory holds at most 36 stacks of 64.
+      count: z.number().int().min(1).max(2304).optional(),
+    })
+    .strict(),
   z.object({ type: z.literal('wait'), seconds: z.number().min(1).max(3600) }).strict(),
 ]);
 
@@ -50,6 +66,7 @@ export function normalizeAction(action) {
 export function assertPlayable(state) {
   if (!state.connected || !state.player) throw new Error('Enter a world or connect to a server first.');
   // Fabric reports focusPaused when the only blocker is the pause menu opened by switching windows; takeover closes it.
-  if (state.paused && !state.focusPaused) throw new Error('Minecraft is paused. Resume the game before giving the agent control.');
+  if (state.paused && !state.focusPaused)
+    throw new Error('Minecraft is paused. Resume the game before giving the agent control.');
   if (state.player.health <= 0) throw new Error('Your character is dead. Respawn manually before continuing.');
 }
