@@ -23,6 +23,8 @@
     "check": "node scripts/check.js",
     "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",
+    "lint:mod": "node scripts/gradle.js spotlessCheck",
+    "format:mod": "node scripts/gradle.js spotlessApply",
     "setup:mod": "node scripts/setup-mod.js",
     "build:mod": "npm run setup:mod && node scripts/gradle.js build && node scripts/package-mod.js",
     "verify:mod": "node scripts/verify-mod.js",
