@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": ["**/*.js"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        // Off when Biome was added: each had existing findings in deliberate code. Enable one at a time later.
+        "noAssignInExpressions": "off", // 16 findings, mostly `while ((m = re.exec(s)))` loops
+        "noControlCharactersInRegex": "off", // strips ANSI escapes from server logs
+        "noSparseArray": "off", // 17 findings, all deliberate holes in test tables
+        "useIterableCallbackReturn": "off" // 6 forEach callbacks written as expressions
+      },
+      "correctness": {
+        "noPrecisionLoss": "off" // 2 full-precision expected values in test cases
+      }
+    }
+  },
+  "assist": {
+    "enabled": false
+  }
+}

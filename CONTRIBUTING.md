@@ -23,6 +23,7 @@ Add regression coverage for behavior changes. Documentation edits generally need
 Before submitting code changes:
 
 ```sh
+npm run lint
 npm run check
 npm test
 npm start -- demo --smoke

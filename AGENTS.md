@@ -13,6 +13,13 @@
 - This repo is public: keep personal notes and machine-specific details out of
   tracked files.
 
+## Lint and format
+
+- Biome (pinned in `package.json`, configured in `biome.jsonc`) lints and
+  formats every tracked `.js` file. `npm run lint` checks both and CI runs it;
+  `npm run format` applies formatting and safe fixes. Fix what it reports
+  rather than hand-formatting. The Java mod has no formatter yet.
+
 ## Context maintenance
 
 - Keep project rules and durable project knowledge in tracked `AGENTS.md` and
