@@ -24,6 +24,7 @@ Before submitting code changes:
 
 ```sh
 npm run lint
+npm run lint:mod
 npm run check
 npm test
 npm start -- demo --smoke

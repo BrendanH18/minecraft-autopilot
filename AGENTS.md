@@ -10,15 +10,25 @@
   approved (owner, 2026-10-05).
 - Keep caches and runtime files inside the repo, and stop Minecraft, bridges
   and test servers after validation.
-- This repo is public: keep personal notes and machine-specific details out of
-  tracked files.
+- This repo is private on GitHub, but keep personal notes and machine-specific
+  details out of tracked files anyway.
 
 ## Lint and format
 
 - Biome (pinned in `package.json`, configured in `biome.jsonc`) lints and
-  formats every tracked `.js` file. `npm run lint` checks both and CI runs it;
-  `npm run format` applies formatting and safe fixes. Fix what it reports
-  rather than hand-formatting. The Java mod has no formatter yet.
+  formats every tracked `.js`, `.json` and `.jsonc` file except
+  `package-lock.json`. `npm run lint` runs `biome ci --error-on-warnings`, so
+  warnings fail it too, and CI runs it; `npm run format` applies formatting and
+  safe fixes. Fix what it reports rather than hand-formatting or suppressing
+  it; prefix an unused parameter with `_` only when its position must stay.
+- Spotless (configured in `mod/build.gradle`) formats the mod's Java with
+  palantir-java-format. `npm run lint:mod` checks it and `npm run format:mod`
+  applies it, offline through `scripts/gradle.js`. Gradle's `check`, and so
+  `build` and the CI `mod` job, fails on unformatted Java.
+- actionlint (version pinned in `.github/workflows/ci.yml`, configured in
+  `.github/actionlint.yaml`) checks the workflows in the CI `node` job; it is
+  not installed locally. Pin every action to a full commit SHA with a
+  `# vX.Y.Z` comment, and run jobs on Namespace runners.
 - The main ruleset requires the `node` and `mod` CI jobs to pass. A new CI
   job must be added to the ruleset's required checks to block merges.
 
