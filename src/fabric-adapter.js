@@ -18,7 +18,9 @@ export class FabricAdapter {
     this.actionInFlight = false;
   }
 
-  static async connect(path) { return new FabricAdapter(await readBridge(path)); }
+  static async connect(path) {
+    return new FabricAdapter(await readBridge(path));
+  }
 
   async request(path, body, signal) {
     let response;
@@ -38,7 +40,9 @@ export class FabricAdapter {
     return result;
   }
 
-  async observe() { return this.request('/v1/state'); }
+  async observe() {
+    return this.request('/v1/state');
+  }
 
   async acquire() {
     if (this.closed) throw new Error('Adapter is closed.');
@@ -49,39 +53,46 @@ export class FabricAdapter {
     }
     if (this.pendingAcquire) return this.pendingAcquire;
     const generation = this.generation;
-    this.pendingAcquire = Promise.resolve().then(async () => {
-      let state = await this.observe();
-      // Cancelled native work on a server bot (e.g. eating) can take a few seconds to settle after the previous command.
-      for (const until = Date.now() + 10_000; state.stopping && Date.now() < until;) {
-        await delay(250);
+    this.pendingAcquire = Promise.resolve()
+      .then(async () => {
+        let state = await this.observe();
+        // Cancelled native work on a server bot (e.g. eating) can take a few seconds to settle after the previous command.
+        for (const until = Date.now() + 10_000; state.stopping && Date.now() < until; ) {
+          await delay(250);
+          if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
+          state = await this.observe();
+        }
+        assertPlayable(state);
         if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
-        state = await this.observe();
-      }
-      assertPlayable(state);
-      if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
-      const leaseId = randomUUID();
-      try {
-        // Await confirmation so a late reply can be released explicitly after shutdown.
-        await this.request('/v1/control', { action: 'acquire', leaseId });
-        if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
-      } catch (error) {
-        await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
-        throw error;
-      }
-      this.leaseId = leaseId;
-      this.leaseError = null;
-      this.sessionController = new AbortController();
-      this.timer = setInterval(() => {
-        if (this.heartbeatInFlight) return;
-        this.heartbeatInFlight = this.request('/v1/control', { action: 'heartbeat', leaseId })
-          .catch(error => {
-            this.leaseError = error;
-            this.sessionController?.abort(error);
-            clearInterval(this.timer);
-          }).finally(() => { this.heartbeatInFlight = null; });
-      }, 2000);
-      this.timer.unref();
-    }).finally(() => { this.pendingAcquire = null; });
+        const leaseId = randomUUID();
+        try {
+          // Await confirmation so a late reply can be released explicitly after shutdown.
+          await this.request('/v1/control', { action: 'acquire', leaseId });
+          if (generation !== this.generation || this.closed) throw new Error('Control acquisition was cancelled.');
+        } catch (error) {
+          await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
+          throw error;
+        }
+        this.leaseId = leaseId;
+        this.leaseError = null;
+        this.sessionController = new AbortController();
+        this.timer = setInterval(() => {
+          if (this.heartbeatInFlight) return;
+          this.heartbeatInFlight = this.request('/v1/control', { action: 'heartbeat', leaseId })
+            .catch((error) => {
+              this.leaseError = error;
+              this.sessionController?.abort(error);
+              clearInterval(this.timer);
+            })
+            .finally(() => {
+              this.heartbeatInFlight = null;
+            });
+        }, 2000);
+        this.timer.unref();
+      })
+      .finally(() => {
+        this.pendingAcquire = null;
+      });
     return this.pendingAcquire;
   }
 
@@ -110,10 +121,17 @@ export class FabricAdapter {
         const state = await this.request('/v1/state', undefined, signal);
         const job = state.job;
         if (job?.id !== started.id) throw new Error('Action was interrupted by another controller.');
-        if (JSON.stringify(job) !== previous) { onProgress(job); previous = JSON.stringify(job); }
+        if (JSON.stringify(job) !== previous) {
+          onProgress(job);
+          previous = JSON.stringify(job);
+        }
         if (terminalStatuses.has(job.status)) {
           // A failed deposit may already have moved items; keep the container it reported.
-          if (job.status !== 'completed') throw Object.assign(new Error(job.message || `Action ${job.status}`), job.container && { container: job.container });
+          if (job.status !== 'completed')
+            throw Object.assign(
+              new Error(job.message || `Action ${job.status}`),
+              job.container && { container: job.container },
+            );
           return job;
         }
         if (state.mode !== 'agent') throw new Error('Control was returned to the player.');
@@ -122,7 +140,9 @@ export class FabricAdapter {
     } catch (error) {
       if (submitted) await this.request('/v1/cancel', { leaseId }).catch(() => {});
       throw signal?.aborted ? signal.reason : error;
-    } finally { this.actionInFlight = false; }
+    } finally {
+      this.actionInFlight = false;
+    }
   }
 
   async cancel() {
@@ -130,7 +150,9 @@ export class FabricAdapter {
   }
 
   // Explicit emergency stop works even from a second CLI process.
-  async emergencyStop() { return this.request('/v1/stop', {}); }
+  async emergencyStop() {
+    return this.request('/v1/stop', {});
+  }
 
   release() {
     if (this.releaseTask) return this.releaseTask;
@@ -138,16 +160,23 @@ export class FabricAdapter {
     clearInterval(this.timer);
     this.timer = null;
     this.sessionController?.abort(new Error('Control was released.'));
-    this.releaseTask = Promise.resolve().then(async () => {
-      await this.pendingAcquire?.catch(() => {});
-      await this.heartbeatInFlight;
-      const leaseId = this.leaseId;
-      this.leaseId = null;
-      this.sessionController = null;
-      if (leaseId) await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
-    }).finally(() => { this.releaseTask = null; });
+    this.releaseTask = Promise.resolve()
+      .then(async () => {
+        await this.pendingAcquire?.catch(() => {});
+        await this.heartbeatInFlight;
+        const leaseId = this.leaseId;
+        this.leaseId = null;
+        this.sessionController = null;
+        if (leaseId) await this.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
+      })
+      .finally(() => {
+        this.releaseTask = null;
+      });
     return this.releaseTask;
   }
 
-  async close() { this.closed = true; await this.release(); }
+  async close() {
+    this.closed = true;
+    await this.release();
+  }
 }

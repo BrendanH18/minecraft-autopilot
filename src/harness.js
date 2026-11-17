@@ -8,7 +8,7 @@ const COLLECT_MARGIN_MS = 15_000;
 function reportContainer(job, container) {
   if (!container) return;
   const { name, x, y, z, before } = container;
-  job.container = { name, x, y, z, before: before.map(item => ({ name: item.name, count: item.count })) };
+  job.container = { name, x, y, z, before: before.map((item) => ({ name: item.name, count: item.count })) };
 }
 
 /** Shared bridge lifecycle for the server bot and deterministic demo. */
@@ -34,27 +34,40 @@ export class Harness {
     else {
       const state = this.driver.healthState?.() || this.driver.observe();
       if (!state.connected || state.player?.health <= 0) this.release('Disconnected or player died.');
-      else if (this.identity !== null && this.driver.identity() !== this.identity) this.release('World, player, or dimension changed. Start a new session explicitly.');
+      else if (this.identity !== null && this.driver.identity() !== this.identity)
+        this.release('World, player, or dimension changed. Start a new session explicitly.');
     }
   }
 
   observe() {
     this.tick();
-    const stopping = Boolean(this.task && this.abortController?.signal.aborted || this.driver.operations?.busy && !this.driver.activeAction);
-    return { protocol: 1, ...this.driver.observe(), mode: this.owner ? 'agent' : 'manual', stopping, job: this.job ? { ...this.job } : null };
+    const stopping = Boolean(
+      (this.task && this.abortController?.signal.aborted) ||
+        (this.driver.operations?.busy && !this.driver.activeAction),
+    );
+    return {
+      protocol: 1,
+      ...this.driver.observe(),
+      mode: this.owner ? 'agent' : 'manual',
+      stopping,
+      job: this.job ? { ...this.job } : null,
+    };
   }
 
   requireLease(leaseId) {
     this.tick();
-    if (!this.owner || leaseId !== this.owner) throw new Error('Control was released or expired. Explicitly start a new session.');
+    if (!this.owner || leaseId !== this.owner)
+      throw new Error('Control was released or expired. Explicitly start a new session.');
   }
 
   acquire(leaseId) {
     this.tick();
-    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(leaseId)) throw new Error('leaseId must be a canonical UUID.');
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(leaseId))
+      throw new Error('leaseId must be a canonical UUID.');
     assertPlayable(this.driver.observe());
     if (this.owner) throw new Error('Another agent owns control. Stop it first.');
-    if (this.task || this.driver.isBusy?.()) throw new Error('Previous activity is still stopping. Wait for it to settle before taking control.');
+    if (this.task || this.driver.isBusy?.())
+      throw new Error('Previous activity is still stopping. Wait for it to settle before taking control.');
     this.owner = leaseId;
     this.renewedAt = this.now();
     this.identity = this.driver.identity?.() ?? null;
@@ -62,7 +75,11 @@ export class Harness {
     return { ok: true };
   }
 
-  heartbeat(leaseId) { this.requireLease(leaseId); this.renewedAt = this.now(); return { ok: true }; }
+  heartbeat(leaseId) {
+    this.requireLease(leaseId);
+    this.renewedAt = this.now();
+    return { ok: true };
+  }
 
   start(leaseId, action) {
     this.requireLease(leaseId);
@@ -75,34 +92,49 @@ export class Harness {
     this.abortController = controller;
     // Collection mines until jobTimeoutMs, then drivers allow up to 60 s to return; the margin keeps the job
     // deadline from cutting off a full-length return and its inventory progress report.
-    const deadline = setTimeout(() => controller.abort(new Error('Action timed out.')), parsed.type === 'wait' ? parsed.seconds * 1000 + 5000 : this.jobTimeoutMs + (parsed.type === 'collect' ? COLLECT_RETURN_MS + COLLECT_MARGIN_MS : 0));
+    const deadline = setTimeout(
+      () => controller.abort(new Error('Action timed out.')),
+      parsed.type === 'wait'
+        ? parsed.seconds * 1000 + 5000
+        : this.jobTimeoutMs + (parsed.type === 'collect' ? COLLECT_RETURN_MS + COLLECT_MARGIN_MS : 0),
+    );
     deadline.unref();
-    this.task = Promise.resolve().then(() => {
-      controller.signal.throwIfAborted();
-      this.requireLease(leaseId);
-      return this.driver.execute(parsed, {
-        signal: controller.signal,
-        collectionTimeoutMs: this.jobTimeoutMs,
-        onProgress: message => { if (job.status === 'running') job.message = message; },
+    this.task = Promise.resolve()
+      .then(() => {
+        controller.signal.throwIfAborted();
+        this.requireLease(leaseId);
+        return this.driver.execute(parsed, {
+          signal: controller.signal,
+          collectionTimeoutMs: this.jobTimeoutMs,
+          onProgress: (message) => {
+            if (job.status === 'running') job.message = message;
+          },
+        });
+      })
+      .then((result) => {
+        if (controller.signal.aborted || job.status !== 'running') return;
+        job.status = 'completed';
+        job.message = result?.message || 'Completed.';
+        reportContainer(job, result?.container);
+      })
+      .catch((error) => {
+        // A driver may abort on death, disconnect, or a world change before the periodic tick notices; let the
+        // tick release first so these end as cancelled sessions on every backend.
+        this.tick();
+        if (job.status === 'running') {
+          job.status =
+            controller.signal.aborted && controller.signal.reason?.message !== 'Action timed out.'
+              ? 'cancelled'
+              : 'failed';
+          job.message = controller.signal.aborted ? controller.signal.reason?.message || error.message : error.message;
+          reportContainer(job, error?.container);
+        }
+      })
+      .finally(() => {
+        clearTimeout(deadline);
+        if (this.abortController === controller) this.abortController = null;
+        this.task = null;
       });
-    }).then(result => {
-      if (controller.signal.aborted || job.status !== 'running') return;
-      job.status = 'completed'; job.message = result?.message || 'Completed.';
-      reportContainer(job, result?.container);
-    }).catch(error => {
-      // A driver may abort on death, disconnect, or a world change before the periodic tick notices; let the
-      // tick release first so these end as cancelled sessions on every backend.
-      this.tick();
-      if (job.status === 'running') {
-        job.status = controller.signal.aborted && controller.signal.reason?.message !== 'Action timed out.' ? 'cancelled' : 'failed';
-        job.message = controller.signal.aborted ? controller.signal.reason?.message || error.message : error.message;
-        reportContainer(job, error?.container);
-      }
-    }).finally(() => {
-      clearTimeout(deadline);
-      if (this.abortController === controller) this.abortController = null;
-      this.task = null;
-    });
     return { ...job };
   }
 
@@ -110,7 +142,10 @@ export class Harness {
     this.abortController?.abort(new Error(message));
     this.driver.cancelActivities?.(message);
     this.driver.stop();
-    if (this.job?.status === 'running') { this.job.status = 'cancelled'; this.job.message = message; }
+    if (this.job?.status === 'running') {
+      this.job.status = 'cancelled';
+      this.job.message = message;
+    }
     return { ok: true };
   }
 
@@ -124,16 +159,25 @@ export class Harness {
 
   request(path, body = {}) {
     switch (path) {
-      case '/v1/state': return this.observe();
-      case '/v1/stop': return this.release('Emergency stop requested.');
-      case '/v1/cancel': this.requireLease(body.leaseId); return this.cancel();
-      case '/v1/actions': return this.start(body.leaseId, body.action);
+      case '/v1/state':
+        return this.observe();
+      case '/v1/stop':
+        return this.release('Emergency stop requested.');
+      case '/v1/cancel':
+        this.requireLease(body.leaseId);
+        return this.cancel();
+      case '/v1/actions':
+        return this.start(body.leaseId, body.action);
       case '/v1/control':
         if (body.action === 'acquire') return this.acquire(body.leaseId);
         if (body.action === 'heartbeat') return this.heartbeat(body.leaseId);
-        if (body.action === 'release') { this.requireLease(body.leaseId); return this.release(); }
+        if (body.action === 'release') {
+          this.requireLease(body.leaseId);
+          return this.release();
+        }
         throw new Error('Unknown control operation.');
-      default: throw new Error('Unknown API endpoint.');
+      default:
+        throw new Error('Unknown API endpoint.');
     }
   }
 

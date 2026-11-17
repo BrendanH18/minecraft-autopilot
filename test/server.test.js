@@ -9,12 +9,21 @@ import { MineflayerDriver } from '../src/mineflayer-driver.js';
 import { Harness } from '../src/harness.js';
 import { testDirectory } from './helpers.js';
 
-test('standalone driver authenticates to a local protocol fixture, observes identity, saves home, and releases on death', { timeout: 15_000 }, async t => {
+test('standalone driver authenticates to a local protocol fixture, observes identity, saves home, and releases on death', {
+  timeout: 15_000,
+}, async (t) => {
   const directory = await testDirectory(t, 'server-');
   const data = minecraftData('1.21.1');
-  const server = minecraftProtocol.createServer({ host: '127.0.0.1', port: 0, version: '1.21.1', 'online-mode': false, keepAlive: false, registryCodec: data.loginPacket.dimensionCodec });
+  const server = minecraftProtocol.createServer({
+    host: '127.0.0.1',
+    port: 0,
+    version: '1.21.1',
+    'online-mode': false,
+    keepAlive: false,
+    registryCodec: data.loginPacket.dimensionCodec,
+  });
   let peer;
-  server.on('playerJoin', client => {
+  server.on('playerJoin', (client) => {
     peer = client;
     client.on('error', () => {});
     client.write('login', { ...data.loginPacket, entityId: 1 });
@@ -25,13 +34,22 @@ test('standalone driver authenticates to a local protocol fixture, observes iden
   let driver;
   let harness;
   t.after(async () => {
-    if (harness) await harness.close(); else await driver?.close();
+    if (harness) await harness.close();
+    else await driver?.close();
     for (const client of Object.values(server.clients)) client.socket.destroy();
     server.close();
     await rm(directory, { recursive: true, force: true });
   });
-  driver = await MineflayerDriver.connect({ host: '127.0.0.1', port: server.socketServer.address().port, account: 'HarnessTest', auth: 'offline', version: '1.21.1' },
-    { log: () => {}, timeoutMs: 5000, storageDirectory: directory });
+  driver = await MineflayerDriver.connect(
+    {
+      host: '127.0.0.1',
+      port: server.socketServer.address().port,
+      account: 'HarnessTest',
+      auth: 'offline',
+      version: '1.21.1',
+    },
+    { log: () => {}, timeoutMs: 5000, storageDirectory: directory },
+  );
   const state = driver.observe();
   assert.equal(state.player.name, 'HarnessTest');
   assert.equal(state.player.dimension, 'minecraft:overworld');
@@ -55,11 +73,20 @@ test('standalone driver authenticates to a local protocol fixture, observes iden
   assert.equal(driver.bot.isAlive, false);
 });
 
-test('joining as a dead character fails promptly instead of waiting for a spawn that never comes', { timeout: 15_000 }, async t => {
+test('joining as a dead character fails promptly instead of waiting for a spawn that never comes', {
+  timeout: 15_000,
+}, async (t) => {
   const directory = await testDirectory(t, 'server-dead-');
   const data = minecraftData('1.21.1');
-  const server = minecraftProtocol.createServer({ host: '127.0.0.1', port: 0, version: '1.21.1', 'online-mode': false, keepAlive: false, registryCodec: data.loginPacket.dimensionCodec });
-  server.on('playerJoin', client => {
+  const server = minecraftProtocol.createServer({
+    host: '127.0.0.1',
+    port: 0,
+    version: '1.21.1',
+    'online-mode': false,
+    keepAlive: false,
+    registryCodec: data.loginPacket.dimensionCodec,
+  });
+  server.on('playerJoin', (client) => {
     client.on('error', () => {});
     client.write('login', { ...data.loginPacket, entityId: 1 });
     client.write('position', { x: 0, y: 64, z: 0, yaw: 0, pitch: 0, flags: 0, teleportId: 1 });
@@ -72,7 +99,18 @@ test('joining as a dead character fails promptly instead of waiting for a spawn 
     await rm(directory, { recursive: true, force: true });
   });
   const started = Date.now();
-  await assert.rejects(MineflayerDriver.connect({ host: '127.0.0.1', port: server.socketServer.address().port, account: 'DeadTest', auth: 'offline', version: '1.21.1' },
-    { log: () => {}, timeoutMs: 10_000, storageDirectory: directory }), /character is dead/);
+  await assert.rejects(
+    MineflayerDriver.connect(
+      {
+        host: '127.0.0.1',
+        port: server.socketServer.address().port,
+        account: 'DeadTest',
+        auth: 'offline',
+        version: '1.21.1',
+      },
+      { log: () => {}, timeoutMs: 10_000, storageDirectory: directory },
+    ),
+    /character is dead/,
+  );
   assert.ok(Date.now() - started < 5000);
 });

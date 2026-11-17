@@ -2,35 +2,277 @@ import { z } from 'zod';
 import { transcriptData, registerTranscriptGroup, TRANSCRIPT_NOTE } from './transcript-data.js';
 import { pointerGet, pointerParts } from './snapshot-query-tools.js';
 import { ledgerNumber } from './ledger-tools.js';
-const specs=[
- ['field-present',' <pointer>','Select events with an explicitly recorded field.'],['field-missing',' <pointer>','Select events lacking a field.'],['field-equals',' <pointer> <json>','Select events equal to a supplied scalar JSON value.'],['field-not-equals',' <pointer> <json>','Select present fields unequal to a supplied scalar JSON value.'],['numeric-between',' <pointer> <minimum> <maximum>','Select numeric fields in an inclusive range.'],['string-prefix',' <pointer> <text>','Select string fields beginning with literal text.'],['string-suffix',' <pointer> <text>','Select string fields ending with literal text.'],['string-contains',' <pointer> <text>','Select string fields containing literal text.'],['array-contains',' <pointer> <json>','Select array fields containing a supplied scalar JSON value.'],['field-types',' <pointer>','Count field types and missing fields separately.'],['group-count',' <pointer>','Group scalar values, retaining null and missing groups.'],['distinct-values',' <pointer>','List distinct recorded scalar values in encounter order.'],['project',' <pointers...>','Project requested fields with presence markers and source lines.'],['numeric-sum',' <pointer>','Sum recorded finite numbers and report excluded rows.'],['numeric-mean',' <pointer>','Mean recorded finite numbers; empty numeric evidence remains unknown.'],['numeric-extrema',' <pointer>','Find minima and maxima with all source-line ties.'],['numeric-quantile',' <pointer> <percent>','Interpolated percentile of recorded finite numbers.'],['adjacent-field-changes',' <pointer>','Locate adjacent present scalar field changes.'],['increasing-breaks',' <pointer>','Locate adjacent numeric decreases violating nondecreasing order.'],['decreasing-breaks',' <pointer>','Locate adjacent numeric increases violating nonincreasing order.'],['timestamp-window',' <earliest> <latest>','Select valid UTC event timestamps inside an inclusive interval.'],['clock-regressions','','Locate adjacent recorded UTC times moving backwards.'],['event-pairs',' <first> <second>','Pair each opening event with the first subsequent closing event in the same run; reset on another opening.'],['duplicate-records','','Group exactly identical serialized event objects with line provenance.'],['field-coverage',' <pointers...>','Report presence and explicit-null counts for requested paths.'],
+const specs = [
+  ['field-present', ' <pointer>', 'Select events with an explicitly recorded field.'],
+  ['field-missing', ' <pointer>', 'Select events lacking a field.'],
+  ['field-equals', ' <pointer> <json>', 'Select events equal to a supplied scalar JSON value.'],
+  ['field-not-equals', ' <pointer> <json>', 'Select present fields unequal to a supplied scalar JSON value.'],
+  ['numeric-between', ' <pointer> <minimum> <maximum>', 'Select numeric fields in an inclusive range.'],
+  ['string-prefix', ' <pointer> <text>', 'Select string fields beginning with literal text.'],
+  ['string-suffix', ' <pointer> <text>', 'Select string fields ending with literal text.'],
+  ['string-contains', ' <pointer> <text>', 'Select string fields containing literal text.'],
+  ['array-contains', ' <pointer> <json>', 'Select array fields containing a supplied scalar JSON value.'],
+  ['field-types', ' <pointer>', 'Count field types and missing fields separately.'],
+  ['group-count', ' <pointer>', 'Group scalar values, retaining null and missing groups.'],
+  ['distinct-values', ' <pointer>', 'List distinct recorded scalar values in encounter order.'],
+  ['project', ' <pointers...>', 'Project requested fields with presence markers and source lines.'],
+  ['numeric-sum', ' <pointer>', 'Sum recorded finite numbers and report excluded rows.'],
+  ['numeric-mean', ' <pointer>', 'Mean recorded finite numbers; empty numeric evidence remains unknown.'],
+  ['numeric-extrema', ' <pointer>', 'Find minima and maxima with all source-line ties.'],
+  ['numeric-quantile', ' <pointer> <percent>', 'Interpolated percentile of recorded finite numbers.'],
+  ['adjacent-field-changes', ' <pointer>', 'Locate adjacent present scalar field changes.'],
+  ['increasing-breaks', ' <pointer>', 'Locate adjacent numeric decreases violating nondecreasing order.'],
+  ['decreasing-breaks', ' <pointer>', 'Locate adjacent numeric increases violating nonincreasing order.'],
+  ['timestamp-window', ' <earliest> <latest>', 'Select valid UTC event timestamps inside an inclusive interval.'],
+  ['clock-regressions', '', 'Locate adjacent recorded UTC times moving backwards.'],
+  [
+    'event-pairs',
+    ' <first> <second>',
+    'Pair each opening event with the first subsequent closing event in the same run; reset on another opening.',
+  ],
+  ['duplicate-records', '', 'Group exactly identical serialized event objects with line provenance.'],
+  ['field-coverage', ' <pointers...>', 'Report presence and explicit-null counts for requested paths.'],
 ];
-export const EVENT_QUERY_COMMANDS=specs.map(([n,a,d])=>[`${n} <file>${a}`,d]);
-const scalar=v=>v===null||['string','number','boolean'].includes(typeof v);
-const time=v=>z.iso.datetime().safeParse(v).success?Date.parse(v):null;
-export function eventQueryReport(content,command,args=[]){if(typeof content!=='string'||Buffer.byteLength(content)>10*1024*1024)throw new Error('Transcript must be text up to10MiB.');const {rows}=transcriptData(content);if(rows.length>20000)throw new Error('At most20000 events supported.');let result;
- const literal=value=>{if(typeof value!=='string'||value.length>1000)throw new Error('Give a scalar JSON literal.');let v;try{v=JSON.parse(value);}catch{throw new Error('Invalid JSON literal.');}if(!scalar(v)||typeof v==='number'&&!Number.isFinite(v))throw new Error('Give scalar JSON.');return v;};
- const pointers=()=>{const ps=args.flat();if(!ps.length||ps.length>100)throw new Error('Give1 to100 pointers.');ps.forEach(pointerParts);return ps;};
- const numeric=(values)=>values.filter(v=>v.present&&typeof v.value==='number'&&Number.isFinite(v.value));
- const projected=()=>{pointerParts(args[0]);return rows.map(row=>({line:row.line,run:row.run,...pointerGet(row.data,args[0])}));};
- const text=()=>{if(typeof args[1]!=='string'||!args[1].length||args[1].length>1000)throw new Error('Give nonempty literal text.');return args[1];};
- switch(command){
- case 'field-present':case 'field-missing':{const ps=projected();result=ps.filter(v=>v.present===(command==='field-present')).map(v=>v.line);break;}
- case 'field-equals':case 'field-not-equals':{const wanted=literal(args[1]);result=projected().filter(v=>v.present&&scalar(v.value)&&(v.value===wanted)===(command==='field-equals')).map(v=>v.line);break;}
- case 'numeric-between':{const low=ledgerNumber(args[1],-1e12,1e12),high=ledgerNumber(args[2],low,1e12);result=numeric(projected()).filter(v=>v.value>=low&&v.value<=high).map(v=>v.line);break;}
- case 'string-prefix':case 'string-suffix':case 'string-contains':{const t=text(),method={'string-prefix':'startsWith','string-suffix':'endsWith','string-contains':'includes'}[command];result=projected().filter(v=>v.present&&typeof v.value==='string'&&v.value[method](t)).map(v=>v.line);break;}
- case 'array-contains':{const wanted=literal(args[1]);result=projected().filter(v=>v.present&&Array.isArray(v.value)&&v.value.some(x=>x===wanted)).map(v=>v.line);break;}
- case 'field-types':{const groups=new Map();for(const v of projected()){const type=!v.present?'missing':v.value===null?'null':Array.isArray(v.value)?'array':typeof v.value;groups.set(type,(groups.get(type)??0)+1);}result=Object.fromEntries(groups);break;}
- case 'group-count':{const groups=new Map();for(const v of projected()){if(v.present&&!scalar(v.value))continue;const key=v.present?JSON.stringify(v.value):undefined;if(!groups.has(key))groups.set(key,{present:v.present,value:v.value,count:0});groups.get(key).count++;}result=[...groups.values()];break;}
- case 'distinct-values':result=[...new Set(projected().filter(v=>v.present&&scalar(v.value)).map(v=>JSON.stringify(v.value)))].map(v=>JSON.parse(v));break;
- case 'project':{const ps=pointers();result=rows.map(row=>({line:row.line,fields:ps.map(path=>({path,...pointerGet(row.data,path)}))}));break;}
- case 'numeric-sum':case 'numeric-mean':case 'numeric-extrema':case 'numeric-quantile':{const ps=projected(),ns=numeric(ps);if(ns.some(v=>Math.abs(v.value)>1e12))throw new Error('Numeric aggregation supports magnitudes up to1e12.');const values=ns.map(v=>v.value),total=values.reduce((n,v)=>n+v,0);let value=null;const p=command==='numeric-quantile'?ledgerNumber(args[1],0,100)/100:null;if(ns.length){if(command==='numeric-sum')value=total;else if(command==='numeric-mean')value=total/ns.length;else if(command==='numeric-extrema'){const min=Math.min(...values),max=Math.max(...values);value={minimum:min,maximum:max,minimumLines:ns.filter(v=>v.value===min).map(v=>v.line),maximumLines:ns.filter(v=>v.value===max).map(v=>v.line)};}else{values.sort((a,b)=>a-b);const index=(values.length-1)*p;value=values[Math.floor(index)]+(values[Math.ceil(index)]-values[Math.floor(index)])*(index-Math.floor(index));}}result={value,numeric:ns.length,excluded:ps.length-ns.length};break;}
- case 'adjacent-field-changes':case 'increasing-breaks':case 'decreasing-breaks':{const ps=projected();result=ps.slice(1).flatMap((v,i)=>{const prev=ps[i];if(prev.run!==v.run||!prev.present||!v.present)return [];const valid=command==='adjacent-field-changes'?scalar(prev.value)&&scalar(v.value)&&prev.value!==v.value:typeof prev.value==='number'&&typeof v.value==='number'&&(command==='increasing-breaks'?v.value<prev.value:v.value>prev.value);return valid?[{fromLine:prev.line,toLine:v.line,before:prev.value,after:v.value}]:[];});break;}
- case 'timestamp-window':{const first=time(args[0]),last=time(args[1]);if(first===null||last===null||last<first)throw new Error('Give ordered ISO UTC timestamps.');result=rows.filter(r=>{const t=time(r.data.time);return t!==null&&t>=first&&t<=last;}).map(r=>r.line);break;}
- case 'clock-regressions':result=rows.slice(1).flatMap((r,i)=>{const a=rows[i],t=time(r.data.time),p=time(a.data.time);return a.run===r.run&&t!==null&&p!==null&&t<p?[{fromLine:a.line,toLine:r.line,seconds:(p-t)/1000}]:[];});break;
- case 'event-pairs':{if(!args[0]||!args[1]||args[0]===args[1])throw new Error('Give two different nonempty event names.');let pending=null;result=[];for(const r of rows){if(pending&&pending.run!==r.run)pending=null;if(r.data.event===args[0])pending=r;else if(r.data.event===args[1]&&pending){result.push({fromLine:pending.line,toLine:r.line,run:r.run});pending=null;}}break;}
- case 'duplicate-records':{const groups=new Map();for(const r of rows){const k=JSON.stringify(r.data);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r.line);}result=[...groups.values()].filter(g=>g.length>1);break;}
- case 'field-coverage':result=pointers().map(path=>{const ps=rows.map(r=>pointerGet(r.data,path));return {path,present:ps.filter(v=>v.present).length,null:ps.filter(v=>v.present&&v.value===null).length,missing:ps.filter(v=>!v.present).length};});break;
- default:throw new Error(`Unknown event query: ${command}.`);
- }return {query:command,result,note:TRANSCRIPT_NOTE};}
-export const registerEventQueryTools=(program,context)=>registerTranscriptGroup(program,'event-query','Query recorded event fields with JSON Pointers.',EVENT_QUERY_COMMANDS,eventQueryReport,context);
+export const EVENT_QUERY_COMMANDS = specs.map(([n, a, d]) => [`${n} <file>${a}`, d]);
+const scalar = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
+const time = (v) => (z.iso.datetime().safeParse(v).success ? Date.parse(v) : null);
+export function eventQueryReport(content, command, args = []) {
+  if (typeof content !== 'string' || Buffer.byteLength(content) > 10 * 1024 * 1024)
+    throw new Error('Transcript must be text up to10MiB.');
+  const { rows } = transcriptData(content);
+  if (rows.length > 20000) throw new Error('At most20000 events supported.');
+  let result;
+  const literal = (value) => {
+    if (typeof value !== 'string' || value.length > 1000) throw new Error('Give a scalar JSON literal.');
+    let v;
+    try {
+      v = JSON.parse(value);
+    } catch {
+      throw new Error('Invalid JSON literal.');
+    }
+    if (!scalar(v) || (typeof v === 'number' && !Number.isFinite(v))) throw new Error('Give scalar JSON.');
+    return v;
+  };
+  const pointers = () => {
+    const ps = args.flat();
+    if (!ps.length || ps.length > 100) throw new Error('Give1 to100 pointers.');
+    ps.forEach(pointerParts);
+    return ps;
+  };
+  const numeric = (values) =>
+    values.filter((v) => v.present && typeof v.value === 'number' && Number.isFinite(v.value));
+  const projected = () => {
+    pointerParts(args[0]);
+    return rows.map((row) => ({ line: row.line, run: row.run, ...pointerGet(row.data, args[0]) }));
+  };
+  const text = () => {
+    if (typeof args[1] !== 'string' || !args[1].length || args[1].length > 1000)
+      throw new Error('Give nonempty literal text.');
+    return args[1];
+  };
+  switch (command) {
+    case 'field-present':
+    case 'field-missing': {
+      const ps = projected();
+      result = ps.filter((v) => v.present === (command === 'field-present')).map((v) => v.line);
+      break;
+    }
+    case 'field-equals':
+    case 'field-not-equals': {
+      const wanted = literal(args[1]);
+      result = projected()
+        .filter((v) => v.present && scalar(v.value) && (v.value === wanted) === (command === 'field-equals'))
+        .map((v) => v.line);
+      break;
+    }
+    case 'numeric-between': {
+      const low = ledgerNumber(args[1], -1e12, 1e12),
+        high = ledgerNumber(args[2], low, 1e12);
+      result = numeric(projected())
+        .filter((v) => v.value >= low && v.value <= high)
+        .map((v) => v.line);
+      break;
+    }
+    case 'string-prefix':
+    case 'string-suffix':
+    case 'string-contains': {
+      const t = text(),
+        method = { 'string-prefix': 'startsWith', 'string-suffix': 'endsWith', 'string-contains': 'includes' }[command];
+      result = projected()
+        .filter((v) => v.present && typeof v.value === 'string' && v.value[method](t))
+        .map((v) => v.line);
+      break;
+    }
+    case 'array-contains': {
+      const wanted = literal(args[1]);
+      result = projected()
+        .filter((v) => v.present && Array.isArray(v.value) && v.value.some((x) => x === wanted))
+        .map((v) => v.line);
+      break;
+    }
+    case 'field-types': {
+      const groups = new Map();
+      for (const v of projected()) {
+        const type = !v.present
+          ? 'missing'
+          : v.value === null
+            ? 'null'
+            : Array.isArray(v.value)
+              ? 'array'
+              : typeof v.value;
+        groups.set(type, (groups.get(type) ?? 0) + 1);
+      }
+      result = Object.fromEntries(groups);
+      break;
+    }
+    case 'group-count': {
+      const groups = new Map();
+      for (const v of projected()) {
+        if (v.present && !scalar(v.value)) continue;
+        const key = v.present ? JSON.stringify(v.value) : undefined;
+        if (!groups.has(key)) groups.set(key, { present: v.present, value: v.value, count: 0 });
+        groups.get(key).count++;
+      }
+      result = [...groups.values()];
+      break;
+    }
+    case 'distinct-values':
+      result = [
+        ...new Set(
+          projected()
+            .filter((v) => v.present && scalar(v.value))
+            .map((v) => JSON.stringify(v.value)),
+        ),
+      ].map((v) => JSON.parse(v));
+      break;
+    case 'project': {
+      const ps = pointers();
+      result = rows.map((row) => ({
+        line: row.line,
+        fields: ps.map((path) => ({ path, ...pointerGet(row.data, path) })),
+      }));
+      break;
+    }
+    case 'numeric-sum':
+    case 'numeric-mean':
+    case 'numeric-extrema':
+    case 'numeric-quantile': {
+      const ps = projected(),
+        ns = numeric(ps);
+      if (ns.some((v) => Math.abs(v.value) > 1e12))
+        throw new Error('Numeric aggregation supports magnitudes up to1e12.');
+      const values = ns.map((v) => v.value),
+        total = values.reduce((n, v) => n + v, 0);
+      let value = null;
+      const p = command === 'numeric-quantile' ? ledgerNumber(args[1], 0, 100) / 100 : null;
+      if (ns.length) {
+        if (command === 'numeric-sum') value = total;
+        else if (command === 'numeric-mean') value = total / ns.length;
+        else if (command === 'numeric-extrema') {
+          const min = Math.min(...values),
+            max = Math.max(...values);
+          value = {
+            minimum: min,
+            maximum: max,
+            minimumLines: ns.filter((v) => v.value === min).map((v) => v.line),
+            maximumLines: ns.filter((v) => v.value === max).map((v) => v.line),
+          };
+        } else {
+          values.sort((a, b) => a - b);
+          const index = (values.length - 1) * p;
+          value =
+            values[Math.floor(index)] +
+            (values[Math.ceil(index)] - values[Math.floor(index)]) * (index - Math.floor(index));
+        }
+      }
+      result = { value, numeric: ns.length, excluded: ps.length - ns.length };
+      break;
+    }
+    case 'adjacent-field-changes':
+    case 'increasing-breaks':
+    case 'decreasing-breaks': {
+      const ps = projected();
+      result = ps.slice(1).flatMap((v, i) => {
+        const prev = ps[i];
+        if (prev.run !== v.run || !prev.present || !v.present) return [];
+        const valid =
+          command === 'adjacent-field-changes'
+            ? scalar(prev.value) && scalar(v.value) && prev.value !== v.value
+            : typeof prev.value === 'number' &&
+              typeof v.value === 'number' &&
+              (command === 'increasing-breaks' ? v.value < prev.value : v.value > prev.value);
+        return valid ? [{ fromLine: prev.line, toLine: v.line, before: prev.value, after: v.value }] : [];
+      });
+      break;
+    }
+    case 'timestamp-window': {
+      const first = time(args[0]),
+        last = time(args[1]);
+      if (first === null || last === null || last < first) throw new Error('Give ordered ISO UTC timestamps.');
+      result = rows
+        .filter((r) => {
+          const t = time(r.data.time);
+          return t !== null && t >= first && t <= last;
+        })
+        .map((r) => r.line);
+      break;
+    }
+    case 'clock-regressions':
+      result = rows.slice(1).flatMap((r, i) => {
+        const a = rows[i],
+          t = time(r.data.time),
+          p = time(a.data.time);
+        return a.run === r.run && t !== null && p !== null && t < p
+          ? [{ fromLine: a.line, toLine: r.line, seconds: (p - t) / 1000 }]
+          : [];
+      });
+      break;
+    case 'event-pairs': {
+      if (!args[0] || !args[1] || args[0] === args[1]) throw new Error('Give two different nonempty event names.');
+      let pending = null;
+      result = [];
+      for (const r of rows) {
+        if (pending && pending.run !== r.run) pending = null;
+        if (r.data.event === args[0]) pending = r;
+        else if (r.data.event === args[1] && pending) {
+          result.push({ fromLine: pending.line, toLine: r.line, run: r.run });
+          pending = null;
+        }
+      }
+      break;
+    }
+    case 'duplicate-records': {
+      const groups = new Map();
+      for (const r of rows) {
+        const k = JSON.stringify(r.data);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(r.line);
+      }
+      result = [...groups.values()].filter((g) => g.length > 1);
+      break;
+    }
+    case 'field-coverage':
+      result = pointers().map((path) => {
+        const ps = rows.map((r) => pointerGet(r.data, path));
+        return {
+          path,
+          present: ps.filter((v) => v.present).length,
+          null: ps.filter((v) => v.present && v.value === null).length,
+          missing: ps.filter((v) => !v.present).length,
+        };
+      });
+      break;
+    default:
+      throw new Error(`Unknown event query: ${command}.`);
+  }
+  return { query: command, result, note: TRANSCRIPT_NOTE };
+}
+export const registerEventQueryTools = (program, context) =>
+  registerTranscriptGroup(
+    program,
+    'event-query',
+    'Query recorded event fields with JSON Pointers.',
+    EVENT_QUERY_COMMANDS,
+    eventQueryReport,
+    context,
+  );

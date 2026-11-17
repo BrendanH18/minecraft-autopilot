@@ -5,7 +5,9 @@ export function runBatch(group, command, request) {
   allowedKeys(request, ['cases']);
   return {
     cases: cases(request.cases).map((args, index) => ({
-      case: index + 1, args: [...args], result: evaluate(group, command, args),
+      case: index + 1,
+      args: [...args],
+      result: evaluate(group, command, args),
     })),
   };
 }

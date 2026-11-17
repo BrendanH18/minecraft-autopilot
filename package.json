@@ -11,6 +11,8 @@
     "start": "node src/cli.js",
     "test": "node --test test/*.test.js",
     "check": "node scripts/check.js",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
     "setup:mod": "node scripts/setup-mod.js",
     "build:mod": "npm run setup:mod && node scripts/gradle.js build && node scripts/package-mod.js",
     "verify:mod": "node scripts/verify-mod.js",
@@ -27,5 +29,8 @@
     "mineflayer-pathfinder": "2.4.5",
     "vec3": "0.2.0",
     "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4"
   }
 }

@@ -31,6 +31,7 @@ jobs:
           # .npmrc points the npm cache at .npm-cache; setup-node reads it from npm config.
           cache: npm
       - run: npm ci
+      - run: npm run lint
       - run: npm run check
       - run: npm test
       - run: npm start -- demo --smoke

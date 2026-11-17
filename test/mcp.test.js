@@ -10,13 +10,23 @@ import { DemoDriver } from '../src/demo-driver.js';
 import { startBridge } from '../src/bridge-server.js';
 import { testDirectory } from './helpers.js';
 
-test('MCP client discovers tools, requires takeover, executes actions, and releases on stop', { timeout: 10_000 }, async t => {
+test('MCP client discovers tools, requires takeover, executes actions, and releases on stop', {
+  timeout: 10_000,
+}, async (t) => {
   const directory = await testDirectory(t, 'mcp-');
   const discoveryPath = join(directory, 'bridge.json');
   const bridge = await startBridge(new Harness(new DemoDriver()), { discoveryPath });
-  const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../src/cli.js', import.meta.url)), '--bridge', discoveryPath, 'mcp'], stderr: 'pipe' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [fileURLToPath(new URL('../src/cli.js', import.meta.url)), '--bridge', discoveryPath, 'mcp'],
+    stderr: 'pipe',
+  });
   const client = new Client({ name: 'minecraft-test', version: '1.0.0' });
-  t.after(async () => { await client.close(); await bridge.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => {
+    await client.close();
+    await bridge.close();
+    await rm(directory, { recursive: true, force: true });
+  });
   await client.connect(transport);
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 11);
@@ -24,7 +34,10 @@ test('MCP client discovers tools, requires takeover, executes actions, and relea
   assert.equal(refused.isError, true);
   const takeover = await client.callTool({ name: 'minecraft_take_control', arguments: {} });
   assert.notEqual(takeover.isError, true);
-  const action = await client.callTool({ name: 'minecraft_action', arguments: { action: { type: 'collect', block: 'oak_log', count: 3 } } });
+  const action = await client.callTool({
+    name: 'minecraft_action',
+    arguments: { action: { type: 'collect', block: 'oak_log', count: 3 } },
+  });
   assert.equal(JSON.parse(action.content[0].text).status, 'completed');
   await client.callTool({ name: 'minecraft_stop', arguments: {} });
   const state = await client.callTool({ name: 'minecraft_observe', arguments: {} });

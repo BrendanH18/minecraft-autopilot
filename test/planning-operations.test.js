@@ -14,7 +14,12 @@ function close(actual, expected) {
     for (const k of Object.keys(expected)) close(actual[k], expected[k]);
   } else assert.equal(actual, expected);
 }
-const calculation = (group, command, args) => calculateOffline(OPERATION_GROUPS.find(g => g.name === group), command, args).result;
+const calculation = (group, command, args) =>
+  calculateOffline(
+    OPERATION_GROUPS.find((g) => g.name === group),
+    command,
+    args,
+  ).result;
 
 test('operation inventory contains 100 unique documented callable behaviors', () => {
   assert.equal(OPERATION_GROUPS.length, 4);
@@ -22,26 +27,39 @@ test('operation inventory contains 100 unique documented callable behaviors', ()
   assert.equal(new Set(OPERATION_CASES.map(([g, c]) => `${g}/${c}`)).size, 100);
   for (const group of OPERATION_GROUPS) {
     assert.equal(group.commands.length, 25, group.name);
-    assert.equal(new Set(group.commands.map(c => c.signature.split(' ')[0])).size, 25, group.name);
-    assert.deepEqual(group.commands.map(c => c.signature.split(' ')[0]), OPERATION_CASES.filter(([g]) => g === group.name).map(([, c]) => c));
+    assert.equal(new Set(group.commands.map((c) => c.signature.split(' ')[0])).size, 25, group.name);
+    assert.deepEqual(
+      group.commands.map((c) => c.signature.split(' ')[0]),
+      OPERATION_CASES.filter(([g]) => g === group.name).map(([, c]) => c),
+    );
     assert.match(group.note, /^Offline/);
   }
 });
 
 for (const [groupName, command, args, expected] of OPERATION_CASES) {
   test(`${groupName} ${command}: expected arithmetic and Commander output`, async () => {
-    const group = OPERATION_GROUPS.find(g => g.name === groupName);
+    const group = OPERATION_GROUPS.find((g) => g.name === groupName);
     const before = JSON.stringify(args);
     const result = calculateOffline(group, command, args);
     close(result.result, expected);
     assert.match(result.note, /Offline/);
     const program = new Command().exitOverride();
     let printed;
-    registerOfflineGroups(program, [group], { print: v => { printed = v; } });
+    registerOfflineGroups(program, [group], {
+      print: (v) => {
+        printed = v;
+      },
+    });
     await program.parseAsync([groupName, command, ...args], { from: 'user' });
     close(printed.result, expected);
     assert.throws(() => calculateOffline(group, command, []));
-    assert.throws(() => calculateOffline(group, command, args.map((v, i) => i ? v : 'NaN')));
+    assert.throws(() =>
+      calculateOffline(
+        group,
+        command,
+        args.map((v, i) => (i ? v : 'NaN')),
+      ),
+    );
     assert.equal(JSON.stringify(args), before);
   });
 }
@@ -74,7 +92,10 @@ test('stripmine: rejections for impossible layouts and unbounded requests', () =
   assert.throws(() => run('branch-length-for-overhead', '3', '2', '5', '2', '0'), /Target fraction must be positive/);
   assert.throws(() => run('widest-gap', '2', '2', '2', '1.5'));
   // Stagger stays inside one pitch, and the enumerated block is capped at 1,000,000 cells.
-  assert.equal(run('stacked-coverage', '2', '5', '3', '1', '1', '2', '6'), run('stacked-coverage', '2', '5', '3', '1', '1', '2', '1'));
+  assert.equal(
+    run('stacked-coverage', '2', '5', '3', '1', '1', '2', '6'),
+    run('stacked-coverage', '2', '5', '3', '1', '1', '2', '1'),
+  );
   assert.throws(() => run('stacked-coverage', '2', '5', '3', '1', '1', '2', '7'), /Stagger must be smaller/);
   assert.equal(run('stacked-coverage', '1', '999', '1', '499', '0', '0', '0'), 0.000002);
   assert.throws(() => run('stacked-coverage', '1', '999', '1', '500', '0', '0', '0'), /limited to 1,000,000 cells/);
@@ -92,11 +113,24 @@ test('stripmine: boundaries at exact fits, zero quantities, and smallest sizes',
   assert.equal(run('branch-count', '39', '3', '2', '5', '1'), 5);
   assert.equal(run('branch-count', '4', '3', '2', '5', '2'), 0);
   assert.equal(run('branch-count', '1', '0', '1', '0', '1'), 1);
-  assert.deepEqual(run('comb-cells', '1', '1', '1', '0', '1', '1'), { corridorCells: 1, branchCells: 0, totalCells: 1 });
+  assert.deepEqual(run('comb-cells', '1', '1', '1', '0', '1', '1'), {
+    corridorCells: 1,
+    branchCells: 0,
+    totalCells: 1,
+  });
   // A lone corridor cell open at the entrance: floor, ceiling, two sides, far end.
-  assert.deepEqual(run('comb-faces', '1', '1', '1', '0', '1', '1'), { floorFaces: 1, ceilingFaces: 1, wallFaces: 3, totalFaces: 5 });
+  assert.deepEqual(run('comb-faces', '1', '1', '1', '0', '1', '1'), {
+    floorFaces: 1,
+    ceilingFaces: 1,
+    wallFaces: 3,
+    totalFaces: 5,
+  });
   // Touching branches (gap 0) merge: only the two outer walls reveal anything sideways.
-  assert.deepEqual(run('comb-reveal', '5', '2', '3', '30', '0', '4', '0'), { sideCells: 720, verticalCells: 0, totalCells: 720 });
+  assert.deepEqual(run('comb-reveal', '5', '2', '3', '30', '0', '4', '0'), {
+    sideCells: 720,
+    verticalCells: 0,
+    totalCells: 720,
+  });
   assert.equal(run('pitch-efficiency', '2', '3', '0', '4', '0'), 0);
   assert.deepEqual(run('layer-coverage', '3', '0', '2'), { dugFraction: 1, revealedFraction: 0, unseenFraction: 0 });
   // Gap equal to two reveals is fully seen; one more cell leaves a strip.
@@ -140,26 +174,40 @@ test('stripmine: boundaries at exact fits, zero quantities, and smallest sizes',
 test('stripmine: cross-command invariants', () => {
   const run = (command, ...args) => calculation('stripmine', command, args);
   // Fractions of a pitch sum to one, and the seen share is the one-cell vein hit chance.
-  for (const [width, gap, reveal] of [['2', '7', '2'], ['1', '3', '1'], ['3', '11', '4'], ['2', '3', '5']]) {
+  for (const [width, gap, reveal] of [
+    ['2', '7', '2'],
+    ['1', '3', '1'],
+    ['3', '11', '4'],
+    ['2', '3', '5'],
+  ]) {
     const { dugFraction, revealedFraction, unseenFraction } = run('layer-coverage', width, gap, reveal);
     close(dugFraction + revealedFraction + unseenFraction, 1);
     close(run('vein-hit-chance', width, gap, reveal, '1'), dugFraction + revealedFraction);
   }
   // The widest gap meets its target and one more cell of gap misses it.
-  for (const [width, reveal, extent, target] of [['2', '2', '2', '0.75'], ['1', '1', '3', '0.6'], ['3', '0', '1', '0.4'], ['2', '4', '5', '0.95']]) {
+  for (const [width, reveal, extent, target] of [
+    ['2', '2', '2', '0.75'],
+    ['1', '1', '3', '0.6'],
+    ['3', '0', '1', '0.4'],
+    ['2', '4', '5', '0.95'],
+  ]) {
     const gap = run('widest-gap', width, reveal, extent, target);
     assert.ok(run('vein-hit-chance', width, String(gap), reveal, extent) >= Number(target));
     assert.ok(run('vein-hit-chance', width, String(gap + 1), reveal, extent) < Number(target));
   }
   // Excavation parts sum to the whole, and floor plus ceiling plus wall faces sum to the total.
-  const cells = run('comb-cells', '41', '2', '3', '11', '4', '20'), faces = run('comb-faces', '41', '2', '3', '11', '4', '20');
+  const cells = run('comb-cells', '41', '2', '3', '11', '4', '20'),
+    faces = run('comb-faces', '41', '2', '3', '11', '4', '20');
   assert.equal(cells.corridorCells + cells.branchCells, cells.totalCells);
   assert.equal(faces.floorFaces + faces.ceilingFaces + faces.wallFaces, faces.totalFaces);
   // Each added interior branch reveals pitch-efficiency cells per cell it digs (2 x 3 x 30 = 180).
-  const more = run('comb-reveal', '6', '2', '3', '30', '5', '4', '1').totalCells - run('comb-reveal', '5', '2', '3', '30', '5', '4', '1').totalCells;
+  const more =
+    run('comb-reveal', '6', '2', '3', '30', '5', '4', '1').totalCells -
+    run('comb-reveal', '5', '2', '3', '30', '5', '4', '1').totalCells;
   close(more / 180, run('pitch-efficiency', '2', '3', '5', '4', '1'));
   // Branch starts agree with the footprint and with the count that fits that footprint.
-  const starts = run('branch-starts', '6', '3', '2', '5'), footprint = run('comb-footprint', '6', '3', '2', '5', '20', '3', '1');
+  const starts = run('branch-starts', '6', '3', '2', '5'),
+    footprint = run('comb-footprint', '6', '3', '2', '5', '20', '3', '1');
   assert.equal(starts.at(-1) + 2 - 1, footprint.alongCells);
   assert.equal(run('branch-count', String(footprint.alongCells), '3', '2', '5', '1'), 6);
   assert.equal(run('parallel-combs', '500', '3', '20', '1', '4').spacing, footprint.acrossCells + 4);
@@ -169,10 +217,16 @@ test('stripmine: cross-command invariants', () => {
   const walk = run('haul-walk', '7', '3', '2', '5', '20', '3');
   assert.equal(walk.totalWalk, 2 * 3 * sumOfReturns);
   close(walk.meanReturn, sumOfReturns / 7);
-  assert.equal(run('branches-within-walk', String(run('return-distance', '7', '3', '2', '5', '20')), '3', '2', '5', '20'), 7);
+  assert.equal(
+    run('branches-within-walk', String(run('return-distance', '7', '3', '2', '5', '20')), '3', '2', '5', '20'),
+    7,
+  );
   // Without vertical reveal, stacked coverage is the seen share of a layer times the dug share of the height.
   const layer = run('layer-coverage', '2', '7', '2');
-  close(run('stacked-coverage', '2', '7', '3', '1', '2', '0', '4'), (layer.dugFraction + layer.revealedFraction) * 3 / 4);
+  close(
+    run('stacked-coverage', '2', '7', '3', '1', '2', '0', '4'),
+    ((layer.dugFraction + layer.revealedFraction) * 3) / 4,
+  );
   assert.equal(run('layer-plan', '4', '3', '1', '2', '7')[3].alongShift, 4);
   // The shortest branch for a target overhead meets it and one cell less does not.
   const shortest = run('branch-length-for-overhead', '3', '2', '5', '2', '0.15');
@@ -192,9 +246,17 @@ test('herd: rejections for impossible plans and unbounded projections', () => {
   // One adult breeds nothing forever, so a feed budget would never run out.
   assert.throws(() => run('feed-budget-cycles', '1', '2', '1', '10', '0.75'), /At least two adults/);
   // One pair per cycle with offspring that never mature in time: 1,000,000 cycles is the last accepted count.
-  assert.deepEqual(run('feed-budget-cycles', '2', '1', '1000000', '500000', '0.5'), { cycles: 1000000, pairings: 1000000, feedUsed: 500000, herd: 1000002 });
+  assert.deepEqual(run('feed-budget-cycles', '2', '1', '1000000', '500000', '0.5'), {
+    cycles: 1000000,
+    pairings: 1000000,
+    feedUsed: 500000,
+    herd: 1000002,
+  });
   assert.throws(() => run('feed-budget-cycles', '2', '1', '1000000', '1000000', '0.5'), /limited to 1,000,000 cycles/);
-  assert.throws(() => run('feed-budget-cycles', '1000000', '1000000', '0', '1000000', '0.000001'), /1,000,000,000,000 animals/);
+  assert.throws(
+    () => run('feed-budget-cycles', '1000000', '1000000', '0', '1000000', '0.000001'),
+    /1,000,000,000,000 animals/,
+  );
   // Founder searches stop at 1,000 cycles; two adults with one offspring per pair pass five quickly.
   assert.equal(run('founders-for-target', '5', '1', '0', '1000'), 2);
   assert.throws(() => run('founders-for-target', '5', '1', '0', '1001'), /limited to 1,000 cycles/);
@@ -248,9 +310,24 @@ test('herd: boundaries at zero quantities, exact multiples, and smallest sizes',
   assert.equal(run('feed-to-target', '1', '3', '2', '2', '1.5'), null);
   assert.deepEqual(run('feed-to-target', '5', '3', '2', '4', '1.5'), { cycles: 0, pairings: 0, feed: 0, herd: 5 });
   // Six adults breed 3, 3, 6, 9 pairs: a budget for exactly twelve pairings covers three cycles.
-  assert.deepEqual(run('feed-budget-cycles', '6', '2', '1', '9', '0.75'), { cycles: 3, pairings: 12, feedUsed: 9, herd: 30 });
-  assert.deepEqual(run('feed-budget-cycles', '6', '2', '1', '8.99', '0.75'), { cycles: 2, pairings: 6, feedUsed: 4.5, herd: 18 });
-  assert.deepEqual(run('feed-budget-cycles', '6', '2', '1', '0', '0.75'), { cycles: 0, pairings: 0, feedUsed: 0, herd: 6 });
+  assert.deepEqual(run('feed-budget-cycles', '6', '2', '1', '9', '0.75'), {
+    cycles: 3,
+    pairings: 12,
+    feedUsed: 9,
+    herd: 30,
+  });
+  assert.deepEqual(run('feed-budget-cycles', '6', '2', '1', '8.99', '0.75'), {
+    cycles: 2,
+    pairings: 6,
+    feedUsed: 4.5,
+    herd: 18,
+  });
+  assert.deepEqual(run('feed-budget-cycles', '6', '2', '1', '0', '0.75'), {
+    cycles: 0,
+    pairings: 0,
+    feedUsed: 0,
+    herd: 6,
+  });
   close(run('feed-budget-cycles', '6', '2', '1', '0.3', '0.1'), { cycles: 1, pairings: 3, feedUsed: 0.3, herd: 12 });
   // Offspring born at a breeding instant can breed at the next one when they mature within one cooldown.
   assert.equal(run('delay-cycles', '0', '5'), 0);
@@ -316,16 +393,42 @@ test('herd: boundaries at zero quantities, exact multiples, and smallest sizes',
   assert.deepEqual(run('pen-split', '5', '100'), [5]);
   assert.deepEqual(run('pen-split', '0', '12'), []);
   // No excess; surplus adults and some juveniles; no surplus adults; breeders as the last resort.
-  assert.deepEqual(run('cull-to-fit', '20', '15', '35', '8'), { adultsCulled: 0, juvenilesCulled: 0, breedersCulled: 0, herdAfter: 35 });
-  assert.deepEqual(run('cull-to-fit', '20', '15', '18', '8'), { adultsCulled: 12, juvenilesCulled: 5, breedersCulled: 0, herdAfter: 18 });
-  assert.deepEqual(run('cull-to-fit', '5', '15', '12', '8'), { adultsCulled: 0, juvenilesCulled: 8, breedersCulled: 0, herdAfter: 12 });
-  assert.deepEqual(run('cull-to-fit', '5', '3', '2', '8'), { adultsCulled: 0, juvenilesCulled: 3, breedersCulled: 3, herdAfter: 2 });
+  assert.deepEqual(run('cull-to-fit', '20', '15', '35', '8'), {
+    adultsCulled: 0,
+    juvenilesCulled: 0,
+    breedersCulled: 0,
+    herdAfter: 35,
+  });
+  assert.deepEqual(run('cull-to-fit', '20', '15', '18', '8'), {
+    adultsCulled: 12,
+    juvenilesCulled: 5,
+    breedersCulled: 0,
+    herdAfter: 18,
+  });
+  assert.deepEqual(run('cull-to-fit', '5', '15', '12', '8'), {
+    adultsCulled: 0,
+    juvenilesCulled: 8,
+    breedersCulled: 0,
+    herdAfter: 12,
+  });
+  assert.deepEqual(run('cull-to-fit', '5', '3', '2', '8'), {
+    adultsCulled: 0,
+    juvenilesCulled: 3,
+    breedersCulled: 3,
+    herdAfter: 2,
+  });
 });
 
 test('herd: cross-command invariants', () => {
   const run = (command, ...args) => calculation('herd', command, args);
-  const total = values => values.reduce((a, b) => a + b, 0);
-  for (const [adults, offspring, delay] of [['5', '3', '2'], ['7', '2', '1'], ['2', '1', '0'], ['9', '4', '3'], ['3', '5', '6']]) {
+  const total = (values) => values.reduce((a, b) => a + b, 0);
+  for (const [adults, offspring, delay] of [
+    ['5', '3', '2'],
+    ['7', '2', '1'],
+    ['2', '1', '0'],
+    ['9', '4', '3'],
+    ['3', '5', '6'],
+  ]) {
     const curve = run('growth-curve', adults, offspring, delay, '12');
     // The curve starts with one breeding round, never shrinks, and ends at the age split.
     assert.equal(curve[0], Number(adults) + run('breeding-round', adults, offspring, '0').offspring);
@@ -334,7 +437,8 @@ test('herd: cross-command invariants', () => {
     assert.equal(split.adults + split.juveniles, split.herd);
     assert.equal(split.herd, curve[11]);
     // The cycle count for a target is the first cycle whose herd reaches it.
-    const target = curve[7] - 1, cycles = run('feed-to-target', adults, offspring, delay, String(target), '0').cycles;
+    const target = curve[7] - 1,
+      cycles = run('feed-to-target', adults, offspring, delay, String(target), '0').cycles;
     assert.ok(curve[cycles - 1] >= target && (cycles === 1 || curve[cycles - 2] < target));
     // The feed that reaches a target funds exactly those cycles; slightly less funds one cycle fewer.
     const plan = run('feed-to-target', adults, offspring, delay, String(target), '0.75');
@@ -343,7 +447,10 @@ test('herd: cross-command invariants', () => {
     close(plan.feed, plan.pairings * 0.75);
     const funded = run('feed-budget-cycles', adults, offspring, delay, String(plan.feed), '0.75');
     assert.deepEqual([funded.cycles, funded.pairings, funded.herd], [plan.cycles, plan.pairings, plan.herd]);
-    assert.equal(run('feed-budget-cycles', adults, offspring, delay, String(plan.feed - 0.01), '0.75').cycles, cycles - 1);
+    assert.equal(
+      run('feed-budget-cycles', adults, offspring, delay, String(plan.feed - 0.01), '0.75').cycles,
+      cycles - 1,
+    );
     // The fewest founders reach the target in time and one fewer does not.
     const founders = run('founders-for-target', String(curve[7]), offspring, delay, '8');
     assert.ok(founders <= Number(adults));
@@ -367,10 +474,20 @@ test('herd: cross-command invariants', () => {
   // The delay for a maturation time of 22 at cooldown 5 is the four cycles used above.
   assert.equal(run('delay-cycles', '22', '5'), 4);
   // The breeders for a demand meet it and two fewer do not.
-  for (const [demandRate, offspring, cooldown, period] of [['100', '3', '8', '60'], ['7.5', '2', '5', '60'], ['250', '4', '6.5', '24']]) {
+  for (const [demandRate, offspring, cooldown, period] of [
+    ['100', '3', '8', '60'],
+    ['7.5', '2', '5', '60'],
+    ['250', '4', '6.5', '24'],
+  ]) {
     const breeders = run('breeders-for-demand', demandRate, offspring, cooldown, period);
-    assert.ok(run('sustainable-yield', String(breeders), offspring, '1', cooldown, period).animalsPerPeriod >= Number(demandRate));
-    assert.ok(run('sustainable-yield', String(breeders - 2), offspring, '1', cooldown, period).animalsPerPeriod < Number(demandRate));
+    assert.ok(
+      run('sustainable-yield', String(breeders), offspring, '1', cooldown, period).animalsPerPeriod >=
+        Number(demandRate),
+    );
+    assert.ok(
+      run('sustainable-yield', String(breeders - 2), offspring, '1', cooldown, period).animalsPerPeriod <
+        Number(demandRate),
+    );
   }
   // Over one harvest interval the sustainable yield is the batch plus its surplus, and feed follows the animals.
   const interval = run('harvest-interval', '50', '9', '3', '8');
@@ -383,10 +500,21 @@ test('herd: cross-command invariants', () => {
   assert.ok(drops.pairings * 4 >= drops.animals && (drops.pairings - 1) * 4 < drops.animals);
   // Mixed feed is the sum of single-species rounds.
   const mixed = run('mixed-feed', '7,12,5', '2.5,1,3');
-  close(mixed.totalFeed, run('breeding-round', '7', '1', '2.5').feed + run('breeding-round', '12', '1', '1').feed + run('breeding-round', '5', '1', '3').feed);
-  for (const [animals, area] of [['23', '2.5'], ['100', '1.7'], ['7', '0.6'], ['999', '3.3']]) {
+  close(
+    mixed.totalFeed,
+    run('breeding-round', '7', '1', '2.5').feed +
+      run('breeding-round', '12', '1', '1').feed +
+      run('breeding-round', '5', '1', '3').feed,
+  );
+  for (const [animals, area] of [
+    ['23', '2.5'],
+    ['100', '1.7'],
+    ['7', '0.6'],
+    ['999', '3.3'],
+  ]) {
     const required = Number(animals) * Number(area);
-    const square = run('square-pen', animals, area), pen = run('min-perimeter-pen', animals, area);
+    const square = run('square-pen', animals, area),
+      pen = run('min-perimeter-pen', animals, area);
     // The square pen holds the herd and a side one shorter would not.
     assert.ok(square.capacity >= Number(animals) && (square.side - 1) ** 2 < required);
     // The least-perimeter pen is large enough, no longer around than the square, and no larger in area.
@@ -398,7 +526,13 @@ test('herd: cross-command invariants', () => {
     assert.ok(run('pen-capacity', String(pen.width), String(pen.length), '0', area) >= Number(animals));
   }
   // Pen splits keep every animal, respect the capacity, and use the fewest pens.
-  for (const [animals, capacity] of [[53, 12], [48, 12], [7, 3], [1000, 7], [5, 100]]) {
+  for (const [animals, capacity] of [
+    [53, 12],
+    [48, 12],
+    [7, 3],
+    [1000, 7],
+    [5, 100],
+  ]) {
     const pens = run('pen-split', String(animals), String(capacity));
     assert.equal(total(pens), animals);
     assert.equal(pens.length, Math.ceil(animals / capacity));
@@ -406,11 +540,19 @@ test('herd: cross-command invariants', () => {
     assert.ok(pens.every((size, i) => i === 0 || size <= pens[i - 1]));
   }
   // Culls and the remaining herd account for every animal, and breeders go last.
-  for (const [adults, juveniles, capacity, keep] of [[20, 15, 6, 8], [20, 15, 18, 8], [5, 15, 12, 8], [9, 0, 4, 4]]) {
+  for (const [adults, juveniles, capacity, keep] of [
+    [20, 15, 6, 8],
+    [20, 15, 18, 8],
+    [5, 15, 12, 8],
+    [9, 0, 4, 4],
+  ]) {
     const cull = run('cull-to-fit', String(adults), String(juveniles), String(capacity), String(keep));
     assert.equal(cull.adultsCulled + cull.juvenilesCulled + cull.breedersCulled + cull.herdAfter, adults + juveniles);
     assert.equal(cull.herdAfter, Math.min(capacity, adults + juveniles));
-    assert.ok(cull.breedersCulled === 0 || (cull.juvenilesCulled === juveniles && cull.adultsCulled === Math.max(0, adults - keep)));
+    assert.ok(
+      cull.breedersCulled === 0 ||
+        (cull.juvenilesCulled === juveniles && cull.adultsCulled === Math.max(0, adults - keep)),
+    );
   }
 });
 
@@ -424,7 +566,12 @@ test('signalplan: rejections for impossible signal inputs', () => {
   assert.throws(() => run('divider-outputs', '100', '3,4,2', '1,0,3'), /start count must be below/);
   assert.throws(() => run('divider-outputs', '100', '3,4', '1,0,3'), /equal lengths/);
   assert.throws(() => run('counter-delay', '1000000', '0.0000001', '2'), /limited to 1,000,000,000,000 pulses/);
-  for (const [command, args] of [['counter-delay', ['1000', '7', '1']], ['counter-wrap', ['3', '1', '150']], ['digits-for-states', ['100', '1']], ['digit-encode', ['47', '1', '5']]]) {
+  for (const [command, args] of [
+    ['counter-delay', ['1000', '7', '1']],
+    ['counter-wrap', ['3', '1', '150']],
+    ['digits-for-states', ['100', '1']],
+    ['digit-encode', ['47', '1', '5']],
+  ]) {
     assert.throws(() => run(command, ...args), /Base must be at least 2/);
   }
   assert.throws(() => run('counter-wrap', '54', '2', '0'), /Counter capacity/);
@@ -486,21 +633,27 @@ test('signalplan: boundaries of lines, clocks, and encodings', () => {
 test('signalplan: cross-command invariants', () => {
   const run = (command, ...args) => calculation('signalplan', command, args);
   // The longest line fits its budget and one more cell does not.
-  for (const [budget, range, booster, cell] of [['29', '15', '2', '0.5'], ['100', '8', '3.5', '0.75'], ['7.35', '4', '0', '0.1']]) {
+  for (const [budget, range, booster, cell] of [
+    ['29', '15', '2', '0.5'],
+    ['100', '8', '3.5', '0.75'],
+    ['7.35', '4', '0', '0.1'],
+  ]) {
     const cells = run('longest-line', budget, range, booster, cell);
     assert.ok(run('line-timing', String(cells), range, booster, cell).delay <= Number(budget));
     assert.ok(run('line-timing', String(cells + 1), range, booster, cell).delay > Number(budget));
   }
   // Reach is the last cell count whose strength stays at the minimum.
   const reach = run('reach-cells', '15', '1.5', '2');
-  assert.ok(run('strength-after', '15', '1.5', String(reach)) >= 2 && run('strength-after', '15', '1.5', String(reach + 1)) < 2);
+  assert.ok(
+    run('strength-after', '15', '1.5', String(reach)) >= 2 && run('strength-after', '15', '1.5', String(reach + 1)) < 2,
+  );
   // High ticks over whole periods are periods times high-ticks, and the clock-shape duty cycle matches.
   assert.equal(run('high-tick-count', '8', '3', '5', '11', '90'), 30);
   close(run('clock-shape', '3', '5', '20').dutyCycle, 30 / 80);
   // Padded paths all arrive together; aligned paths land on clock multiples.
   const delays = [7, 12.5, 3, 9];
   const padded = run('path-padding', delays.join(','), '1.5').map((pad, i) => pad + delays[i]);
-  assert.ok(padded.every(total => total === 14));
+  assert.ok(padded.every((total) => total === 14));
   run('clock-align', '7,13,3,10', '5').forEach((pad, i) => assert.equal(([7, 13, 3, 10][i] + pad) % 5, 0));
   // Two clocks starting together first coincide at their common period.
   assert.equal(run('first-coincidence', '6', '0', '10', '0').repeatEvery, run('common-period', '6,10'));
@@ -510,9 +663,16 @@ test('signalplan: cross-command invariants', () => {
   assert.equal(run('counter-wrap', String(digits - 1), '3', '99').wraps, 1);
   // Encodings round-trip and Gray codes of neighbors differ in one digit.
   for (let value = 0; value < 64; value++) {
-    const digitsOf = v => run('digit-encode', String(v), '2', '7');
+    const digitsOf = (v) => run('digit-encode', String(v), '2', '7');
     assert.equal(parseInt(digitsOf(value).join(''), 2), value);
-    assert.equal(run('hamming-distance', digitsOf(run('gray-code', String(value))).join(','), digitsOf(run('gray-code', String(value + 1))).join(',')), 1);
+    assert.equal(
+      run(
+        'hamming-distance',
+        digitsOf(run('gray-code', String(value))).join(','),
+        digitsOf(run('gray-code', String(value + 1))).join(','),
+      ),
+      1,
+    );
   }
   // Parity matches the ones count; edges alternate starting with a rise.
   const samples = '1,1,0,0,1,0,1,1,0';
@@ -547,7 +707,7 @@ test('linkplan: rejections for wrong row counts and impossible inputs', () => {
   assert.throws(() => run('to-compact', '[[1,2]]', '0'));
   assert.throws(() => run('safe-separation', '2.5', '1.5'));
   // 45 points in one cell give 990 pairs; 46 give 1035, beyond the limit.
-  const cluster = count => JSON.stringify(Array.from({ length: count }, (_, i) => [i / 100, 0.5]));
+  const cluster = (count) => JSON.stringify(Array.from({ length: count }, (_, i) => [i / 100, 0.5]));
   assert.equal(run('collisions', cluster(45), '4', '0').length, 990);
   assert.throws(() => run('collisions', cluster(46), '4', '0'), /limited to 1000 pairs/);
 });
@@ -555,7 +715,12 @@ test('linkplan: rejections for wrong row counts and impossible inputs', () => {
 test('linkplan: boundaries at zero, exact multiples, and smallest sizes', () => {
   const run = (command, ...args) => calculation('linkplan', command, args);
   assert.equal(run('break-even', '7.5', '0'), 0);
-  assert.deepEqual(run('relay-legs', '[[3,4],[3,4]]', '8', '30'), { compactDistance: 0, legs: 0, relays: 0, legLength: 0 });
+  assert.deepEqual(run('relay-legs', '[[3,4],[3,4]]', '8', '30'), {
+    compactDistance: 0,
+    legs: 0,
+    relays: 0,
+    legLength: 0,
+  });
   // Compact distance 120 is an exact multiple of 30; 125 needs one more leg.
   assert.equal(run('relay-legs', '[[0,0],[576,-768]]', '8', '30').legs, 4);
   assert.equal(run('relay-legs', '[[0,0],[600,-800]]', '8', '30').legs, 5);
@@ -564,7 +729,10 @@ test('linkplan: boundaries at zero, exact multiples, and smallest sizes', () => 
   assert.deepEqual(run('coverage-sites', '840', '84', '7', '12'), { alongX: 10, alongZ: 1, sites: 10 });
   assert.deepEqual(run('coverage-sites', '841', '84', '7', '12'), { alongX: 11, alongZ: 1, sites: 11 });
   // A budget equal to 5 + 13 + 23 takes the third errand too.
-  assert.deepEqual(run('errand-plan', '[[10,7.5],[-12.5,17.5],[15,-32.5],[4,-0.5]]', '[[1,-1]]', '2.5', '3', '41'), { visits: [4, 1, 2], used: 41 });
+  assert.deepEqual(run('errand-plan', '[[10,7.5],[-12.5,17.5],[15,-32.5],[4,-0.5]]', '[[1,-1]]', '2.5', '3', '41'), {
+    visits: [4, 1, 2],
+    used: 41,
+  });
   assert.deepEqual(run('errand-plan', '[[2.5,-2.5]]', '[[1,-1]]', '2.5', '0', '0'), { visits: [1], used: 0 });
   // With scale below one a single cell can hold no whole wide column.
   assert.equal(run('cell-footprint', '[[0.5,0.5]]', '0.4', '0').columns, 0);
@@ -590,23 +758,42 @@ test('linkplan: cross-command invariants', () => {
   close(trip.linkedTime, trip.walkInTime + trip.compactTime + trip.walkOutTime + 2.25);
   close(trip.savedTime, trip.directTime - trip.linkedTime);
   const assigned = run('hub-assign', points, '[[2,-1],[-5,12],[1,3]]', '4');
-  assert.equal(assigned.loads.reduce((a, b) => a + b, 0), 6);
+  assert.equal(
+    assigned.loads.reduce((a, b) => a + b, 0),
+    6,
+  );
   const spokes = run('spokes', points, '[[2,-1]]', '4');
-  close(spokes.total, spokes.lengths.reduce((a, b) => a + b, 0));
+  close(
+    spokes.total,
+    spokes.lengths.reduce((a, b) => a + b, 0),
+  );
   assert.equal(spokes.lengths[spokes.farthest - 1], spokes.longest);
   const trunk = run('trunk-network', points, '[[2,-1]]', '4');
   close(trunk.total, trunk.trunk + trunk.branches);
   const coverage = run('coverage-check', points, '[[2,-1],[-5,12]]', '4', '3.5');
-  assert.deepEqual([...coverage.covered, ...coverage.uncovered].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(
+    [...coverage.covered, ...coverage.uncovered].sort((a, b) => a - b),
+    [1, 2, 3, 4, 5, 6],
+  );
   const cells = run('compact-cells', points, '4');
   const span = run('cell-span', points, '4');
   assert.equal(span.cells, (span.maxCell[0] - span.minCell[0] + 1) * (span.maxCell[1] - span.minCell[1] + 1));
-  assert.ok(cells.every(([x, z]) => x >= span.minCell[0] && x <= span.maxCell[0] && z >= span.minCell[1] && z <= span.maxCell[1]));
+  assert.ok(
+    cells.every(
+      ([x, z]) => x >= span.minCell[0] && x <= span.maxCell[0] && z >= span.minCell[1] && z <= span.maxCell[1],
+    ),
+  );
   // Every point in a shared cell collides with radius zero, and tunnel cells match the cell differences.
   const shared = run('shared-cells', '[[5,13],[37,-22],[6.5,15.9],[38,-21],[-3,8],[7.9,12]]', '4');
   const zeroPairs = run('collisions', '[[5,13],[37,-22],[6.5,15.9],[38,-21],[-3,8],[7.9,12]]', '4', '0');
-  assert.equal(zeroPairs.length, shared.reduce((n, g) => n + g.length * (g.length - 1) / 2, 0));
-  assert.equal(run('tunnel-cells', '[[37,-22],[-3,8]]', '4').tunnelCells, Math.abs(cells[0][0] - cells[2][0]) + Math.abs(cells[0][1] - cells[2][1]) + 1);
+  assert.equal(
+    zeroPairs.length,
+    shared.reduce((n, g) => n + (g.length * (g.length - 1)) / 2, 0),
+  );
+  assert.equal(
+    run('tunnel-cells', '[[37,-22],[-3,8]]', '4').tunnelCells,
+    Math.abs(cells[0][0] - cells[2][0]) + Math.abs(cells[0][1] - cells[2][1]) + 1,
+  );
   // A spanning network of n points has n - 1 edges and is never longer than the star from point one.
   const network = run('spanning-network', points, '4');
   assert.equal(network.edges.length, 5);
@@ -624,12 +811,21 @@ test('stripmine: comb layouts split branches per side and walk limits round cons
   assert.throws(() => run('comb-cells', '3', '1', '1', '3', '2', '1'), /Branch mouths/);
   assert.throws(() => run('comb-faces', '3', '1', '1', '3', '2', '1'), /Branch mouths/);
   // A 4-cell wall holds two width-2 mouths: 4 corridor cells plus 3 x 2 x 1 branch cells.
-  assert.deepEqual(run('comb-cells', '4', '1', '1', '3', '2', '1'), { corridorCells: 4, branchCells: 6, totalCells: 10 });
+  assert.deepEqual(run('comb-cells', '4', '1', '1', '3', '2', '1'), {
+    corridorCells: 4,
+    branchCells: 6,
+    totalCells: 10,
+  });
   // Two separated width-2 branches need 2 + 1 + 2 = 5 cells, so 4 is refused (touching branches share a wall).
   assert.throws(() => run('comb-faces', '4', '1', '1', '4', '2', '1'), /Branch mouths/);
   // Length 5: side walls 1 + 1 left after the mouths, far end 1, branch sides 4 x 2, branch ends 4 x 2.
   // Floor 5 x 1 + 4 x 2 x 1 = 13.
-  assert.deepEqual(run('comb-faces', '5', '1', '1', '4', '2', '1'), { floorFaces: 13, ceilingFaces: 13, wallFaces: 19, totalFaces: 45 });
+  assert.deepEqual(run('comb-faces', '5', '1', '1', '4', '2', '1'), {
+    floorFaces: 13,
+    ceilingFaces: 13,
+    wallFaces: 19,
+    totalFaces: 45,
+  });
   // Branch one returns 23 steps and branch two 30; limits within roundoff of either admit that branch.
   assert.equal(run('branches-within-walk', '22.999999999999996', '3', '2', '5', '20'), 1);
   assert.equal(run('branches-within-walk', '29.99999999999999', '3', '2', '5', '20'), 2);
@@ -646,7 +842,10 @@ test('herd: cycles-to-harvest totals culls, stops when breeding ends, and caps c
   assert.deepEqual(run('cycles-to-harvest', '5', '3', '2', '8', '28'), { cycles: 7, culled: 39, herd: 32 });
   assert.deepEqual(run('cycles-to-harvest', '5', '3', '2', '8', '0'), { cycles: 0, culled: 0, herd: 5 });
   const schedule = run('cull-schedule', '5', '3', '2', '8', '7');
-  assert.equal(schedule.reduce((a, b) => a + b, 0), run('cycles-to-harvest', '5', '3', '2', '8', '39').culled);
+  assert.equal(
+    schedule.reduce((a, b) => a + b, 0),
+    run('cycles-to-harvest', '5', '3', '2', '8', '39').culled,
+  );
   // Keeping no adults: four parents and six offspring that mature at once are all culled in cycle one.
   assert.deepEqual(run('cycles-to-harvest', '4', '3', '0', '0', '10'), { cycles: 1, culled: 10, herd: 0 });
   assert.equal(run('cycles-to-harvest', '4', '3', '0', '0', '11'), null);
@@ -659,7 +858,11 @@ test('herd: cycles-to-harvest totals culls, stops when breeding ends, and caps c
   assert.deepEqual(run('cycles-to-harvest', '4', '1', '2', '1', '5'), { cycles: 3, culled: 5, herd: 1 });
   assert.equal(run('cycles-to-harvest', '4', '1', '2', '1', '6'), null);
   // One pair's first offspring mature at the end of cycle 1,000,000, the last accepted cycle.
-  assert.deepEqual(run('cycles-to-harvest', '2', '1', '999999', '2', '1'), { cycles: 1000000, culled: 1, herd: 1000001 });
+  assert.deepEqual(run('cycles-to-harvest', '2', '1', '999999', '2', '1'), {
+    cycles: 1000000,
+    culled: 1,
+    herd: 1000001,
+  });
   assert.throws(() => run('cycles-to-harvest', '2', '1', '1000000', '2', '1'), /limited to 1,000,000 cycles/);
   assert.throws(() => run('cycles-to-harvest', '1000000', '1000000', '5', '1000000', '1'), /1,000,000,000,000 animals/);
 });
@@ -678,15 +881,29 @@ test('herd: growth-factor at long delays and min-perimeter-pen against a full wi
       let best = null;
       for (let width = 1; width * width <= required + 2 * width + 1; width++) {
         const length = Math.max(width, Math.ceil(required / width - 1e-9));
-        if (!best || width + length < best.width + best.length || (width + length === best.width + best.length && width * length < best.penArea)) best = { width, length, penArea: width * length };
+        if (
+          !best ||
+          width + length < best.width + best.length ||
+          (width + length === best.width + best.length && width * length < best.penArea)
+        )
+          best = { width, length, penArea: width * length };
       }
       const pen = run('min-perimeter-pen', String(animals), String(areaPerAnimal));
-      assert.deepEqual([pen.width, pen.length, pen.penArea], [best.width, best.length, best.penArea], `${animals} x ${areaPerAnimal}`);
+      assert.deepEqual(
+        [pen.width, pen.length, pen.penArea],
+        [best.width, best.length, best.penArea],
+        `${animals} x ${areaPerAnimal}`,
+      );
     }
   }
   // Half-perimeter 1,999,998 holds at most 999,999^2 < 999,998,700,000.3, so 1,999,999 is least; with
   // width 999,999.5 - d the area is 999,999,000,000.25 - d^2, so d = 547.5 is the largest half-odd d allowed.
-  assert.deepEqual(run('min-perimeter-pen', '999999', '999999.7'), { width: 999452, length: 1000547, penArea: 999998700244, perimeter: 3999998 });
+  assert.deepEqual(run('min-perimeter-pen', '999999', '999999.7'), {
+    width: 999452,
+    length: 1000547,
+    penArea: 999998700244,
+    perimeter: 3999998,
+  });
 });
 
 test('signalplan: roundoff at whole-unit boundaries and large line quotients', () => {
@@ -710,15 +927,38 @@ test('signalplan: roundoff at whole-unit boundaries and large line quotients', (
 test('linkplan: tie rules, unequal list lengths, and roundoff in whole counts', () => {
   const run = (command, ...args) => calculation('linkplan', command, args);
   // At scale 5 both compact distances are 0.275 exactly, a tie that goes to point 2; at scale 1 point 3 is one ulp nearer.
-  assert.deepEqual(run('spanning-network', '[[0,0],[1.3750000000000002,0],[-1.375,0]]', '5'), { edges: [[1, 2], [1, 3]], total: 0.55 });
-  assert.deepEqual(run('spanning-network', '[[0,0],[1.3750000000000002,0],[-1.375,0]]', '1').edges, [[1, 3], [1, 2]]);
+  assert.deepEqual(run('spanning-network', '[[0,0],[1.3750000000000002,0],[-1.375,0]]', '5'), {
+    edges: [
+      [1, 2],
+      [1, 3],
+    ],
+    total: 0.55,
+  });
+  assert.deepEqual(run('spanning-network', '[[0,0],[1.3750000000000002,0],[-1.375,0]]', '1').edges, [
+    [1, 3],
+    [1, 2],
+  ]);
   // Point 3 is sqrt(4.25) from both connected points 4 and 2, so it joins the lower index 2.
-  close(run('spanning-network', '[[0,0],[2,0],[1.5,2],[1,0]]', '1'), { edges: [[1, 4], [4, 2], [2, 3]], total: 2 + Math.sqrt(4.25) });
+  close(run('spanning-network', '[[0,0],[2,0],[1.5,2],[1,0]]', '1'), {
+    edges: [
+      [1, 4],
+      [4, 2],
+      [2, 3],
+    ],
+    total: 2 + Math.sqrt(4.25),
+  });
   // A linked leg counts its compact distance plus overhead: 18.25 + 137 + 10 walked.
-  assert.deepEqual(run('mixed-route', '[[0,0],[30,40],[630,840],[636,848]]', '8', '12'), { linkedLegs: [1, 2], total: 165.25 });
+  assert.deepEqual(run('mixed-route', '[[0,0],[30,40],[630,840],[636,848]]', '8', '12'), {
+    linkedLegs: [1, 2],
+    total: 165.25,
+  });
   // Point lists of different lengths; equidistant hubs go to the lower index and unused hubs load zero.
   assert.deepEqual(run('hub-assign', '[[0,0],[4,0]]', '[[1,0],[-1,0],[9,9]]', '1'), { hubs: [1, 1], loads: [2, 0, 0] });
-  assert.deepEqual(run('link-matching', '[[0,0],[10,0]]', '[[0.5,0],[-0.5,0]]', '1', '0', '0'), { forward: [1, null], backward: [1, null], mutualPairs: 1 });
+  assert.deepEqual(run('link-matching', '[[0,0],[10,0]]', '[[0.5,0],[-0.5,0]]', '1', '0', '0'), {
+    forward: [1, null],
+    backward: [1, null],
+    mutualPairs: 1,
+  });
   // Counts a user computes exactly by hand: 0.7 / 0.1 = 7 legs, 0.3 / 0.1 and 0.7 / 0.1 sites, 10 x 0.7 = 7.
   assert.deepEqual(run('relay-legs', '[[0,0],[0.7,0]]', '1', '0.1').legs, 7);
   assert.deepEqual(run('coverage-sites', '0.3', '0.7', '1', '0.1'), { alongX: 3, alongZ: 7, sites: 21 });
@@ -737,8 +977,14 @@ test('stripmine: branches-in-time finds the last branch when the quotient is lar
 
 test('linkplan: a scale too small for the coordinates fails instead of dropping candidates', () => {
   // 1,000,000 / 1e-303 overflows to Infinity, so no compact distance is finite.
-  assert.throws(() => calculation('linkplan', 'spanning-network', ['[[0,0],[1000000,0],[0,1000000]]', '1e-303']), /must be finite/);
-  assert.throws(() => calculation('linkplan', 'hub-assign', ['[[1000000,0]]', '[[0,0],[5,5]]', '1e-303']), /must be finite/);
+  assert.throws(
+    () => calculation('linkplan', 'spanning-network', ['[[0,0],[1000000,0],[0,1000000]]', '1e-303']),
+    /must be finite/,
+  );
+  assert.throws(
+    () => calculation('linkplan', 'hub-assign', ['[[1000000,0]]', '[[0,0],[5,5]]', '1e-303']),
+    /must be finite/,
+  );
   assert.throws(() => calculation('linkplan', 'to-compact', ['[[1000000,0]]', '1e-303']), /must be finite/);
   // At an ordinary scale the same points connect: legs of 125,000 compact blocks
   // to each corner, joined through the first point.

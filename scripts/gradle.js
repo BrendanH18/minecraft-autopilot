@@ -9,31 +9,44 @@ const windows = process.platform === 'win32';
 const wrapper = join(root, 'mod', windows ? 'gradlew.bat' : 'gradlew');
 const requested = process.argv.slice(2);
 const downloadsAllowed = requested.includes('--allow-downloads');
-const argumentsToPass = requested.filter(value => value !== '--allow-downloads');
+const argumentsToPass = requested.filter((value) => value !== '--allow-downloads');
 if (!downloadsAllowed) {
   // Use the Gradle version the wrapper pins, so a wrapper upgrade needs no change here.
   const wrapperProperties = await readFile(join(root, 'mod/gradle/wrapper/gradle-wrapper.properties'), 'utf8');
   const distribution = wrapperProperties.match(/distributionUrl=.*\/(gradle-([^/-]+)-(?:bin|all))\.zip/);
-  if (!distribution) throw new Error('Could not read the Gradle version from mod/gradle/wrapper/gradle-wrapper.properties.');
+  if (!distribution)
+    throw new Error('Could not read the Gradle version from mod/gradle/wrapper/gradle-wrapper.properties.');
   const [, distributionName, gradleVersion] = distribution;
   const distributions = join(root, '.gradle-user/wrapper/dists', distributionName);
   let cached = false;
   try {
     for (const directory of await readdir(distributions)) {
-      try { await access(join(distributions, directory, `gradle-${gradleVersion}/bin`, windows ? 'gradle.bat' : 'gradle')); cached = true; } catch {}
+      try {
+        await access(join(distributions, directory, `gradle-${gradleVersion}/bin`, windows ? 'gradle.bat' : 'gradle'));
+        cached = true;
+      } catch {}
     }
   } catch {}
-  if (!cached) throw new Error(`Gradle ${gradleVersion} is not cached in this project. No download was made. Use --allow-downloads only after approving the download.`);
+  if (!cached)
+    throw new Error(
+      `Gradle ${gradleVersion} is not cached in this project. No download was made. Use --allow-downloads only after approving the download.`,
+    );
   argumentsToPass.unshift('--offline');
   if (argumentsToPass.includes('runClient')) {
     const assetsRoot = join(root, '.gradle-user/caches/fabric-loom/assets');
     let index;
-    try { index = JSON.parse(await readFile(join(assetsRoot, 'indexes/1.21.1-17.json'), 'utf8')); }
-    catch { throw new Error('Minecraft asset index is not cached. No download was made.'); }
+    try {
+      index = JSON.parse(await readFile(join(assetsRoot, 'indexes/1.21.1-17.json'), 'utf8'));
+    } catch {
+      throw new Error('Minecraft asset index is not cached. No download was made.');
+    }
     for (const object of Object.values(index.objects)) {
       let metadata;
-      try { metadata = await stat(join(assetsRoot, 'objects', object.hash.slice(0, 2), object.hash)); } catch {}
-      if (!metadata || metadata.size !== object.size) throw new Error(`Minecraft asset ${object.hash} is missing or incomplete. No download was made.`);
+      try {
+        metadata = await stat(join(assetsRoot, 'objects', object.hash.slice(0, 2), object.hash));
+      } catch {}
+      if (!metadata || metadata.size !== object.size)
+        throw new Error(`Minecraft asset ${object.hash} is missing or incomplete. No download was made.`);
     }
     // Loom's asset download task has its own networking, so skip it after verifying the cache.
     argumentsToPass.push('-x', 'downloadAssets');
@@ -48,5 +61,10 @@ const child = spawn(wrapper, ['-p', join(root, 'mod'), '--no-daemon', ...argumen
 });
 process.once('SIGINT', () => child.kill('SIGINT'));
 process.once('SIGTERM', () => child.kill('SIGTERM'));
-child.once('error', error => { console.error(error.message); process.exitCode = 1; });
-child.once('exit', (code, signal) => { process.exitCode = code ?? (signal ? 130 : 1); });
+child.once('error', (error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
+child.once('exit', (code, signal) => {
+  process.exitCode = code ?? (signal ? 130 : 1);
+});
