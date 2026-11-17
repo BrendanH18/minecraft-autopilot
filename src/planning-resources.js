@@ -55,7 +55,7 @@ function blendBounds(properties, minimums, maximums) {
   );
   const solve = (reverse) => {
     const shares = [...minimums],
-      order = properties.map((v, i) => i).sort((i, j) => (properties[i] - properties[j]) * (reverse ? -1 : 1) || i - j);
+      order = properties.map((_, i) => i).sort((i, j) => (properties[i] - properties[j]) * (reverse ? -1 : 1) || i - j);
     let left = Math.max(0, 1 - sum(shares));
     for (const i of order) {
       const extra = Math.min(left, maximums[i] - shares[i]);
@@ -94,7 +94,7 @@ function divisor(weights, units, method, prefix = false) {
 }
 function cappedDivisor(weights, caps, units) {
   weightCheck(weights, units);
-  demand(sum(caps.filter((v, i) => weights[i] > 0)) >= units, 'Insufficient positive-weight capacity.');
+  demand(sum(caps.filter((_, i) => weights[i] > 0)) >= units, 'Insufficient positive-weight capacity.');
   const grants = weights.map(() => 0);
   for (let n = 0; n < units; n++) {
     const priorities = weights.map((w, i) => (grants[i] < caps[i] ? w / (grants[i] + 1) : -1)),
@@ -534,7 +534,7 @@ export const RESOURCE_GROUPS = [
         types: ['L', 'L', 'q'],
         run: (a, b, c) => {
           same(a, b);
-          return sum(a.filter((v, i) => b[i] <= c));
+          return sum(a.filter((_, i) => b[i] <= c));
         },
       },
       {
@@ -711,7 +711,7 @@ export const RESOURCE_GROUPS = [
         types: ['L', 'L', 'q'],
         run: (a, b, c) => {
           same(a, b);
-          return sum(b.filter((v, i) => a[i] <= c));
+          return sum(b.filter((_, i) => a[i] <= c));
         },
       },
       {
@@ -1259,7 +1259,7 @@ export const RESOURCE_GROUPS = [
         types: ['L', 'L', 'q'],
         run: (a, b, c) => {
           same(a, b);
-          return sum(a.filter((v, i) => b[i] <= c));
+          return sum(a.filter((_, i) => b[i] <= c));
         },
       },
     ],
@@ -1554,7 +1554,7 @@ export const RESOURCE_GROUPS = [
         types: ['L', 'L', 'q'],
         run: (a, b, c) => {
           same(a, b);
-          return sum(b.filter((v, i) => a[i] <= c));
+          return sum(b.filter((_, i) => a[i] <= c));
         },
       },
       {
@@ -2134,7 +2134,7 @@ export const RESOURCE_GROUPS = [
         run: (a, b) => {
           same(a, b);
           weightCheck(a, sum(b));
-          return sum(a.filter((v, i) => b[i] === 0));
+          return sum(a.filter((_, i) => b[i] === 0));
         },
       },
       {

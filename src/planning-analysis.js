@@ -194,7 +194,11 @@ export const ANALYSIS_GROUPS = [
       'List strictly new high readings with zero-based indices, including the first.',
       (a) => {
         let high = -Infinity;
-        return a.flatMap((v, index) => (v > high ? ((high = v), [{ index, value: v }]) : []));
+        return a.flatMap((v, index) => {
+          if (!(v > high)) return [];
+          high = v;
+          return [{ index, value: v }];
+        });
       },
     ),
     command(
@@ -203,7 +207,11 @@ export const ANALYSIS_GROUPS = [
       'List strictly new low readings with zero-based indices, including the first.',
       (a) => {
         let low = Infinity;
-        return a.flatMap((v, index) => (v < low ? ((low = v), [{ index, value: v }]) : []));
+        return a.flatMap((v, index) => {
+          if (!(v < low)) return [];
+          low = v;
+          return [{ index, value: v }];
+        });
       },
     ),
     command('positive-part <values>', 'l', 'Retain positive excess while replacing negative readings with zero.', (a) =>

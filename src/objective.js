@@ -226,8 +226,12 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
         // Another inventory already split from the receiving one shares its history, but its starting stock was never read.
         const split = scope.some((entry) => entry.split);
         const contents =
-          current &&
-          current.reduce((total, container) => total + (container.items ? held(container.items, deposit.item) : 0), 0);
+          current === null
+            ? null
+            : current.reduce(
+                (total, container) => total + (container.items ? held(container.items, deposit.item) : 0),
+                0,
+              );
         stored =
           contents === null
             ? null
@@ -255,16 +259,17 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
           : null;
         const seen = new Set();
         const contents =
-          current &&
-          current.reduce((total, container) => {
-            // Only current coordinates deduplicate inventory; historical sources never hide a separate container.
-            if (seen.has(key(container))) return total;
-            seen.add(key(container));
-            for (const source of sources(container))
-              if (!initialSources.has(source.id) && !discoveredSources.has(source.id))
-                discoveredSources.set(source.id, source.items);
-            return total + held(container.items, deposit.item);
-          }, 0);
+          current === null
+            ? null
+            : current.reduce((total, container) => {
+                // Only current coordinates deduplicate inventory; historical sources never hide a separate container.
+                if (seen.has(key(container))) return total;
+                seen.add(key(container));
+                for (const source of sources(container))
+                  if (!initialSources.has(source.id) && !discoveredSources.has(source.id))
+                    discoveredSources.set(source.id, source.items);
+                return total + held(container.items, deposit.item);
+              }, 0);
         const baseline =
           initialStored.reduce((total, container) => total + held(container.items, deposit.item), 0) +
           [...discoveredSources.values()].reduce((total, items) => total + held(items, deposit.item), 0);

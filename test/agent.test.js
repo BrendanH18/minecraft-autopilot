@@ -137,7 +137,7 @@ test('an exact repeat of an action that changed nothing is refused, but waits an
   const result = await runAgent(adapter, 'Collect and guard', {
     model: 'test',
     log() {},
-    fetchImpl: async (url, request) => {
+    fetchImpl: async (_url, request) => {
       inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
       return reply(decisions.shift());
     },
@@ -251,7 +251,7 @@ test('the planner cannot replace a home saved before the task', async () => {
   const result = await runAgent(adapter, 'Guard my base', {
     model: 'test',
     log() {},
-    fetchImpl: async (url, request) => {
+    fetchImpl: async (_url, request) => {
       inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
       return reply(decisions.shift());
     },
@@ -274,7 +274,7 @@ test('the planner cannot replace a home saved before the task', async () => {
 
 test('requests set an explicit context size and only override thinking when asked', async () => {
   const bodies = [];
-  const fetchImpl = async (url, request) => {
+  const fetchImpl = async (_url, request) => {
     bodies.push(JSON.parse(request.body));
     return reply({ type: 'done', reason: 'Nothing to do.' });
   };
@@ -293,8 +293,8 @@ test('a slow model decision fails clearly without executing anything', async () 
       model: 'test',
       modelTimeout: 0.05,
       log() {},
-      fetchImpl: (url, request) =>
-        new Promise((resolve, reject) => {
+      fetchImpl: (_url, request) =>
+        new Promise((_resolve, reject) => {
           const socket = setInterval(() => {}, 1000);
           request.signal.addEventListener('abort', () => {
             clearInterval(socket);
@@ -682,7 +682,7 @@ test('oversized model actions are rejected before parsing or execution', async (
   await assert.rejects(
     runAgent(adapter, 'Task', {
       model: 'test',
-      fetchImpl: async () => new Response(JSON.stringify({ message: { content: ' '.repeat(65536) + '{}' } })),
+      fetchImpl: async () => new Response(JSON.stringify({ message: { content: `${' '.repeat(65536)}{}` } })),
     }),
     /oversized action/,
   );
@@ -717,7 +717,7 @@ test('model can refresh storage only on backends that expose containers', async 
     await runAgent(adapter, 'Inspect storage', {
       model: 'test',
       log() {},
-      fetchImpl: async (url, request) => {
+      fetchImpl: async (_url, request) => {
         inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
         return reply(decisions.shift());
       },
@@ -754,7 +754,7 @@ test('namespace aliases cannot bypass repeated ineffective action detection', as
   await runAgent(adapter, 'Task', {
     model: 'test',
     log() {},
-    fetchImpl: async (url, request) => {
+    fetchImpl: async (_url, request) => {
       inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
       return reply(decisions.shift());
     },
@@ -860,7 +860,7 @@ test('a distant unrelated container opened earlier no longer fails a task-scoped
     model: 'test',
     log() {},
     criteria: { deposit: { item: 'oak_log', count: 8 } },
-    fetchImpl: async (url, request) => {
+    fetchImpl: async (_url, request) => {
       inputs.push(JSON.parse(JSON.parse(request.body).messages[1].content));
       return reply(decisions.shift());
     },

@@ -110,10 +110,6 @@ function segments(p) {
 function profile(v, spacing) {
   return pairs(v).map(([a, b]) => (b - a) / spacing);
 }
-function windowSum(v, k) {
-  demand(k <= v.length, 'Window exceeds list length.');
-  return sequence(v.length - k + 1, (i) => sum(v.slice(i, i + k)));
-}
 function cyclePhase(period, time) {
   const cycles = time / period;
   return wholeFloor(cycles) === wholeCeil(cycles) ? 0 : ((time % period) + period) % period;
@@ -210,13 +206,13 @@ interval_set.commands.push({
   signature: 'starts <intervals>',
   types: ['intervals'],
   description: 'Report starts of merged runs.',
-  run: (r) => union(r).map(([a, b]) => a),
+  run: (r) => union(r).map(([a]) => a),
 });
 interval_set.commands.push({
   signature: 'ends <intervals>',
   types: ['intervals'],
   description: 'Report ends of merged runs.',
-  run: (r) => union(r).map(([a, b]) => b),
+  run: (r) => union(r).map(([, b]) => b),
 });
 interval_set.commands.push({
   signature: 'midpoints <intervals>',
@@ -351,13 +347,13 @@ shiftplan.commands.push({
   signature: 'shortest-first <durations>',
   types: ['L'],
   description: 'Order job indexes by duration ascending.',
-  run: (v) => v.map((d, i) => i).sort((a, b) => v[a] - v[b] || a - b),
+  run: (v) => v.map((_, i) => i).sort((a, b) => v[a] - v[b] || a - b),
 });
 shiftplan.commands.push({
   signature: 'longest-first <durations>',
   types: ['L'],
   description: 'Order job indexes by duration descending.',
-  run: (v) => v.map((d, i) => i).sort((a, b) => v[b] - v[a] || a - b),
+  run: (v) => v.map((_, i) => i).sort((a, b) => v[b] - v[a] || a - b),
 });
 shiftplan.commands.push({
   signature: 'deadline-slack <durations> <deadline>',
@@ -595,13 +591,13 @@ dependency.commands.push({
   signature: 'reachable-pairs <nodes> <edges>',
   types: ['s', 'edges'],
   description: 'Count ordered reachable distinct-node pairs.',
-  run: (n, e) => ((g) => sum(g.adj.map((v, i) => walk(g.adj, i).length - 1)))(graph(n, e)),
+  run: (n, e) => ((g) => sum(g.adj.map((_, i) => walk(g.adj, i).length - 1)))(graph(n, e)),
 });
 dependency.commands.push({
   signature: 'closure <nodes> <edges>',
   types: ['s', 'edges'],
   description: 'Report transitive reachable dependents.',
-  run: (n, e) => ((g) => g.adj.map((v, i) => walk(g.adj, i).filter((j) => j !== i)))(graph(n, e)),
+  run: (n, e) => ((g) => g.adj.map((_, i) => walk(g.adj, i).filter((j) => j !== i)))(graph(n, e)),
 });
 dependency.commands.push({
   signature: 'redundant <nodes> <edges>',
@@ -1289,13 +1285,13 @@ tiling.commands.push({
   signature: 'columns <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Columns needed including a partial edge column.',
-  run: (w, h, x, z) => wholeCeil(w / x),
+  run: (w, _h, x) => wholeCeil(w / x),
 });
 tiling.commands.push({
   signature: 'rows <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Rows needed including a partial edge row.',
-  run: (w, h, x, z) => wholeCeil(h / z),
+  run: (_w, h, _x, z) => wholeCeil(h / z),
 });
 tiling.commands.push({
   signature: 'tiles <width> <height> <tile-width> <tile-height>',
@@ -1319,7 +1315,7 @@ tiling.commands.push({
   signature: 'area <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Target covered area.',
-  run: (w, h, x, z) => w * h,
+  run: (w, h) => w * h,
 });
 tiling.commands.push({
   signature: 'purchased-area <width> <height> <tile-width> <tile-height>',
@@ -1343,25 +1339,25 @@ tiling.commands.push({
   signature: 'edge-width <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Remainder width; zero when exactly divisible.',
-  run: (w, h, x, z) => Math.max(0, w - wholeFloor(w / x) * x),
+  run: (w, _h, x) => Math.max(0, w - wholeFloor(w / x) * x),
 });
 tiling.commands.push({
   signature: 'edge-height <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Remainder height; zero when exactly divisible.',
-  run: (w, h, x, z) => Math.max(0, h - wholeFloor(h / z) * z),
+  run: (_w, h, _x, z) => Math.max(0, h - wholeFloor(h / z) * z),
 });
 tiling.commands.push({
   signature: 'horizontal-seams <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Length of interior row seams.',
-  run: (w, h, x, z) => Math.max(0, wholeCeil(h / z) - 1) * w,
+  run: (w, h, _x, z) => Math.max(0, wholeCeil(h / z) - 1) * w,
 });
 tiling.commands.push({
   signature: 'vertical-seams <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Length of interior column seams.',
-  run: (w, h, x, z) => Math.max(0, wholeCeil(w / x) - 1) * h,
+  run: (w, h, x) => Math.max(0, wholeCeil(w / x) - 1) * h,
 });
 tiling.commands.push({
   signature: 'seam-total <width> <height> <tile-width> <tile-height>',
@@ -1373,7 +1369,7 @@ tiling.commands.push({
   signature: 'border <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Outer boundary length.',
-  run: (w, h, x, z) => 2 * (w + h),
+  run: (w, h) => 2 * (w + h),
 });
 tiling.commands.push({
   signature: 'junctions <width> <height> <tile-width> <tile-height>',
@@ -1385,13 +1381,13 @@ tiling.commands.push({
   signature: 'row-widths <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Cut width of each column.',
-  run: (w, h, x, z) => sequence(wholeCeil(w / x), (i) => Math.min(x, w - i * x)),
+  run: (w, _h, x) => sequence(wholeCeil(w / x), (i) => Math.min(x, w - i * x)),
 });
 tiling.commands.push({
   signature: 'column-heights <width> <height> <tile-width> <tile-height>',
   types: ['p', 'p', 'p', 'p'],
   description: 'Cut height of each row.',
-  run: (w, h, x, z) => sequence(wholeCeil(h / z), (i) => Math.min(z, h - i * z)),
+  run: (_w, h, _x, z) => sequence(wholeCeil(h / z), (i) => Math.min(z, h - i * z)),
 });
 tiling.commands.push({
   signature: 'rotated-count <width> <height> <tile-width> <tile-height>',
@@ -1632,13 +1628,13 @@ reach.commands.push({
   signature: 'time-left <budget> <speed> <delay>',
   types: ['q', 'p', 'q'],
   description: 'Travel time available after fixed delay.',
-  run: (b, s, d) => Math.max(0, b - d),
+  run: (b, _s, d) => Math.max(0, b - d),
 });
 reach.commands.push({
   signature: 'delay-share <budget> <speed> <delay>',
   types: ['q', 'p', 'q'],
   description: 'Delay divided by total time budget.',
-  run: (b, s, d) => {
+  run: (b, _s, d) => {
     demand(b > 0);
     return d / b;
   },
@@ -1792,7 +1788,7 @@ patrol.commands.push({
   signature: 'moving-period <length> <speed> <rest>',
   types: ['q', 'p', 'q'],
   description: 'Duration moving once around a loop.',
-  run: (l, s, r) => l / s,
+  run: (l, s) => l / s,
 });
 patrol.commands.push({
   signature: 'cycle-period <length> <speed> <rest>',

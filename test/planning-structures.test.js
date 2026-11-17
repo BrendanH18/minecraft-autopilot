@@ -557,7 +557,7 @@ test('roundplan: cross-command invariants and a direct cell-by-cell model', () =
     if (d % 2 === 0) assert.equal(dome.solidCells * 2, total(layers));
     for (const height of [1, 2, 5]) {
       const parts = run('cylinder-parts', d, height),
-        cylinder = solid(d, height, d, (x, y, z) => x * x + z * z <= (d / 2) ** 2);
+        cylinder = solid(d, height, d, (x, _y, z) => x * x + z * z <= (d / 2) ** 2);
       assert.equal(parts.solidCells, count(cylinder));
       assert.equal(parts.shellCells, count(exposed(cylinder, six)), `cylinder ${d} ${height}`);
       assert.equal(parts.wallCells, run('disc-outline', d) * height);
@@ -567,7 +567,7 @@ test('roundplan: cross-command invariants and a direct cell-by-cell model', () =
         d,
         height,
         d,
-        (x, y, z, k) => x * x + z * z <= (((d / 2) * (height - k + 0.5)) / height) ** 2,
+        (x, _y, z, k) => x * x + z * z <= (((d / 2) * (height - k + 0.5)) / height) ** 2,
       );
       assert.deepEqual(cone.layerCells, coneModel.map(count), `cone ${d} ${height}`);
       assert.equal(cone.totalCells, total(cone.layerCells));

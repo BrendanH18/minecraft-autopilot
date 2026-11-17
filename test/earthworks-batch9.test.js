@@ -47,7 +47,7 @@ const cases = [
   ],
   ['overdig', ['2', '3', '4', '1'], 56],
   ['topsoil-strip', ['10', '5', '0.2'], 10],
-  ['stockpile-cone', ['1', '3'], 3.141592653589793],
+  ['stockpile-cone', ['1', '3'], Math.PI],
   ['stockpile-height', ['0', '1'], 0],
   ['stockpile-footprint', ['12', '3'], 12],
   ['average-end-area', ['2', '6', '10'], 40],

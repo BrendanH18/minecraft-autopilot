@@ -1359,7 +1359,7 @@ export const OPERATION_GROUPS = [
               ) + 1
             );
           });
-          return { hubs: assigned, loads: hubs.map((h, k) => assigned.filter((a) => a === k + 1).length) };
+          return { hubs: assigned, loads: hubs.map((_, k) => assigned.filter((a) => a === k + 1).length) };
         },
       ),
       linkCommand(

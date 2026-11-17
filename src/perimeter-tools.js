@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, count, size, sequence, checked } from './spatial-inputs.js';
 
 const NOTE =
   'Offline continuous boundary and material estimates with supplied rates and dimensions. Cell quantities and counts are integers where stated; lengths measure intervals. Gates and openings must be nonoverlapping. No fences are placed or containment, visibility, safety, collision, and construction feasibility checked.';

@@ -1,4 +1,4 @@
-import { numeric, positive, count, size, radians, wrap, sequence, checked } from './spatial-inputs.js';
+import { numeric, positive, count, size, sequence, checked } from './spatial-inputs.js';
 
 const NOTE =
   'Offline continuous material and time estimates using caller-supplied rates. Units must be consistent. No terrain, fluid, geology, support, stability, game mechanics, or construction feasibility is checked. No excavation is executed.';

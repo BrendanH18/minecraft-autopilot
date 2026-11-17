@@ -58,7 +58,7 @@ const raw = (content, extra = {}) => new Response(JSON.stringify({ message: { co
 const reply = (decision, extra) => raw(JSON.stringify(decision), extra);
 const scripted =
   (replies, bodies = []) =>
-  async (url, request) => {
+  async (_url, request) => {
     bodies.push(JSON.parse(request.body));
     const next = replies.shift();
     return next instanceof Response ? next : reply(next);

@@ -12,7 +12,7 @@ export function navNumber(value) {
 }
 export function navPoint(value) {
   const parts = typeof value === 'string' ? value.split(',') : null;
-  if (!parts || parts.length !== 3) throw new Error('Use a point as x,y,z.');
+  if (parts?.length !== 3) throw new Error('Use a point as x,y,z.');
   return bounded(Object.fromEntries(['x', 'y', 'z'].map((axis, i) => [axis, navNumber(parts[i])])));
 }
 function bounded(point) {

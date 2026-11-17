@@ -3,7 +3,6 @@ import { Command, Option, InvalidArgumentError } from 'commander';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { FabricAdapter } from './fabric-adapter.js';
 import { bridgeFile, dataDirectory } from './config.js';
 import { attachBridge, cleanupRuntime, assertBridgeNotRunning } from './runtime.js';

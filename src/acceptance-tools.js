@@ -481,7 +481,8 @@ export function renderMarkdown(sessions) {
     if (session.config.note) lines.push(`- Notes: ${flat(session.config.note)}`);
     return lines.join('\n');
   });
-  return [`_Recorded with \`mc-agent acceptance\`. ${ACCEPTANCE_NOTE}_`, ...blocks].join('\n\n') + '\n';
+  const header = `_Recorded with \`mc-agent acceptance\`. ${ACCEPTANCE_NOTE}_`;
+  return `${[header, ...blocks].join('\n\n')}\n`;
 }
 
 const gateView = (gate) => ({

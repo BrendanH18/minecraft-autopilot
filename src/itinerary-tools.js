@@ -242,7 +242,7 @@ export function itineraryCalculation(command, args = []) {
       const every = number(args[0], 1, 49, true);
       read(1);
       result = {
-        stops: ps.map((point, i) => ({ stop: i + 1, point })).filter((s, i) => i % every === 0 || i === ps.length - 1),
+        stops: ps.map((point, i) => ({ stop: i + 1, point })).filter((_, i) => i % every === 0 || i === ps.length - 1),
       };
       break;
     }

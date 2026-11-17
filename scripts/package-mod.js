@@ -38,7 +38,7 @@ for (const [source, name] of files) {
   await copyFile(`${root}/${source}`, `${output}/${name}`);
   hashes.push(`${checksum(await readFile(`${output}/${name}`))}  ${name}`);
 }
-await writeFile(`${root}/dist/SHA256SUMS`, hashes.join('\n') + '\n');
+await writeFile(`${root}/dist/SHA256SUMS`, `${hashes.join('\n')}\n`);
 await copyFile(`${root}/LICENSE`, `${root}/dist/LICENSE`);
 await writeFile(
   `${root}/dist/INSTALL.md`,
@@ -50,19 +50,13 @@ const changes = spawnSync('git', ['status', '--porcelain', '--untracked-files=no
   cwd: root,
   encoding: 'utf8',
 });
-await writeFile(
-  `${root}/dist/BUILD.json`,
-  JSON.stringify(
-    {
-      version: '0.1.0',
-      minecraft: '1.21.1',
-      sourceCommit: revision.status === 0 ? revision.stdout.trim() : null,
-      sourceModified: changes.status === 0 ? Boolean(changes.stdout.trim()) : null,
-    },
-    null,
-    2,
-  ) + '\n',
-);
+const build = {
+  version: '0.1.0',
+  minecraft: '1.21.1',
+  sourceCommit: revision.status === 0 ? revision.stdout.trim() : null,
+  sourceModified: changes.status === 0 ? Boolean(changes.stdout.trim()) : null,
+};
+await writeFile(`${root}/dist/BUILD.json`, `${JSON.stringify(build, null, 2)}\n`);
 const archive = 'minecraft-agent-0.1.0.zip';
 execFileSync('jar', [
   '--create',
