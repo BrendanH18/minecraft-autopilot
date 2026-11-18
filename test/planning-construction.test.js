@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { testStudyWorkflows } from './planning-study-workflow-checks.js';
 
 import { calculateOffline } from '../src/offline-kit.js';
 import { CONSTRUCTION_GROUPS } from '../src/planning-construction.js';
@@ -130,6 +131,7 @@ for (const group of CONSTRUCTION_GROUPS) {
     assert.deepEqual([...commands].sort(), Object.keys(cases[group.name]).sort());
   });
   for (const [name, [inputs, expected]] of Object.entries(cases[group.name])) {
+    testStudyWorkflows(group.name, name, inputs, expected);
     test(`${group.name} ${name}`, () => {
       assert.deepEqual(calculateOffline(group, name, inputs).result, expected);
     });

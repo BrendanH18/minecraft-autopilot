@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { testStudyWorkflows } from './planning-study-workflow-checks.js';
 import { calculateOffline } from '../src/offline-kit.js';
 import { INFRASTRUCTURE_GROUPS } from '../src/planning-infrastructure.js';
 
@@ -196,6 +197,7 @@ for (const [group, cases] of [
   [canal, canalCases],
 ]) {
   for (const [name, args, expected] of cases) {
+    testStudyWorkflows(group.name, name, args, expected);
     test(`${group.name} ${name} returns its expected calculation`, () => {
       assert.deepEqual(run(group, name, ...args), expected);
       assert.throws(() => run(group, name), /documented arguments/);

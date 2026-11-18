@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { testStudyWorkflows } from './planning-study-workflow-checks.js';
 import { calculateOffline } from '../src/offline-kit.js';
 import { WATERWAY_GROUPS } from '../src/planning-waterways.js';
 
@@ -152,6 +153,7 @@ test('waterway planners have 50 unique documented commands with expected-output 
 
 for (const [group, checks] of Object.entries(cases)) {
   for (const [command, args, expected] of checks) {
+    testStudyWorkflows(group, command, args, expected);
     test(`${group} ${command} gives the documented arithmetic`, () => {
       assert.deepEqual(calculate(group, command, ...args), expected);
       assert.throws(() => calculate(group, command), /exactly the documented arguments/);

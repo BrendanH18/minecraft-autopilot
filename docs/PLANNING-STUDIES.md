@@ -1,9 +1,9 @@
 # Offline planning studies
 
-`mc-agent study` adds nine workflows to each of the 1,200 typed planners (the
-1,000 from batch 10 and the 200 from batch 13): **10,800 supported
+`mc-agent study` adds nine workflows to each of the 1,400 typed planners (the
+1,000 from batch 10 and 200 each from batches 13 and 14): **12,600 supported
 planner/workflow combinations**. These are nine reusable capabilities, not
-10,800 algorithms. No action is executed and no bridge, model, or Minecraft
+12,600 algorithms. No action is executed and no bridge, model, or Minecraft
 connection is needed. The original planner's assumptions, argument types, and
 output restrictions still apply.
 
@@ -11,6 +11,16 @@ Run `mc-agent study --help` for workflows, `mc-agent study catalog` for the full
 machine-readable inventory, or `mc-agent study catalog durability` for one group.
 The catalog reports each planner's signature and ordered argument types.
 Run `mc-agent GROUP COMMAND --help` for the original calculation's arguments.
+
+Compare the cost of a three-layer beacon base with a four-layer base using a
+three-block top edge for both:
+
+```sh
+mc-agent study compare beacon-plan tier-materials '{"baseline":[3,3],"candidates":[[3,4]]}'
+```
+
+The baseline needs 83 blocks. Adding the fourth layer takes another 81 blocks,
+bringing the candidate total to 164.
 
 ## Requests and reports
 
@@ -302,7 +312,7 @@ choose one best case, or establish feasibility or a global optimum.
 
 Each listed group contains 25 planners. Each planner supports `batch`,
 `compare`, `sweep`, `sensitivity`, `rank`, `screen`, `factorial`, `summarize`,
-and `pareto`: **225 combinations per group × 48 groups = 10,800**. The guides
+and `pareto`: **225 combinations per group × 56 groups = 12,600**. The guides
 enumerate all signatures; `study catalog` provides their exact names and
 argument types at runtime.
 
@@ -314,13 +324,17 @@ argument types at runtime.
 | [Coordination](PLANNING-COORDINATION.md) | `interval-set`, `shiftplan`, `dependency`, `pathplan`, `pointcloud`, `index-set`, `tiling`, `elevation`, `reach`, `patrol` | 2,250 |
 | [Structures](PLANNING-STRUCTURES.md) | `stairplan`, `roundplan`, `rampart`, `warehouse` | 900 |
 | [Operations](PLANNING-OPERATIONS.md) | `stripmine`, `herd`, `signalplan`, `linkplan` | 900 |
+| [Construction](PLANNING-CONSTRUCTION.md) | `scaffold-plan`, `beacon-plan` | 450 |
+| [Infrastructure](PLANNING-INFRASTRUCTURE.md) | `tunnel-vent`, `canal-lock` | 450 |
+| [Waterways](PLANNING-WATERWAYS.md) | `sponge-plan`, `ice-road` | 450 |
+| [Stations](PLANNING-STATIONS.md) | `furnace-bank`, `brewing-bench` | 450 |
 
 Batch 13 accounts for 4,800 of these combinations: `factorial`, `summarize`,
 and `pareto` on the 1,000 batch 10 planners (3,000), the same three workflows
 on the 200 batch 13 planners (600), and the six earlier workflows on those 200
 planners (1,200).
 
-The inventory test exercises all 10,800 combinations with independent expected
+The inventory test exercises all 12,600 combinations with independent expected
 results from the planner examples, via the study API and Commander. Focused
 tests cover changed arguments, baseline deltas, shape changes, sorted
 candidates, factorial ordering, summary statistics, dominance, invalid
