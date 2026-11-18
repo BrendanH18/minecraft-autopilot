@@ -12,6 +12,12 @@ machine-readable inventory, or `mc-agent study catalog durability` for one group
 The catalog reports each planner's signature and ordered argument types.
 Run `mc-agent GROUP COMMAND --help` for the original calculation's arguments.
 
+Use `mc-agent study search "map scale"` to find planners by topic. Each word must
+appear somewhere in the group name, command name, or description. Matching ignores
+case and accepts partial words. Results are a JSON array in catalog order with
+the group, signature, and description for each match. An unmatched query returns
+`[]`.
+
 Compare the cost of a three-layer beacon base with a four-layer base using a
 three-block top edge for both:
 
