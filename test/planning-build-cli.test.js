@@ -16,9 +16,17 @@ const groups = [
   'ice-road',
   'furnace-bank',
   'brewing-bench',
+  'orchardplan',
+  'greenhouse',
+  'maproom',
+  'bookbind',
+  'bannerhall',
+  'harborplan',
+  'aqueduct',
+  'viaduct',
 ];
 
-test('the build planning inventory contains exactly 200 distinct commands', () => {
+test('the build planning inventory contains exactly 400 distinct commands', () => {
   assert.deepEqual(
     BUILD_PLANNING_GROUPS.map(({ name }) => name),
     groups,
@@ -30,10 +38,18 @@ test('the build planning inventory contains exactly 200 distinct commands', () =
     assert.equal(specs.length, 25, name);
     for (const { signature } of specs) commands.add(`${name} ${signature.split(' ')[0]}`);
   }
-  assert.equal(commands.size, 200);
+  assert.equal(commands.size, 400);
 });
 
 const samples = {
+  orchardplan: ['planting-grid', '17', '11', '1', '2', '4', '3'],
+  greenhouse: ['wall-glazing', '7', '5', '4', '6'],
+  maproom: ['scale-span', '3'],
+  bookbind: ['chapter-starts', '3,1,5', '2'],
+  bannerhall: ['stripe-order', '2,5,3', '5', '1'],
+  harborplan: ['quay-frontage', '3,5,4', '2', '1'],
+  aqueduct: ['trough-section', '4', '3', '1', '2'],
+  viaduct: ['span-balance', '17', '5'],
   'scaffold-plan': ['frame-grid', '9', '5', '4', '5'],
   'beacon-plan': ['tier-materials', '3', '4'],
   'tunnel-vent': ['clear-profile', '7', '5', '2', '1', '5', '4'],

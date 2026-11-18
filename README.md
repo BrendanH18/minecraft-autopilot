@@ -54,7 +54,7 @@ geometry and workbench run offline. Plans do not execute actions or guarantee sa
 [`study`](docs/PLANNING-STUDIES.md) adds batch evaluation, baseline comparison,
 parameter sweeps, one-at-a-time sensitivity, candidate ranking, constraint
 screening, factorial grids, result summaries, and Pareto fronts to each of the
-1,400 typed planners: **12,600 planner/workflow combinations** from nine
+1,600 typed planners: **14,400 planner/workflow combinations** from nine
 reusable capabilities. Supply inline JSON, `@request.json`, or stdin. These
 offline studies evaluate supplied plans without taking control of Minecraft.
 
@@ -260,3 +260,8 @@ adds 200 direct CLI planners for
 [production stations](docs/PLANNING-STATIONS.md). Use
 `mc-agent GROUP --help` for command signatures. For example,
 `mc-agent beacon-plan tier-materials 3 4` budgets a four-layer square beacon base.
+
+[Batch 15](docs/IMPROVEMENTS.md#batch-15-200-settlement-planners) adds 200
+planners for orchards, greenhouses, map rooms, books, banners, harbors,
+aqueducts, and viaducts. For example, `mc-agent viaduct span-balance 17 5`
+divides a 17-block crossing into spans of 5, 4, 4, and 4 blocks.

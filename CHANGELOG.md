@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- [200 settlement planners](docs/IMPROVEMENTS.md#batch-15-200-settlement-planners) cover gardens, map rooms, books, banners, and crossings. All support the nine planning study workflows.
+
 - 200 offline build planners for scaffolds, beacon bases, tunnel ventilation
   layouts, canal locks, underwater draining, ice roads, furnace banks, and
   brewing benches. Each command calculates from supplied assumptions and can

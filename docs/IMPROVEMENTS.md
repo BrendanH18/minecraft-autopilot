@@ -526,3 +526,13 @@ The commands estimate materials, layouts, coverage, throughput, and schedules
 from supplied dimensions, rates, and limits. They are intended for design
 work before a build. Each calculation has an expected-output test, and the
 CLI tests exercise discovery and execution for all eight groups.
+
+## Batch 15: 200 settlement planners
+
+Each group adds 25 commands for planning a Minecraft settlement offline.
+
+| Groups | Commands | Reference |
+| --- | ---: | --- |
+| `orchardplan`, `greenhouse` | 50 | [Gardens](PLANNING-GARDENS.md) |
+| `maproom`, `bookbind`, `bannerhall` | 75 | [Settlements](PLANNING-SETTLEMENTS.md) |
+| `harborplan`, `aqueduct`, `viaduct` | 75 | [Crossings](PLANNING-CROSSINGS.md) |
