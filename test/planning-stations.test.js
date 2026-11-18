@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { testStudyWorkflows } from './planning-study-workflow-checks.js';
 import assert from 'node:assert/strict';
 import { calculateOffline } from '../src/offline-kit.js';
 import { STATION_GROUPS } from '../src/planning-stations.js';
@@ -319,6 +320,7 @@ for (const [index, cases] of [furnaceCases, brewingCases].entries()) {
     );
   });
   for (const [name, args, expected] of cases) {
+    testStudyWorkflows(group.name, name, args, expected);
     test(`${group.name} ${name}`, () => {
       assert.deepEqual(calculate(group, name, ...args), expected);
       assert.throws(() => calculate(group, name), /exactly the documented arguments/);

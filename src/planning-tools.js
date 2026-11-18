@@ -16,15 +16,15 @@ export const PLANNING_GROUPS = [...SPATIAL_GROUPS, ...RESOURCE_GROUPS, ...ANALYS
 // Batch 13: eight further groups of 25 typed planners.
 export const EXTENSION_GROUPS = [...STRUCTURE_GROUPS, ...OPERATION_GROUPS];
 
-// The typed planners exposed in study workflows.
-export const ALL_PLANNING_GROUPS = [...PLANNING_GROUPS, ...EXTENSION_GROUPS];
-
 export const BUILD_PLANNING_GROUPS = [
   ...CONSTRUCTION_GROUPS,
   ...INFRASTRUCTURE_GROUPS,
   ...WATERWAY_GROUPS,
   ...STATION_GROUPS,
 ];
+
+// The typed planners exposed in study workflows.
+export const ALL_PLANNING_GROUPS = [...PLANNING_GROUPS, ...EXTENSION_GROUPS, ...BUILD_PLANNING_GROUPS];
 
 export function registerPlanningTools(program, options) {
   registerOfflineGroups(program, PLANNING_GROUPS, options);

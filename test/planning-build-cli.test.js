@@ -26,7 +26,7 @@ test('the build planning inventory contains exactly 200 distinct commands', () =
   const studyGroups = new Set(ALL_PLANNING_GROUPS.map(({ name }) => name));
   const commands = new Set();
   for (const { name, commands: specs } of BUILD_PLANNING_GROUPS) {
-    assert.ok(!studyGroups.has(name), `${name} is a direct CLI group`);
+    assert.ok(studyGroups.has(name), `${name} is missing from the study inventory`);
     assert.equal(specs.length, 25, name);
     for (const { signature } of specs) commands.add(`${name} ${signature.split(' ')[0]}`);
   }
@@ -53,6 +53,12 @@ for (const groupName of groups) {
       assert.ok(help.includes(signature), `Help is missing ${signature}`);
     }
     const output = execFileSync(process.execPath, [cli, groupName, command, ...args], { encoding: 'utf8' });
-    assert.deepEqual(JSON.parse(output), calculateOffline(group, command, args));
+    const direct = JSON.parse(output);
+    assert.deepEqual(direct, calculateOffline(group, command, args));
+    const request = JSON.stringify({ cases: [args] });
+    const batch = execFileSync(process.execPath, [cli, 'study', 'batch', groupName, command, request], {
+      encoding: 'utf8',
+    });
+    assert.deepEqual(JSON.parse(batch).cases[0].result, direct.result);
   });
 }

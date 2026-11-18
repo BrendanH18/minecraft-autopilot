@@ -3,12 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { Command } from 'commander';
-import {
-  PLANNING_GROUPS,
-  EXTENSION_GROUPS,
-  ALL_PLANNING_GROUPS,
-  registerPlanningExtensions,
-} from '../src/planning-tools.js';
+import { PLANNING_GROUPS, EXTENSION_GROUPS, registerPlanningExtensions } from '../src/planning-tools.js';
 import { STRUCTURE_GROUPS } from '../src/planning-structures.js';
 import { OPERATION_GROUPS } from '../src/planning-operations.js';
 import { calculateOffline } from '../src/offline-kit.js';
@@ -29,7 +24,7 @@ test('batch 13 has exactly 200 documented planners with independent examples', a
     EXTENSION_GROUPS.map((group) => group.name),
     ['stairplan', 'roundplan', 'rampart', 'warehouse', 'stripmine', 'herd', 'signalplan', 'linkplan'],
   );
-  assert.equal(new Set(ALL_PLANNING_GROUPS.map((group) => group.name)).size, 48);
+  assert.equal(new Set([...PLANNING_GROUPS, ...EXTENSION_GROUPS].map((group) => group.name)).size, 48);
   assert.equal(cases.length, 200);
   const caseNames = cases.map(([group, command]) => `${group} ${command}`);
   assert.equal(new Set(caseNames).size, 200);
@@ -88,13 +83,15 @@ test('batch 13 adds exactly 5,000 callable entries: 200 planners and 4,800 study
     PLANNING_GROUPS.reduce((total, group) => total + group.commands.length, 0),
     before.planners,
   );
-  const catalog = studyCatalog();
+  const catalogs = [...PLANNING_GROUPS, ...EXTENSION_GROUPS].map(({ name }) => studyCatalog(name));
+  const planners = catalogs.reduce((sum, group) => sum + group.planners, 0);
+  const combinations = catalogs.reduce((sum, group) => sum + group.combinations, 0);
   const addedWorkflows = Object.keys(STUDY_WORKFLOWS).slice(before.workflows);
   assert.deepEqual(addedWorkflows, ['factorial', 'summarize', 'pareto']);
-  const addedPlanners = catalog.planners - before.planners;
-  const addedCombinations = catalog.combinations - before.planners * before.workflows;
+  const addedPlanners = planners - before.planners;
+  const addedCombinations = combinations - before.planners * before.workflows;
   assert.equal(addedPlanners, 200);
-  assert.equal(catalog.combinations, 10800);
+  assert.equal(combinations, 10800);
   assert.equal(addedCombinations, 4800);
   // New workflows on the original planners, new workflows on the new planners,
   // and the original workflows on the new planners.
