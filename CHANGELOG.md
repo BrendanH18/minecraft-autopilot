@@ -6,6 +6,11 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- 200 offline build planners for scaffolds, beacon bases, tunnel ventilation
+  layouts, canal locks, underwater draining, ice roads, furnace banks, and
+  brewing benches. Each command calculates from supplied assumptions and can
+  run without a bridge. See [the command inventory](docs/IMPROVEMENTS.md#batch-14-200-offline-build-planners).
+
 - Fabric parity for task-scoped storage verification and the full-inventory
   collection stop. Fabric deposit jobs now report `container` (canonical
   position, block name, and the `before` contents read from the opened screen

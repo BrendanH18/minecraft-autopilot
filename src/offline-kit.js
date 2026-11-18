@@ -49,14 +49,16 @@ export function readInput(value, type) {
     demand(parts.length <= 1000, 'Lists are limited to 1000 entries.');
     return parts.map((part) => scalar(part, { l: 'n', L: 'q', P: 'p', C: 'c', S: 's' }[type]));
   }
-  if (['points2', 'points3', 'intervals', 'edges'].includes(type)) {
+  if (['points2', 'points3', 'points2-empty', 'points3-empty', 'intervals', 'edges'].includes(type)) {
     demand(typeof value === 'string' && value.length <= 100000, 'Supply a bounded JSON array.');
     const rows = JSON.parse(value);
+    const emptyAllowed = type === 'edges' || type.endsWith('-empty');
+    const rowType = type === 'edges' ? 'edge' : 'coordinate';
     demand(
-      Array.isArray(rows) && (type === 'edges' || rows.length > 0) && rows.length <= 1000,
-      type === 'edges' ? 'Supply 0–1000 edge rows.' : 'Supply 1–1000 coordinate rows.',
+      Array.isArray(rows) && (emptyAllowed || rows.length > 0) && rows.length <= 1000,
+      `Supply ${emptyAllowed ? 0 : 1}–1000 ${rowType} rows.`,
     );
-    const width = type === 'points3' ? 3 : 2;
+    const width = type.startsWith('points3') ? 3 : 2;
     return rows.map((row) => {
       demand(Array.isArray(row) && row.length === width, `Rows need ${width} numbers.`);
       const values = row.map((v) => scalar(v, type === 'edges' ? 'c' : 'n'));

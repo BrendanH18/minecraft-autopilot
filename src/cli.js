@@ -109,7 +109,7 @@ import { registerVitalsSeriesTools } from './vitals-series-tools.js';
 import { registerRoutineMetricsTools } from './routine-metrics-tools.js';
 import { registerEventQueryTools } from './event-query-tools.js';
 import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
-import { registerPlanningTools, registerPlanningExtensions } from './planning-tools.js';
+import { registerPlanningTools, registerPlanningExtensions, registerBuildPlanningTools } from './planning-tools.js';
 import { registerPlanningStudies } from './planning-studies.js';
 import { registerAcceptanceTools } from './acceptance-tools.js';
 
@@ -1052,6 +1052,7 @@ registerEventQueryTools(program, { print });
 registerSnapshotQueryTools(program, { print });
 registerPlanningTools(program, { print });
 registerPlanningExtensions(program, { print });
+registerBuildPlanningTools(program, { print });
 registerPlanningStudies(program, { print });
 registerAcceptanceTools(program, { print });
 
