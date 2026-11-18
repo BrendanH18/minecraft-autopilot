@@ -151,7 +151,9 @@ const scaffoldPlan = {
       'Assign each target level to the highest usable deck at or below it, or null.',
       (targets, decks, reach) => {
         const sorted = [...decks].sort((a, b) => b - a);
-        return targets.map((target) => sorted.find((deck) => deck <= target && target - deck <= reach) ?? null);
+        return targets.map(
+          (target) => sorted.find((deck) => deck <= target && coordinateDifference(target, deck) <= reach) ?? null,
+        );
       },
     ),
     command(

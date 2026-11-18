@@ -168,6 +168,7 @@ test('construction surveys accept a known absence of pads and obstructions', () 
 
 test('construction clearance and beacon range include exact decimal endpoints', () => {
   const [scaffold, beacon] = CONSTRUCTION_GROUPS;
+  assert.deepEqual(calculateOffline(scaffold, 'workface-reach', ['0.4,0.401', '0.1,0,0.5', 0.3]).result, [0.1, null]);
   assert.deepEqual(calculateOffline(scaffold, 'deck-clearance', ['0.1,0.1', '0.3,0.29', 0.2]).result, [2]);
   const station = '[[0.4,0]]';
   const sites = '[[0.1,0],[0.7,0]]';
