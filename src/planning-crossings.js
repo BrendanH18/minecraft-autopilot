@@ -452,7 +452,8 @@ const aqueductCommands = [
     'Find the fewest interior bars that divide an opening into gaps at most the supplied width.',
     (width, bar, gap) => {
       const count = Math.max(0, Math.ceil((width - gap) / (bar + gap)));
-      return count * bar > width ? null : { bars: count, freeWidth: width - count * bar };
+      const freeWidth = width - count * bar;
+      return freeWidth < count + 1 ? null : { bars: count, freeWidth };
     },
   ),
   command(

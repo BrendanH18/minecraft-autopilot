@@ -158,7 +158,8 @@ test('crossing planners enforce layout and output bounds', () => {
   assert.deepEqual(run(1, 'isolation-loss', '', 10, 9), { from: 0, until: 10, length: 10 });
   assert.deepEqual(run(1, 'access-crossings', '', 10), { from: 0, until: 10 });
   assert.equal(run(1, 'cover-slabs', 5, 3, ''), 15);
-  assert.equal(run(1, 'inlet-screen', 4, 5, 3), null);
+  for (const width of [4, 5, 6]) assert.equal(run(1, 'inlet-screen', width, 5, 3), null);
+  assert.deepEqual(run(1, 'inlet-screen', 7, 5, 3), { bars: 1, freeWidth: 2 });
   assert.throws(() => run(2, 'joint-offsets', '1002', 1), /1000/);
   assert.throws(() => run(2, 'corbel-layers', 2, 5, 1), /even/);
   assert.equal(run(2, 'repair-possession', '1', 2, 2), null);
