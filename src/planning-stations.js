@@ -24,17 +24,19 @@ function availableSlot(ready, clock) {
 function zoneDispatch(machines, zones, items, periods, releases) {
   same(zones, items, releases);
   same(machines, periods);
-  const readyByZone = machines.map(() => []);
+  const zoneClocks = machines.map(() => ({ ready: [], addDuration: [] }));
   return zones.map((zone, index) => {
     demand(zone <= machines.length && machines[zone - 1] > 0, 'Every job needs a zone with a furnace.');
     demand(index === 0 || releases[index - 1] <= releases[index], 'Release times must be nondecreasing.');
-    const ready = readyByZone[zone - 1];
+    const { ready, addDuration } = zoneClocks[zone - 1];
     // Use the lowest numbered available machine at the release clock.
     const release = releases[index];
     let slot = availableSlot(ready, release);
     if (ready.length < machines[zone - 1] && !budgetFits(ready[slot] ?? 0, release)) slot = ready.length;
     const start = Math.max(release, ready[slot] ?? 0);
-    const finish = start + items[index] * periods[zone - 1];
+    // Carry fractional seconds across consecutive jobs, restarting the clock after an idle gap.
+    if (ready[slot] === undefined || start > ready[slot]) addDuration[slot] = compensatedAdder(start);
+    const finish = addDuration[slot](items[index] * periods[zone - 1]);
     ready[slot] = finish;
     return { zone, furnace: slot + 1, start, finish };
   });

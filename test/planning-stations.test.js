@@ -402,3 +402,10 @@ test('furnace releases and brewing renewals honor exact decimal boundaries', () 
     { doses: 0, coveredUntil },
   ]);
 });
+
+test('a long run of decimal furnace cycles keeps the first furnace available at each release', () => {
+  const jobs = Array(80).fill(1).join(',');
+  const releases = Array.from({ length: 80 }, (_, index) => (index * 7) / 10).join(',');
+  const schedule = calculate(STATION_GROUPS[0], 'zone-dispatch', '2', jobs, jobs, '0.7', releases);
+  assert.ok(schedule.every(({ furnace }) => furnace === 1));
+});

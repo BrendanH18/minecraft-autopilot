@@ -179,3 +179,19 @@ test('construction clearance and beacon range include exact decimal endpoints', 
   assert.deepEqual(calculateOffline(beacon, 'upgrade-impact', ['[[0.1,0]]', 0.2, 0.3, station]).result, [1]);
   assert.deepEqual(calculateOffline(beacon, 'upgrade-impact', ['[[0.1,0]]', 0.3, 0.4, station]).result, []);
 });
+
+test('construction clearance and beacon coverage retain small spans at translated coordinates', () => {
+  const [scaffold, beacon] = CONSTRUCTION_GROUPS;
+  assert.deepEqual(
+    calculateOffline(scaffold, 'deck-clearance', ['64.2,-64.3,64.21', '64.3,-64.2,64.3', 0.1]).result,
+    [3],
+  );
+  const sites = '[[1000.1,0],[1000.3,0]]';
+  const station = '[[1000.2,0]]';
+  assert.deepEqual(calculateOffline(beacon, 'uncovered-stations', ['[[1000.1,0]]', '0.1', station]).result, []);
+  assert.deepEqual(calculateOffline(beacon, 'shared-stations', [sites, 0.1, station]).result, [
+    { station: 1, sites: [1, 2] },
+  ]);
+  assert.deepEqual(calculateOffline(beacon, 'station-assignment', [sites, 0.1, station]).result, [1]);
+  assert.deepEqual(calculateOffline(beacon, 'upgrade-impact', [sites, 0.09, 0.1, station]).result, [1]);
+});

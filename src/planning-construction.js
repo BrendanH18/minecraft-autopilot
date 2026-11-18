@@ -14,6 +14,22 @@ function deckArea(length, width, opening) {
   return area - opening;
 }
 
+function decimalParts(value) {
+  const [mantissa, exponent = '0'] = String(value).split('e');
+  const [whole, fraction = ''] = mantissa.split('.');
+  return { units: BigInt(whole + fraction), exponent: Number(exponent) - fraction.length };
+}
+
+// Subtract surveyed decimal coordinates before rounding the span back to a Number.
+function coordinateDifference(left, right) {
+  if (left === right || (Number.isInteger(left) && Number.isInteger(right))) return left - right;
+  const a = decimalParts(left);
+  const b = decimalParts(right);
+  const exponent = Math.min(a.exponent, b.exponent);
+  const units = a.units * 10n ** BigInt(a.exponent - exponent) - b.units * 10n ** BigInt(b.exponent - exponent);
+  return Number(`${units}e${exponent}`);
+}
+
 function cantilever(supports, reach) {
   const sorted = [...new Set(supports)].sort((a, b) => a - b);
   const intervals = [];
@@ -130,7 +146,9 @@ const scaffoldPlan = {
       'Report the one-based decks with insufficient vertical clearance.',
       (levels, undersides, clearance) => {
         same(levels, undersides);
-        return levels.flatMap((level, index) => (budgetFits(clearance, undersides[index] - level) ? [] : [index + 1]));
+        return levels.flatMap((level, index) =>
+          clearance <= coordinateDifference(undersides[index], level) ? [] : [index + 1],
+        );
       },
     ),
     command(
@@ -303,12 +321,13 @@ function tierLayers(topWidth, tiers) {
 }
 
 const tierCost = (topWidth, tiers) => sum(tierLayers(topWidth, tiers).map((width) => width ** 2));
-const gridDistance = ([x1, z1], [x2, z2]) => Math.max(Math.abs(x1 - x2), Math.abs(z1 - z2));
+const gridDistance = ([x1, z1], [x2, z2]) =>
+  Math.max(Math.abs(coordinateDifference(x1, x2)), Math.abs(coordinateDifference(z1, z2)));
 
 function bestSite(sites, stations) {
   return sites.reduce((best, site, index) => {
     const radius = Math.max(...stations.map((station) => gridDistance(site, station)));
-    return !best || !budgetFits(best.radius, radius) ? { site: index + 1, radius } : best;
+    return !best || radius < best.radius ? { site: index + 1, radius } : best;
   }, null);
 }
 
@@ -532,7 +551,7 @@ const beaconPlan = {
       (sites, radii, stations) => {
         same(sites, radii);
         return stations.flatMap((station, index) =>
-          sites.some((site, siteIndex) => budgetFits(gridDistance(station, site), radii[siteIndex])) ? [] : [index + 1],
+          sites.some((site, siteIndex) => gridDistance(station, site) <= radii[siteIndex]) ? [] : [index + 1],
         );
       },
     ),
@@ -543,7 +562,7 @@ const beaconPlan = {
       (sites, radius, stations) =>
         stations.flatMap((station, index) => {
           const covering = sites.flatMap((site, siteIndex) =>
-            budgetFits(gridDistance(station, site), radius) ? [siteIndex + 1] : [],
+            gridDistance(station, site) <= radius ? [siteIndex + 1] : [],
           );
           return covering.length > 1 ? [{ station: index + 1, sites: covering }] : [];
         }),
@@ -580,7 +599,7 @@ const beaconPlan = {
           let best = Infinity;
           sites.forEach((site, index) => {
             const distance = gridDistance(station, site);
-            if (budgetFits(distance, radius) && !budgetFits(best, distance)) {
+            if (distance <= radius && distance < best) {
               assigned = index + 1;
               best = distance;
             }
@@ -608,7 +627,7 @@ const beaconPlan = {
         demand(current <= next, 'New radius must be at least the current radius.');
         return stations.flatMap((station, index) => {
           const nearest = Math.min(...sites.map((site) => gridDistance(station, site)));
-          return !budgetFits(nearest, current) && budgetFits(nearest, next) ? [index + 1] : [];
+          return current < nearest && nearest <= next ? [index + 1] : [];
         });
       },
     ),
