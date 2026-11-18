@@ -16,7 +16,7 @@ function availableSlot(ready, clock) {
   let earliest = 0;
   for (const [i, time] of ready.entries()) {
     if (budgetFits(time, clock)) return i;
-    if (time < ready[earliest]) earliest = i;
+    if (!budgetFits(ready[earliest], time)) earliest = i;
   }
   return earliest;
 }

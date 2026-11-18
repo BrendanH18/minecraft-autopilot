@@ -409,3 +409,12 @@ test('a long run of decimal furnace cycles keeps the first furnace available at 
   const schedule = calculate(STATION_GROUPS[0], 'zone-dispatch', '2', jobs, jobs, '0.7', releases);
   assert.ok(schedule.every(({ furnace }) => furnace === 1));
 });
+
+test('queued jobs use the lower-numbered furnace when parallel finish clocks tie', () => {
+  const dispatch = (items) =>
+    calculate(STATION_GROUPS[0], 'zone-dispatch', '2', '1,1,1,1,1', items, '0.7', '0,0,0,0,0').map(
+      ({ furnace }) => furnace,
+    );
+  assert.deepEqual(dispatch('5,3,1,1,1'), [1, 2, 2, 2, 1]);
+  assert.deepEqual(dispatch('6,3,1,1,1'), [1, 2, 2, 2, 2]);
+});
