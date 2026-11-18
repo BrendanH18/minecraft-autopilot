@@ -100,12 +100,34 @@ test('study rejects unknown names, invalid requests, oversized output and unsafe
   }
 });
 
+const call = (args, input) =>
+  spawnSync(process.execPath, ['src/cli.js', '--bridge', '.runtime/missing-study.json', 'study', ...args], {
+    encoding: 'utf8',
+    input,
+  });
+
+test('study search discovers planners offline by group, command and description', () => {
+  const result = call(['search', ' MAPROOM  scale-span PIXEL ']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    {
+      group: 'maproom',
+      signature: 'scale-span <level>',
+      description: 'Report the side in blocks and the blocks per pixel of a square map.',
+    },
+  ]);
+  const group = call(['search', 'maproom']);
+  assert.deepEqual(
+    JSON.parse(group.stdout).map((entry) => entry.signature),
+    studyCatalog('maproom').groups[0].commands.map((entry) => entry.signature),
+  );
+  const missing = call(['search', 'maproom', 'xyzzy']);
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.deepEqual(JSON.parse(missing.stdout), []);
+  assert.match(call(['search', '   ']).stderr, /at least one search term/);
+});
+
 test('real CLI runs each workflow without a bridge and errors have no partial report', () => {
-  const call = (args, input) =>
-    spawnSync(process.execPath, ['src/cli.js', '--bridge', '.runtime/missing-study.json', 'study', ...args], {
-      encoding: 'utf8',
-      input,
-    });
   const requests = {
     screen: {
       cases: [

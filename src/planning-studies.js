@@ -48,6 +48,22 @@ export function studyCatalog(groupName) {
   };
 }
 
+function searchPlanners(query) {
+  const terms = query.trim().toLowerCase().split(/\s+/);
+  demand(terms[0].length > 0, 'Supply at least one search term.');
+  const matches = [];
+  for (const group of ALL_PLANNING_GROUPS) {
+    for (const { signature, description } of group.commands) {
+      const command = signature.split(' ')[0];
+      const searchable = `${group.name} ${command} ${description}`.toLowerCase();
+      if (terms.every((term) => searchable.includes(term))) {
+        matches.push({ group: group.name, signature, description });
+      }
+    }
+  }
+  return matches;
+}
+
 export function calculateStudy(workflow, groupName, commandName, request) {
   demand(Object.hasOwn(STUDY_WORKFLOWS, workflow), `Unknown study workflow: ${workflow}.`);
   validateRequest(request);
@@ -107,6 +123,10 @@ export function registerPlanningStudies(program, { print }) {
     .command('catalog [group]')
     .description('List supported planners, argument types, and nine workflows per planner.')
     .action((group) => print(studyCatalog(group)));
+  study
+    .command('search <terms...>')
+    .description('Find planners whose group, command, or description matches all search terms.')
+    .action((terms) => print(searchPlanners(terms.join(' '))));
   const descriptions = {
     batch: 'Evaluate independent argument rows: {cases:[[args],...]}.',
     compare: 'Compare candidates with a baseline: {baseline:[args],candidates:[[args],...]}.',
