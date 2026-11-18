@@ -251,3 +251,12 @@ add 200 more typed planners in eight groups of 25:
 5,000 new callable entries: the 200 commands plus 4,800 planner/workflow
 combinations. Every rate, size, and delay is a supplied assumption; nothing
 here encodes game rules or executes gameplay.
+
+[Batch 14](docs/IMPROVEMENTS.md#batch-14-200-offline-build-planners)
+adds 200 direct CLI planners for
+[construction](docs/PLANNING-CONSTRUCTION.md),
+[infrastructure](docs/PLANNING-INFRASTRUCTURE.md),
+[waterways](docs/PLANNING-WATERWAYS.md), and
+[production stations](docs/PLANNING-STATIONS.md). Use
+`mc-agent GROUP --help` for command signatures. For example,
+`mc-agent beacon-plan tier-materials 3 4` budgets a four-layer square beacon base.

@@ -504,3 +504,25 @@ separates non-dominated candidates from dominated ones across several
 objectives. Like the earlier workflows they accept inline JSON, `@file`, or
 stdin, are limited to 100 cases, and fail atomically. They examine only the
 supplied candidates and do not establish optimality, safety, or feasibility.
+
+## Batch 14: 200 offline build planners
+
+Eight groups each add 25 direct CLI commands. The count covers distinct
+calculations. Run `mc-agent GROUP --help` for the available signatures.
+
+| Numbers | CLI group | Count | Guide |
+| --- | --- | ---: | --- |
+| 1–25 | `scaffold-plan` | 25 | [Scaffolds](PLANNING-CONSTRUCTION.md#scaffold-plan) |
+| 26–50 | `beacon-plan` | 25 | [Beacons](PLANNING-CONSTRUCTION.md#beacon-plan) |
+| 51–75 | `tunnel-vent` | 25 | [Tunnel ventilation](PLANNING-INFRASTRUCTURE.md#tunnel-vent) |
+| 76–100 | `canal-lock` | 25 | [Canal locks](PLANNING-INFRASTRUCTURE.md#canal-lock) |
+| 101–125 | `sponge-plan` | 25 | [Underwater draining](PLANNING-WATERWAYS.md#sponge-plan) |
+| 126–150 | `ice-road` | 25 | [Ice roads](PLANNING-WATERWAYS.md#ice-road) |
+| 151–175 | `furnace-bank` | 25 | [Furnace banks](PLANNING-STATIONS.md#furnace-bank) |
+| 176–200 | `brewing-bench` | 25 | [Brewing benches](PLANNING-STATIONS.md#brewing-bench) |
+| | **Total** | **200** | |
+
+The commands estimate materials, layouts, coverage, throughput, and schedules
+from supplied dimensions, rates, and limits. They are intended for design
+work before a build. Each calculation has an expected-output test, and the
+CLI tests exercise discovery and execution for all eight groups.
