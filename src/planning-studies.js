@@ -101,7 +101,7 @@ export function registerPlanningStudies(program, { print }) {
   const study = program
     .command('study')
     .description(
-      'Batch, compare, vary, rank, screen, cross, summarize, and trade off the 1,400 typed offline planners. Requests: inline JSON, @file, or - for stdin.',
+      'Batch, compare, vary, rank, screen, cross, summarize, and trade off the 1,600 typed offline planners. Requests: inline JSON, @file, or - for stdin.',
     );
   study
     .command('catalog [group]')

@@ -22,10 +22,10 @@ const examples = [
   ...OPERATION_CASES,
 ];
 
-test('study inventory includes all 12,600 planner and workflow combinations', async () => {
+test('study inventory includes all 14,400 planner and workflow combinations', async () => {
   const catalog = studyCatalog();
-  assert.equal(catalog.planners, 1400);
-  assert.equal(catalog.combinations, 12600);
+  assert.equal(catalog.planners, 1600);
+  assert.equal(catalog.combinations, 14400);
   assert.deepEqual(catalog.workflows, [
     'batch',
     'compare',
@@ -37,12 +37,12 @@ test('study inventory includes all 12,600 planner and workflow combinations', as
     'summarize',
     'pareto',
   ]);
-  assert.equal(catalog.groups.length, 56);
+  assert.equal(catalog.groups.length, 64);
   assert.equal(examples.length, 1200);
   const keys = catalog.groups.flatMap((g) =>
     g.commands.flatMap((c) => catalog.workflows.map((w) => `${w}/${g.name}/${c.command}`)),
   );
-  assert.equal(new Set(keys).size, 12600);
+  assert.equal(new Set(keys).size, 14400);
   const docs = await readFile(new URL('../docs/PLANNING-STUDIES.md', import.meta.url), 'utf8');
   for (const group of ALL_PLANNING_GROUPS) {
     assert.ok(docs.includes(`\`${group.name}\``), group.name);
@@ -159,7 +159,7 @@ test('real CLI runs each workflow without a bridge and errors have no partial re
   }
   const catalog = call(['catalog']);
   assert.equal(catalog.status, 0, catalog.stderr);
-  assert.equal(JSON.parse(catalog.stdout).combinations, 12600);
+  assert.equal(JSON.parse(catalog.stdout).combinations, 14400);
   const help = call(['--help']);
   for (const workflow of Object.keys(STUDY_WORKFLOWS)) assert.ok(help.stdout.includes(workflow));
   const invalid = call(['batch', 'durability', 'action-budget', '{"cases":[[5,2,1],[-1,2,1]]}']);
