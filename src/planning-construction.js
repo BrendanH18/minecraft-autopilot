@@ -1,5 +1,5 @@
 import { demand, same, sum } from './offline-kit.js';
-import { budgetFits, wholeCeil, wholeFloor } from './resource-rounding.js';
+import { budgetFits, decimalParts, unitsAtExponent, wholeCeil, wholeFloor } from './resource-rounding.js';
 
 const command = (signature, types, description, run) => ({ signature, types, description, run });
 
@@ -14,19 +14,13 @@ function deckArea(length, width, opening) {
   return area - opening;
 }
 
-function decimalParts(value) {
-  const [mantissa, exponent = '0'] = String(value).split('e');
-  const [whole, fraction = ''] = mantissa.split('.');
-  return { units: BigInt(whole + fraction), exponent: Number(exponent) - fraction.length };
-}
-
 // Subtract surveyed decimal coordinates before rounding the span back to a Number.
 function coordinateDifference(left, right) {
   if (left === right || (Number.isInteger(left) && Number.isInteger(right))) return left - right;
   const a = decimalParts(left);
   const b = decimalParts(right);
   const exponent = Math.min(a.exponent, b.exponent);
-  const units = a.units * 10n ** BigInt(a.exponent - exponent) - b.units * 10n ** BigInt(b.exponent - exponent);
+  const units = unitsAtExponent(a, exponent) - unitsAtExponent(b, exponent);
   return Number(`${units}e${exponent}`);
 }
 

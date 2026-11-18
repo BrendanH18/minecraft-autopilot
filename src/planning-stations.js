@@ -1,5 +1,5 @@
 import { compensatedAdder, demand, same, sequence, sum } from './offline-kit.js';
-import { budgetFits, wholeCeil, wholeFloor } from './resource-rounding.js';
+import { budgetFits, decimalParts, unitsAtExponent, wholeCeil, wholeFloor } from './resource-rounding.js';
 
 const command = (signature, types, description, run) => ({ signature, types, description, run });
 const batches = (items, slots) => Math.ceil(items / slots);
@@ -12,11 +12,11 @@ function sumRates(rates) {
   return total;
 }
 
-function availableSlot(ready, clock) {
+function availableSlot(ready, clock, fits = budgetFits) {
   let earliest = 0;
   for (const [i, time] of ready.entries()) {
-    if (budgetFits(time, clock)) return i;
-    if (!budgetFits(ready[earliest], time)) earliest = i;
+    if (fits(time, clock)) return i;
+    if (!fits(ready[earliest], time)) earliest = i;
   }
   return earliest;
 }
@@ -24,21 +24,28 @@ function availableSlot(ready, clock) {
 function zoneDispatch(machines, zones, items, periods, releases) {
   same(zones, items, releases);
   same(machines, periods);
-  const zoneClocks = machines.map(() => ({ ready: [], addDuration: [] }));
+  // Keep every release and completion on the same exact decimal clock until reporting seconds.
+  const durations = periods.map(decimalParts);
+  const arrivals = releases.map(decimalParts);
+  const exponent = Math.min(...[...durations, ...arrivals].map((time) => time.exponent));
+  const ticksPerItem = durations.map((duration) => unitsAtExponent(duration, exponent));
+  const seconds = (ticks) => Number(`${ticks}e${exponent}`);
+  const readyByZone = machines.map(() => []);
   return zones.map((zone, index) => {
     demand(zone <= machines.length && machines[zone - 1] > 0, 'Every job needs a zone with a furnace.');
     demand(index === 0 || releases[index - 1] <= releases[index], 'Release times must be nondecreasing.');
-    const { ready, addDuration } = zoneClocks[zone - 1];
+    const ready = readyByZone[zone - 1];
     // Use the lowest numbered available machine at the release clock.
-    const release = releases[index];
-    let slot = availableSlot(ready, release);
-    if (ready.length < machines[zone - 1] && !budgetFits(ready[slot] ?? 0, release)) slot = ready.length;
-    const start = Math.max(release, ready[slot] ?? 0);
-    // Carry fractional seconds across consecutive jobs, restarting the clock after an idle gap.
-    if (ready[slot] === undefined || start > ready[slot]) addDuration[slot] = compensatedAdder(start);
-    const finish = addDuration[slot](items[index] * periods[zone - 1]);
+    const release = unitsAtExponent(arrivals[index], exponent);
+    let slot = availableSlot(ready, release, (a, b) => a <= b);
+    let start = release;
+    if (ready[slot] > release) {
+      if (ready.length < machines[zone - 1]) slot = ready.length;
+      else start = ready[slot];
+    }
+    const finish = start + BigInt(items[index]) * ticksPerItem[zone - 1];
     ready[slot] = finish;
-    return { zone, furnace: slot + 1, start, finish };
+    return { zone, furnace: slot + 1, start: seconds(start), finish: seconds(finish) };
   });
 }
 

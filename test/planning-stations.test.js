@@ -391,10 +391,9 @@ test('sorter-reservation keeps a full list of decimal flows on one exact-fit lan
 });
 
 test('furnace releases and brewing renewals honor exact decimal boundaries', () => {
-  const release = 3 * 0.1;
   assert.deepEqual(calculate(STATION_GROUPS[0], 'zone-dispatch', '2', '1,1', '3,1', '0.1', '0,0.3'), [
-    { zone: 1, furnace: 1, start: 0, finish: release },
-    { zone: 1, furnace: 1, start: release, finish: release + 0.1 },
+    { zone: 1, furnace: 1, start: 0, finish: 0.3 },
+    { zone: 1, furnace: 1, start: 0.3, finish: 0.4 },
   ]);
   const coveredUntil = 3 * 0.7;
   assert.deepEqual(calculate(STATION_GROUPS[1], 'effect-renewals', '[[0,2],[2,2.1]]', 0.7), [
@@ -417,4 +416,20 @@ test('queued jobs use the lower-numbered furnace when parallel finish clocks tie
     );
   assert.deepEqual(dispatch('5,3,1,1,1'), [1, 2, 2, 2, 1]);
   assert.deepEqual(dispatch('6,3,1,1,1'), [1, 2, 2, 2, 2]);
+});
+
+test('furnace clocks distinguish a long-runtime tie from a one-nanosecond lead', () => {
+  const dispatch = (items, releases) =>
+    calculate(STATION_GROUPS[0], 'zone-dispatch', '2', '1,1,1,1', items, '123456.78', releases);
+  const tied = dispatch('4353,4352,1,1', '0,0,0,0');
+  assert.deepEqual(
+    tied.map(({ furnace }) => furnace),
+    [1, 2, 2, 1],
+  );
+  assert.equal(tied[3].start, 537407363.34);
+  const earlier = dispatch('1,4353,4352,1', '0,0,123456.780000001,123456.780000001');
+  assert.deepEqual(
+    earlier.map(({ furnace }) => furnace),
+    [1, 2, 1, 2],
+  );
 });
