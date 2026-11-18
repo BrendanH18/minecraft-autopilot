@@ -24,18 +24,18 @@ node scripts/live-bot-acceptance.js --accept-eula --all
 node scripts/live-bot-acceptance.js --accept-eula --scenario stale-removal-model --model YOUR_LOCAL_MODEL [--no-thinking]
 ```
 
-Options: `--scenario ID` (repeatable) or `--all`; `--port N`; `--out FILE` (default `.runtime/live-acceptance/results-<time>.json`); `--account NAME` (offline username, default `LiveBot`); `--java PATH`; `--model NAME` and `--ollama URL` for model scenarios; `--keep-server`.
+Options: `--scenario ID` (repeatable) or `--all`; `--port N`; `--out FILE` (defaults to `results.json` in the run directory); `--account NAME` (offline username, default `LiveBot`); `--java PATH`; `--model NAME` and `--ollama URL` for model scenarios; `--keep-server`. Use distinct ports and, if supplying `--out`, distinct output files for concurrent runs.
 
 A full `--all` run has not been timed yet; expect it to take well over ten minutes, because the three pit scenarios each wait out the bot's 180-second mining deadline.
 
 ## What a run does
 
-1. Copies the jar into `.runtime/live-acceptance/server/`, writes `eula.txt` and `server.properties` (offline mode, `127.0.0.1`, fixed seed, superflat world, spawn protection 0, peaceful), and deletes the previous world so every run starts identically.
+1. Creates a private `.runtime/live-acceptance/run-<id>/` directory, copies the jar into its `server/` subdirectory, and writes `eula.txt` and `server.properties` (offline mode, `127.0.0.1`, fixed seed, superflat world, spawn protection 0, peaceful). The server creates a fresh world in that directory.
 2. Starts `java -jar server.jar nogui` with stdin as the console and mirrors all output to `server.out`. Readiness is the `Done (…s)! For help` line; the reported version must be 1.21.1.
 3. Applies world rules: peaceful, no daylight/weather cycle, no mob spawning, random tick speed 0, time 1000, clear weather.
-4. For each scenario, in its own 64-block lane (beyond the bot's 48-block collection search): force-loads the lane, builds the fixture, starts a **fresh bot session** with `node src/cli.js --bridge .runtime/live-acceptance/bridge.json server --host 127.0.0.1 --port N --account LiveBot --auth offline --version 1.21.1` (so storage remembered from earlier scenarios never affects inspection), resets the player, teleports it, and waits until the bridge and server agree on its position and inventory.
+4. For each scenario, in its own 64-block lane (beyond the bot's 48-block collection search): force-loads the lane, builds the fixture, starts a **fresh bot session** with `node src/cli.js --bridge <run-dir>/bridge.json server --host 127.0.0.1 --port N --account LiveBot --auth offline --version 1.21.1` and sets `MC_AGENT_HOME` to `<run-dir>/agent-home`. Then it resets the player, teleports it, and waits until the bridge and server agree on its position and inventory.
 5. Runs the scenario, then always sends a bridge emergency stop, removes the fixture, and stops the bot process — also after a failed check, an exception, or Ctrl+C.
-6. Stops the server (`stop`, then SIGTERM/SIGKILL if needed) and writes the results file.
+6. Stops the server (`stop`, then SIGTERM/SIGKILL if needed), writes the results file, and prints the paths to it and `server.out`. The report includes the log path even when `--out` puts the report elsewhere. Run directories are retained for review and accumulate on disk.
 
 Independent verification uses only server console reads: `data get block X Y Z Items`, `data get entity NAME Inventory`, and `data get entity NAME Pos`. The bot's own reports are compared against them, never trusted alone.
 

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -94,8 +94,13 @@ export function serverProperties({ port, seed }) {
   ].join('\n');
 }
 
-/** Copies the jar and writes eula.txt/server.properties; the world is recreated for each run unless keepWorld. */
-export async function prepareServerDirectory({ directory, jar, port, seed, acceptEula, keepWorld = false }) {
+export async function createRunDirectory(root = RUNTIME) {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  return mkdtemp(join(root, 'run-'));
+}
+
+/** Copies the jar and writes eula.txt/server.properties in the new run's server directory. */
+export async function prepareServerDirectory({ directory, jar, port, seed, acceptEula }) {
   if (!acceptEula) throw new Error('--accept-eula is required before writing eula=true.');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await copyFile(jar, join(directory, 'server.jar'));
@@ -104,7 +109,6 @@ export async function prepareServerDirectory({ directory, jar, port, seed, accep
     `# Accepted with --accept-eula for local acceptance testing (https://aka.ms/MinecraftEULA)\neula=true\n`,
   );
   await writeFile(join(directory, 'server.properties'), serverProperties({ port, seed }));
-  if (!keepWorld) await rm(join(directory, 'world'), { recursive: true, force: true });
 }
 
 // Children run in their own process group so Ctrl+C reaches only the runner, which then stops them in order.

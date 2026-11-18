@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import {
   parseSnbt,
   parseDataReply,
@@ -17,7 +19,15 @@ import {
   interceptInference,
   depositCompleted,
 } from '../scripts/live-acceptance/scenarios.js';
-import { preflight, javaVersion, serverProperties, settle } from '../scripts/live-acceptance/processes.js';
+import {
+  createRunDirectory,
+  preflight,
+  javaVersion,
+  prepareServerDirectory,
+  RUNTIME,
+  serverProperties,
+  settle,
+} from '../scripts/live-acceptance/processes.js';
 import {
   parseOptions,
   buildPlan,
@@ -209,8 +219,10 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
   );
   assert.match(
     plan.botCommand,
-    /src\/cli\.js --bridge \S+\.runtime\/live-acceptance\/bridge\.json server --host 127\.0\.0\.1 --port 25566 --account LiveBot --auth offline --version 1\.21\.1/,
+    /src\/cli\.js --bridge \S+\.runtime\/live-acceptance\/run-XXXXXX\/bridge\.json server --host 127\.0\.0\.1 --port 25566 --account LiveBot --auth offline --version 1\.21\.1/,
   );
+  assert.equal(plan.serverLog, join(plan.serverDirectory, 'server.out'));
+  assert.equal(plan.resultsFile, join(dirname(plan.serverDirectory), 'results.json'));
   const known = (command) => Object.hasOwn(REPLIES, command.split(/\s+/)[0]);
   for (const command of WORLD_SETUP) assert.ok(known(command), command);
   const lanes = new Set();
@@ -409,6 +421,7 @@ function fakeDeps(world, { behaviors, runAgent, clock = { now: 0 } } = {}) {
       preflight: () => ({ banner: 'openjdk version "21.0.4"', major: 21 }),
       portIsFree: async () => true,
       sha256File: async () => 'f'.repeat(64),
+      createRunDirectory: async () => '/fake/run',
       prepareServerDirectory: async () => {},
       environment: () => ({ commit: 'abc123', dirty: false, node: process.version, java: 'openjdk version "21.0.4"' }),
       startServer: () => {
@@ -832,6 +845,7 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
   );
   assert.equal(value.minecraft.jarSha256, 'f'.repeat(64));
   assert.equal(value.minecraft.serverVersion, '1.21.1');
+  assert.equal(value.minecraft.serverLog, '/fake/run/server/server.out');
   assert.deepEqual(value.summary, { pass: 0, fail: 1, skipped: 1, error: null });
   const [failed, skip] = value.scenarios;
   assert.deepEqual(
@@ -884,6 +898,69 @@ test('an interrupt during a scenario cleans up, skips the rest, and still stops 
   assert.ok(world.written.includes('fill 90 -60 -5 100 -55 5 air'));
   assert.equal(deps.calls.botStops, 1);
   assert.equal(deps.calls.serverStops, 1);
+});
+
+test('overlapping runs keep their server, bot state, and review evidence in separate directories', async (t) => {
+  await mkdir(RUNTIME, { recursive: true });
+  const root = await mkdtemp(join(RUNTIME, 'test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const jar = join(root, 'cached.jar');
+  await writeFile(jar, 'cached jar fixture');
+  const { promise: bothStarted, resolve: releaseServers } = Promise.withResolvers();
+  let servers = 0;
+  const scenario = {
+    ...byId('collect-and-store'),
+    run: async (ctx) => ctx.check('fixture reached', true),
+  };
+  const run = async (port) => {
+    const world = fakeWorld({ start: { x: laneOrigin(scenario.lane).x + 0.5, y: -60, z: 0.5 } });
+    const deps = fakeDeps(world);
+    const { startBot, startServer } = deps;
+    let botPaths;
+    deps.createRunDirectory = () => createRunDirectory(join(root, 'runs'));
+    deps.prepareServerDirectory = async (options) => {
+      await prepareServerDirectory(options);
+      await mkdir(join(options.directory, 'world'));
+      await writeFile(join(options.directory, 'world', 'port'), String(port));
+    };
+    deps.startServer = ({ directory }) => {
+      const server = startServer();
+      const ready = server.console.ready.bind(server.console);
+      server.console.ready = async (options) => {
+        if (++servers === 2) releaseServers();
+        await bothStarted;
+        assert.equal(servers, 2);
+        await writeFile(join(directory, 'server.out'), String(port));
+        return ready(options);
+      };
+      return server;
+    };
+    deps.startBot = async ({ bridge, home }) => {
+      botPaths = { bridge, home };
+      return startBot();
+    };
+    const options = { ...parseOptions(['--all', '--accept-eula']), jar, port, scenarios: [scenario] };
+    const results = await runAcceptance(options, deps).finally(releaseServers);
+    const { serverLog } = results.minecraft;
+    const directory = dirname(dirname(serverLog));
+    assert.equal(results.summary.pass, 1, JSON.stringify(results.summary));
+    assert.equal(deps.calls.serverStops, 1);
+    assert.equal(deps.calls.botStops, 1);
+    assert.deepEqual(botPaths, { bridge: join(directory, 'bridge.json'), home: join(directory, 'agent-home') });
+    assert.equal(deps.calls.results.path, join(directory, 'results.json'));
+    const properties = await readFile(join(dirname(serverLog), 'server.properties'), 'utf8');
+    assert.ok(properties.split('\n').includes(`server-port=${port}`));
+    return { serverLog, directory };
+  };
+  const [first, second] = await Promise.all([run(25566), run(25567)]);
+  assert.notEqual(first.directory, second.directory);
+  for (const [entry, port] of [
+    [first, '25566'],
+    [second, '25567'],
+  ]) {
+    assert.equal(await readFile(entry.serverLog, 'utf8'), port);
+    assert.equal(await readFile(join(dirname(entry.serverLog), 'world', 'port'), 'utf8'), port);
+  }
 });
 
 test('main prints the dry-run plan without starting anything and refuses without --accept-eula', async () => {
