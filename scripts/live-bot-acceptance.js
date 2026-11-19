@@ -23,6 +23,7 @@ import {
   portIsFree,
   sha256File,
   serverProperties,
+  createRunDirectory,
   prepareServerDirectory,
   startServer,
   startBot,
@@ -103,19 +104,21 @@ export function parseOptions(argv) {
   };
 }
 
-const paths = (options) => ({
-  runtime: RUNTIME,
-  server: join(RUNTIME, 'server'),
-  bridge: join(RUNTIME, 'bridge.json'),
-  home: join(RUNTIME, 'agent-home'),
-  out: options.out ?? join(RUNTIME, `results-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
+const paths = (options, directory) => ({
+  server: join(directory, 'server'),
+  serverLog: join(directory, 'server', 'server.out'),
+  bridge: join(directory, 'bridge.json'),
+  home: join(directory, 'agent-home'),
+  out: options.out ?? join(directory, 'results.json'),
 });
 
 /** Everything the run would do, without starting anything. */
 export function buildPlan(options) {
-  const where = paths(options);
+  const where = paths(options, join(RUNTIME, 'run-XXXXXX'));
   return {
     serverDirectory: where.server,
+    serverLog: where.serverLog,
+    resultsFile: where.out,
     serverJar: options.jar,
     java: options.java,
     port: options.port,
@@ -139,6 +142,8 @@ export function formatPlan(plan) {
     'Live bot acceptance plan (dry run; nothing is started)',
     `Server: ${plan.serverCommand}`,
     `Jar: ${plan.serverJar}`,
+    `Server log: ${plan.serverLog}`,
+    `Results: ${plan.resultsFile}`,
     `server.properties: ${plan.serverProperties.join(', ')}`,
     'World setup:',
     ...plan.worldSetup.map((command) => `  > ${command}`),
@@ -397,7 +402,7 @@ export function formatSummary(results, out) {
     lines.push(
       `  ${scenario.status.toUpperCase().padEnd(7)} ${scenario.id}${scenario.reason ? ` — ${scenario.reason}` : ''}`,
     );
-  lines.push(`Results: ${out}`, REVIEW_NOTE);
+  lines.push(`Results: ${out}`, `Server log: ${results.minecraft.serverLog}`, REVIEW_NOTE);
   return lines.join('\n');
 }
 
@@ -427,6 +432,7 @@ export const defaultDeps = {
   preflight,
   portIsFree,
   sha256File,
+  createRunDirectory,
   prepareServerDirectory,
   startServer,
   startBot,
@@ -440,10 +446,11 @@ export const defaultDeps = {
 
 /** Runs the selected scenarios; always stops the bot and server and writes results unless preflight refuses. */
 export async function runAcceptance(options, deps = defaultDeps, signal = new AbortController().signal) {
-  const where = paths(options);
   const javaInfo = deps.preflight({ acceptEula: options.acceptEula, jar: options.jar, java: options.java });
   if (!(await deps.portIsFree(options.port)))
     throw new Error(`Port ${options.port} on 127.0.0.1 is in use. Stop the other server or pass --port.`);
+  const jarSha256 = await deps.sha256File(options.jar);
+  const where = paths(options, await deps.createRunDirectory());
   const results = {
     schema: 'minecraft-agent/live-bot-acceptance/1',
     startedAt: new Date(deps.now()).toISOString(),
@@ -454,8 +461,9 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     minecraft: {
       expectedVersion: MINECRAFT_VERSION,
       serverVersion: null,
+      serverLog: where.serverLog,
       jar: options.jar,
-      jarSha256: await deps.sha256File(options.jar),
+      jarSha256,
       seed: SEED,
       levelType: 'minecraft:flat',
     },
