@@ -12,3 +12,11 @@ dist/
 *.log
 .env
 coverage/
+
+# Secrets and local-only files
+.env.*
+*.pem
+*.key
+.claude/settings.local.json
+.claude/worktrees/
+!.env.example
