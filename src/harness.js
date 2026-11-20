@@ -127,8 +127,9 @@ export class Harness {
               ? 'cancelled'
               : 'failed';
           job.message = controller.signal.aborted ? controller.signal.reason?.message || error.message : error.message;
-          reportContainer(job, error?.container);
         }
+        // Cancel, stop, and expiry end the job before the driver settles; items may still have moved.
+        if (!job.container) reportContainer(job, error?.container);
       })
       .finally(() => {
         clearTimeout(deadline);

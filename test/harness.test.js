@@ -139,3 +139,25 @@ test('deposit jobs report their container, including a failed deposit that may h
   await harness.task;
   assert.equal('container' in harness.observe().job, false);
 });
+
+test('a withdrawal cancelled by the agent still reports the container it opened', async (t) => {
+  const driver = new DemoDriver();
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  const chest = { name: 'minecraft:chest', x: 3, y: 64, z: 3 };
+  driver.execute = async (_action, { signal }) => {
+    await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    throw Object.assign(new Error('aborted'), {
+      container: { ...chest, before: [{ name: 'minecraft:oak_log', count: 20 }] },
+    });
+  };
+  harness.start(owner, { type: 'withdraw', item: 'oak_log', count: 8 });
+  harness.cancel();
+  await harness.task;
+  const job = harness.observe().job;
+  assert.equal(job.status, 'cancelled');
+  assert.equal(job.message, 'Cancelled by agent.');
+  assert.deepEqual(job.container, { ...chest, before: [{ name: 'minecraft:oak_log', count: 20 }] });
+});

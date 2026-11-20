@@ -5,19 +5,21 @@ export const demoScenarios = ['default', 'hungry', 'hostile', 'stocked', 'full']
 const MAIN_SLOTS = 36;
 const STACK_SIZE = 64;
 const short = (name) => name.replace('minecraft:', '');
+// Tools do not stack; every other demo item stacks to 64.
+const stackSize = (name) => (/_(?:pickaxe|axe|shovel)$/.test(name) ? 1 : STACK_SIZE);
 /** Room for `name` in the 36 main slots: empty slots plus partial stacks of it. */
 function roomFor(inventory, name) {
   const used = inventory.filter((stack) => stack.count > 0);
   const partial = used
     .filter((stack) => stack.name === name)
-    .reduce((sum, stack) => sum + Math.max(0, STACK_SIZE - stack.count), 0);
-  return (MAIN_SLOTS - used.length) * STACK_SIZE + partial;
+    .reduce((sum, stack) => sum + Math.max(0, stackSize(name) - stack.count), 0);
+  return (MAIN_SLOTS - used.length) * stackSize(name) + partial;
 }
 /** Adds up to `count` of `name`, partial stacks first, then empty main slots; returns how many fit. */
 function addItems(inventory, name, count) {
   let remaining = count;
   for (const stack of inventory.filter((stack) => stack.name === name && stack.count > 0)) {
-    const added = Math.min(remaining, Math.max(0, STACK_SIZE - stack.count));
+    const added = Math.min(remaining, Math.max(0, stackSize(name) - stack.count));
     stack.count += added;
     remaining -= added;
   }
@@ -25,7 +27,7 @@ function addItems(inventory, name, count) {
     const used = new Set(inventory.filter((stack) => stack.count > 0).map((stack) => stack.slot));
     const slot = Array.from({ length: MAIN_SLOTS }, (_, index) => index).find((index) => !used.has(index));
     if (slot === undefined) break;
-    const added = Math.min(remaining, STACK_SIZE);
+    const added = Math.min(remaining, stackSize(name));
     inventory.push({ slot, name, count: added });
     remaining -= added;
   }
@@ -187,7 +189,9 @@ export class DemoDriver {
   async withdraw(action, signal) {
     const name = short(action.item);
     const known = this.chest.items;
-    if (known && !known.some((item) => item.name === action.item && item.count > 0))
+    const at = this.player.position;
+    const inRange = Math.hypot(this.chest.x - at.x, this.chest.y - at.y, this.chest.z - at.z) <= 16;
+    if (!inRange || (known && !known.some((item) => item.name === action.item && item.count > 0)))
       throw new Error(
         `No chest or barrel within 16 blocks is known to hold ${name}, and none nearby is unopened. Move near storage that holds it first.`,
       );

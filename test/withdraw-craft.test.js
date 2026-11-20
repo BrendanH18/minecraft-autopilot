@@ -65,6 +65,25 @@ test('demo withdraw fails with partial progress when the chest holds too little 
   assert.deepEqual(full.chest.items, [{ name: 'minecraft:cobblestone', count: 96 }]);
 });
 
+test('demo withdraw refuses a chest beyond 16 blocks, and crafted tools take one slot each', async () => {
+  const driver = new DemoDriver({ scenario: 'stocked' });
+  driver.player.position = { x: 40, y: 64, z: 0 };
+  await assert.rejects(run(driver, { type: 'withdraw', item: 'oak_log', count: 2 }), /No chest or barrel within 16 blocks/);
+  assert.equal(held(driver.inventory, 'minecraft:oak_log'), 0);
+  // Bread, sticks, and cobblestone plus 32 dirt stacks leave one free slot: room for one pickaxe, not two.
+  driver.inventory.push(
+    { slot: 1, name: 'minecraft:stick', count: 4 },
+    { slot: 2, name: 'minecraft:cobblestone', count: 6 },
+  );
+  for (let slot = 3; slot < 35; slot++) driver.inventory.push({ slot, name: 'minecraft:dirt', count: 64 });
+  driver.craftingTable = { x: 41, y: 64, z: 0 };
+  await assert.rejects(
+    run(driver, { type: 'craft', item: 'stone_pickaxe', count: 2 }),
+    /^Error: Inventory full; crafted 1 of 2 stone_pickaxe\.$/,
+  );
+  assert.equal(held(driver.inventory, 'minecraft:stone_pickaxe'), 1);
+});
+
 test('demo crafting bootstraps from chest logs to a stone pickaxe, placing the crafted table once', async () => {
   const driver = new DemoDriver({ scenario: 'stocked' });
   await run(driver, { type: 'withdraw', item: 'oak_log', count: 3 });
@@ -130,7 +149,16 @@ test('demo table recipes fail before anything changes without a table, and craft
 // A bot in a flat world: stone at y 63, air above, chests and crafting tables where `blocks` says.
 function botFixture(
   t,
-  { start = new Vec3(0.5, 64, 0.5), blocks = {}, contents = {}, items = [], onTransfer, onCraft } = {},
+  {
+    start = new Vec3(0.5, 64, 0.5),
+    blocks = {},
+    contents = {},
+    items = [],
+    onTransfer,
+    onCraft,
+    onTableClick,
+    tableOpens = true,
+  } = {},
 ) {
   const bot = new EventEmitter();
   const world = new Map(Object.entries(blocks));
@@ -165,7 +193,9 @@ function botFixture(
     slots
       .map((stack, index) => stack && { ...stack, slot: 9 + index, type: registry.itemsByName[stack.name].id })
       .filter(Boolean);
-  const log = { trips: [], windows: [], batches: [], crafts: [], placed: [], equipped: [] };
+  const log = { trips: [], windows: [], batches: [], crafts: [], placed: [], equipped: [], tables: [], clicks: [] };
+  // The output recipesAll was last asked for: the table window's result slot shows it once the grid is filled.
+  let output = null;
   const blockAt = (position) => {
     const key = `${position.x},${position.y},${position.z}`;
     const name = world.get(key) ?? (position.y < 64 ? 'stone' : 'air');
@@ -240,11 +270,72 @@ function botFixture(
       onTransfer?.();
       if (left) throw new Error('destination full');
     },
-    recipesAll: (id, metadata, table) => Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table),
+    recipesAll: (id, metadata, table) => {
+      output = Recipe.find(id, metadata)[0].result;
+      return Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table);
+    },
+    // A crafting table window: result slot 0, grid 1-9, the player's main slots from 10.
+    openBlock: async (block) => {
+      assert.equal(world.get(`${block.position.x},${block.position.y},${block.position.z}`), 'crafting_table');
+      if (!tableOpens) return new Promise(() => {});
+      const grid = new Map();
+      const window = {
+        type: 'minecraft:crafting',
+        inventoryStart: 10,
+        inventoryEnd: 46,
+        selectedItem: null,
+        closed: false,
+        block,
+        grid,
+        get slots() {
+          return [grid.size ? { type: output.id, count: output.count } : null];
+        },
+        findInventoryItem: (id) => {
+          const index = slots.findIndex((stack) => stack && registry.itemsByName[stack.name].id === id);
+          return index === -1 ? null : { type: id, slot: 10 + index };
+        },
+      };
+      log.tables.push(window);
+      return window;
+    },
+    clickWindow: async (slot, button, mode) => {
+      const window = log.tables.at(-1);
+      assert.equal(window.closed, false, 'no click after the table closed');
+      assert.equal(mode, 0);
+      log.clicks.push(slot);
+      if (slot >= 10) {
+        window.selectedItem = { type: registry.itemsByName[slots[slot - 10].name].id };
+        return;
+      }
+      assert.equal(button, 1);
+      const name = registry.items[window.selectedItem.type].name;
+      take(name, 1);
+      window.grid.set(slot, name);
+      onTableClick?.(window);
+    },
+    putSelectedItemRange: async (start, end, window) => {
+      assert.deepEqual([start, end], [10, 46]);
+      window.selectedItem = null;
+    },
+    putAway: async (slot) => {
+      const window = log.tables.at(-1);
+      assert.equal(slot, 0);
+      log.crafts.push({ table: window.block.position.toString(), cells: [...window.grid.values()] });
+      window.grid.clear();
+      assert.equal(give(registry.items[output.id].name, output.count), 0, 'result had room');
+      onCraft?.();
+    },
+    // Closing returns the grid to the inventory, as the server does.
+    closeWindow: (window) => {
+      window.closed = true;
+      for (const name of window.grid.values()) give(name, 1);
+      window.grid.clear();
+      window.selectedItem = null;
+    },
     craft: async (recipe, count, table) => {
       assert.equal(count, 1);
-      if (recipe.requiresTable) assert.equal(table?.name, 'crafting_table');
-      else assert.equal(table, null);
+      assert.equal(table, null, 'only the 2x2 grid crafts through mineflayer');
+      assert.equal(recipe.requiresTable, false);
       const cells = [...(recipe.inShape?.flat() ?? []), ...(recipe.ingredients ?? [])].filter((cell) => cell.id !== -1);
       log.crafts.push({
         table: table ? table.position.toString() : null,
@@ -502,4 +593,37 @@ test('crafting stops between crafts on handoff and when the result would have no
     (await run(last.driver, { type: 'craft', item: 'oak_planks', count: 4 })).message,
     'Crafted 4 oak_planks.',
   );
+});
+
+test('takeover while filling a table grid stops before the next click and returns the grid', async (t) => {
+  const controller = new AbortController();
+  const { driver, log, count } = botFixture(t, {
+    blocks: { '1,64,0': 'crafting_table' },
+    items: [['oak_planks', 8]],
+    onTableClick: (window) => {
+      if (window.grid.size === 2) controller.abort(new Error('Player took control.'));
+    },
+  });
+  await assert.rejects(run(driver, { type: 'craft', item: 'chest', count: 1 }, controller.signal), /Player took control/);
+  await driver.operations.waitForIdle(new AbortController().signal);
+  assert.equal(log.clicks.filter((slot) => slot < 10).length, 2, 'no ingredient placed after the takeover');
+  assert.equal(log.tables[0].closed, true);
+  assert.equal(log.crafts.length, 0);
+  assert.equal(count('oak_planks'), 8);
+  assert.equal(count('chest'), 0);
+});
+
+test('a crafting table that never opens fails within the container timeout and leaves the bot idle', async (t) => {
+  const { driver, log } = botFixture(t, {
+    blocks: { '1,64,0': 'crafting_table' },
+    items: [['oak_planks', 8]],
+    tableOpens: false,
+  });
+  driver.containerTimeoutMs = 50;
+  await assert.rejects(
+    run(driver, { type: 'craft', item: 'chest', count: 1 }),
+    /^Error: Crafting chest failed after 0 of 1: The crafting table did not open\.$/,
+  );
+  assert.equal(driver.operations.busy, false);
+  assert.deepEqual(log.clicks, []);
 });
