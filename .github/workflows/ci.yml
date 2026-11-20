@@ -89,7 +89,7 @@ jobs:
           npm run build:mod
           npm run verify:mod
       # Keep the build for a week rather than GitHub's 90-day default; every PR and
-      # push uploads one, and in this private repo they count against storage.
+      # push to main uploads one, and in this private repo they count against storage.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: minecraft-agent-installation
