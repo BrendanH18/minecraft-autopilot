@@ -73,10 +73,11 @@ test('demo withdraw refuses a chest beyond 16 blocks, and crafted tools take one
     /No chest or barrel within 16 blocks/,
   );
   assert.equal(held(driver.inventory, 'minecraft:oak_log'), 0);
-  // Bread, sticks, and cobblestone plus 32 dirt stacks leave one free slot: room for one pickaxe, not two.
+  // Bread, sticks, and cobblestone plus 32 dirt stacks leave one free slot: room for one pickaxe, not two, since
+  // neither ingredient runs out and frees its slot.
   driver.inventory.push(
-    { slot: 1, name: 'minecraft:stick', count: 4 },
-    { slot: 2, name: 'minecraft:cobblestone', count: 6 },
+    { slot: 1, name: 'minecraft:stick', count: 6 },
+    { slot: 2, name: 'minecraft:cobblestone', count: 9 },
   );
   for (let slot = 3; slot < 35; slot++) driver.inventory.push({ slot, name: 'minecraft:dirt', count: 64 });
   driver.craftingTable = { x: 41, y: 64, z: 0 };

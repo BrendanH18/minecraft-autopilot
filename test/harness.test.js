@@ -147,13 +147,19 @@ test('a withdrawal cancelled by the agent still reports the container it opened'
   const owner = randomUUID();
   harness.acquire(owner);
   const chest = { name: 'minecraft:chest', x: 3, y: 64, z: 3 };
+  let running;
+  const started = new Promise((resolve) => {
+    running = resolve;
+  });
   driver.execute = async (_action, { signal }) => {
+    running();
     await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
     throw Object.assign(new Error('aborted'), {
       container: { ...chest, before: [{ name: 'minecraft:oak_log', count: 20 }] },
     });
   };
   harness.start(owner, { type: 'withdraw', item: 'oak_log', count: 8 });
+  await started;
   harness.cancel();
   await harness.task;
   const job = harness.observe().job;
