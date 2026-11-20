@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { bridgeFile, profileFile, writePrivateJson } from './config.js';
 import { claimBridge, assertBridgeNotRunning } from './runtime.js';
@@ -79,7 +79,12 @@ export async function startBridge(harness, { discoveryPath = bridgeFile, port = 
           server.closeAllConnections();
         });
         try {
-          if (JSON.parse(await readFile(discoveryPath, 'utf8')).token === token) await unlink(discoveryPath);
+          const fileToken = JSON.parse(await readFile(discoveryPath, 'utf8')).token;
+          if (fileToken) {
+            const actual = createHash('sha256').update(fileToken).digest();
+            const expected = createHash('sha256').update(token).digest();
+            if (timingSafeEqual(actual, expected)) await unlink(discoveryPath);
+          }
         } catch {}
         await releaseClaim();
       })();
