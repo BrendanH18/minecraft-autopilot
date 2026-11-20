@@ -161,6 +161,7 @@ function botFixture(
     onTransfer,
     onCraft,
     onTableClick,
+    rejectPlacement,
     tableOpens = true,
   } = {},
 ) {
@@ -338,6 +339,7 @@ function botFixture(
         return;
       }
       assert.equal(button, 1);
+      if (rejectPlacement?.(window)) throw new Error('Server did not confirm the click.');
       const name = registry.items[window.selectedItem.type].name;
       take(name, 1);
       window.grid.set(slot, name);
@@ -686,4 +688,20 @@ test('a late table window is left alone once another action has started', async 
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(log.tables[0].closed, false);
   driver.activeAction = false;
+});
+
+test('a rejected grid click returns the cursor stack and the placed ingredients before failing', async (t) => {
+  const { driver, bot, log, count } = botFixture(t, {
+    items: [['oak_planks', 8]],
+    rejectPlacement: (window) => window.grid.size === 2,
+  });
+  await assert.rejects(
+    run(driver, { type: 'craft', item: 'crafting_table', count: 1 }),
+    /Server did not confirm the click/,
+  );
+  await driver.operations.waitForIdle(new AbortController().signal);
+  assert.equal(bot.inventory.selectedItem, null, 'the cursor stack went back');
+  assert.equal(bot.inventory.grid.size, 0, 'the placed planks went back');
+  assert.equal(count('oak_planks'), 8);
+  assert.equal(log.crafts.length, 0);
 });
