@@ -15,6 +15,10 @@ export const RELEASE = {
     'RELEASE.md: "Run collection with partial progress and recovery from a pit ..." (bot half only; Fabric still pending)',
   store:
     'RELEASE.md: "Run collect-and-store with both criteria. Remove stored items during inference and block inspection; stale contents must not produce success. Verify final inspection preserves return-home criteria or reports failure."',
+  withdraw:
+    'protocol.md: "Withdraw takes an item from one chest, trapped chest, or barrel within 16 blocks ..." (no RELEASE.md box yet; bot evidence for the preview)',
+  craft:
+    'protocol.md: "Craft makes at least `count` (1..64) of one allowlisted output ..." including placing a held crafting table (no RELEASE.md box yet; bot evidence for the preview)',
 };
 
 const at = (o, dx, y, dz) => `${o.x + dx} ${y} ${o.z + dz}`;
@@ -107,6 +111,85 @@ function platformPlan({ bot, lane }) {
     ],
   };
 }
+
+/** A chest two blocks east of the start, seeded with 20 oak logs and 5 cobblestone; the player holds nothing. */
+function withdrawPlan({ bot, lane }) {
+  const o = laneOrigin(lane);
+  const chest = point(o, 2, STAND, 0);
+  const start = center(point(o, 0, STAND, 0));
+  return {
+    origin: o,
+    points: { start, chest },
+    fixture: [
+      forceload(o, 'add'),
+      `fill ${at(o, -3, STAND, -3)} ${at(o, 4, STAND + 3, 3)} air`,
+      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[{Slot:0b,id:"minecraft:oak_log",count:20},{Slot:1b,id:"minecraft:cobblestone",count:5}]}`,
+    ],
+    prepare: [...resetPlayer(bot), teleport(bot, start)],
+    cleanup: [
+      ...resetPlayer(bot),
+      `fill ${at(o, -3, STAND, -3)} ${at(o, 4, STAND + 3, 3)} air`,
+      killDrops(o),
+      forceload(o, 'remove'),
+    ],
+  };
+}
+
+/**
+ * Open ground with no crafting table; the player holds 3 oak logs and 3 cobblestone. The craft action places the
+ * crafting table it made on one of the eight blocks beside the start, all of which are read before and after.
+ */
+function craftPlan({ bot, lane }) {
+  const o = laneOrigin(lane);
+  const start = center(point(o, 0, STAND, 0));
+  const beside = [
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+    [0, -1],
+    [1, 1],
+    [-1, 1],
+    [-1, -1],
+    [1, -1],
+  ].map(([dx, dz]) => point(o, dx, STAND, dz));
+  return {
+    origin: o,
+    points: { start, beside },
+    reads: beside.map((cell) => tableAt(cell)),
+    fixture: [forceload(o, 'add'), `fill ${at(o, -4, STAND, -4)} ${at(o, 4, STAND + 3, 4)} air`],
+    prepare: [
+      ...resetPlayer(bot),
+      teleport(bot, start),
+      `give ${bot} minecraft:oak_log 3`,
+      `give ${bot} minecraft:cobblestone 3`,
+    ],
+    cleanup: [
+      ...resetPlayer(bot),
+      `fill ${at(o, -4, STAND, -4)} ${at(o, 4, STAND + 3, 4)} air`,
+      killDrops(o),
+      forceload(o, 'remove'),
+    ],
+  };
+}
+export const tableAt = ({ x, y, z }) => `execute if block ${x} ${y} ${z} minecraft:crafting_table`;
+/** The craft-bootstrap sequence: 3 logs → 12 planks → table → 4 sticks → stone pickaxe (places the table) → wooden pickaxe (reuses it). */
+export const CRAFT_SEQUENCE = [
+  ['oak_planks', 12],
+  ['crafting_table', 1],
+  ['stick', 4],
+  ['stone_pickaxe', 1],
+  ['wooden_pickaxe', 1],
+];
+// What the server inventory must hold afterwards: 12 planks − 4 (table) − 2 (sticks) − 3 (wooden pickaxe) = 3.
+const CRAFT_RESULT = {
+  'minecraft:stone_pickaxe': 1,
+  'minecraft:wooden_pickaxe': 1,
+  'minecraft:oak_planks': 3,
+  'minecraft:stick': 0,
+  'minecraft:crafting_table': 0,
+  'minecraft:oak_log': 0,
+  'minecraft:cobblestone': 0,
+};
 
 /** Planner decisions served without a model; `before[i]` runs while the agent awaits decision i (its "inference" window). */
 export function scriptedPlanner(decisions, { before = {} } = {}) {
@@ -462,6 +545,158 @@ async function runStore(ctx, plan, variant) {
   }
 }
 
+const totalsOf = (items) => Object.fromEntries((items || []).map(({ name, count }) => [name, count]));
+const sameTotals = (a, b) => {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  return [...keys].every((key) => (a?.[key] || 0) === (b?.[key] || 0));
+};
+const settledAction = async (ctx, action) => {
+  try {
+    const job = await ctx.bridge.execute(action);
+    return { settled: 'completed', message: job.message, container: job.container ?? null };
+  } catch (error) {
+    return { settled: 'rejected', message: error.message, container: error.container ?? null };
+  }
+};
+
+async function runWithdraw(ctx, plan) {
+  const { chest, start } = plan.points;
+  const before = await ctx.step('independent baseline (chest Items, Inventory, Pos)', () => snapshot(ctx, chest));
+  ctx.note('baseline', before);
+  const outcome = await ctx.step('bridge: withdraw oak_log 8', () =>
+    settledAction(ctx, { type: 'withdraw', item: 'oak_log', count: 8 }),
+  );
+  ctx.note('outcome', outcome);
+  const state = await ctx.bridge.observe();
+  const after = await ctx.step('independent final state', () => snapshot(ctx, chest));
+  ctx.note('final', { server: after, bridgeJob: state.job, bridgeContainers: state.containers ?? null });
+  const taken = (before.chest[LOG] || 0) - (after.chest[LOG] || 0);
+  ctx.check('job completed', outcome.settled === 'completed' && state.job?.status === 'completed', {
+    outcome,
+    job: state.job,
+  });
+  ctx.check('job reports 8 oak logs withdrawn', /Withdrew 8 oak_log\b/.test(outcome.message || ''), {
+    message: outcome.message,
+  });
+  ctx.check('server chest holds exactly 8 fewer oak logs', taken === 8, { before: before.chest, after: after.chest });
+  ctx.check(
+    'other chest contents untouched',
+    (after.chest['minecraft:cobblestone'] || 0) === (before.chest['minecraft:cobblestone'] || 0),
+    { before: before.chest, after: after.chest },
+  );
+  ctx.check('server inventory holds 8 more oak logs', after.held - before.held === 8, {
+    before: before.held,
+    after: after.held,
+  });
+  const reported = outcome.container;
+  ctx.check(
+    'job names the seeded chest',
+    reported?.name === 'minecraft:chest' && reported.x === chest.x && reported.y === chest.y && reported.z === chest.z,
+    { container: reported, chest },
+  );
+  ctx.check(
+    'job container.before matches the server baseline',
+    !!reported && sameTotals(totalsOf(reported.before), before.chest),
+    {
+      reported: reported?.before ?? null,
+      server: before.chest,
+    },
+  );
+  ctx.check('bridge inventory agrees with the server', heldOnBridge(state) === after.held, {
+    bridge: heldOnBridge(state),
+    server: after.held,
+  });
+  const observed = (state.containers || []).find(
+    (entry) => entry.x === chest.x && entry.y === chest.y && entry.z === chest.z,
+  );
+  ctx.check(
+    'bridge container observation agrees with the server chest',
+    !!observed?.items && sameTotals(totalsOf(observed.items), after.chest),
+    { bridge: observed?.items ?? null, server: after.chest },
+  );
+  ctx.check(
+    'the bot stayed beside the chest (server Pos within 2 blocks of the start)',
+    distance(after.position, start) <= 2,
+    {
+      distance: distance(after.position, start),
+    },
+  );
+}
+
+async function runCraft(ctx, plan) {
+  const { start, beside } = plan.points;
+  const tables = async () => {
+    const found = [];
+    for (const cell of beside) if (await ctx.server.testBlock(cell, 'minecraft:crafting_table')) found.push(cell);
+    return found;
+  };
+  const before = await ctx.step('independent baseline (Inventory, crafting tables beside the start)', async () => ({
+    inventory: itemTotals(await ctx.server.inventory()),
+    tables: await tables(),
+  }));
+  ctx.note('baseline', before);
+  const jobs = {};
+  for (const [item, count] of CRAFT_SEQUENCE)
+    jobs[item] = await ctx.step(`bridge: craft ${item} ${count}`, () =>
+      settledAction(ctx, { type: 'craft', item, count }),
+    );
+  ctx.note('jobs', jobs);
+  const state = await ctx.bridge.observe();
+  const after = await ctx.step(
+    'independent final state (Inventory, crafting tables beside the start, Pos)',
+    async () => ({
+      inventory: itemTotals(await ctx.server.inventory()),
+      tables: await tables(),
+      position: await ctx.server.position(),
+    }),
+  );
+  ctx.note('final', { server: after, bridgeInventory: state.inventory ?? null });
+  ctx.check(
+    'every craft completed',
+    CRAFT_SEQUENCE.every(([item]) => jobs[item]?.settled === 'completed'),
+    { jobs },
+  );
+  ctx.check(
+    'each job reports the crafted amount',
+    CRAFT_SEQUENCE.every(([item, count]) => new RegExp(`Crafted ${count} ${item}\\b`).test(jobs[item]?.message || '')),
+    { messages: Object.fromEntries(CRAFT_SEQUENCE.map(([item]) => [item, jobs[item]?.message])) },
+  );
+  ctx.check('no crafting table beside the start before crafting', before.tables.length === 0, {
+    tables: before.tables,
+  });
+  ctx.check(
+    'server inventory holds the crafted results and nothing left over',
+    sameTotals(Object.fromEntries(Object.keys(CRAFT_RESULT).map((id) => [id, after.inventory[id] || 0])), CRAFT_RESULT),
+    { expected: CRAFT_RESULT, server: after.inventory },
+  );
+  const placed = /Placed a crafting table at (-?\d+) (-?\d+) (-?\d+)/.exec(jobs.stone_pickaxe?.message || '');
+  const reported = placed && { x: Number(placed[1]), y: Number(placed[2]), z: Number(placed[3]) };
+  ctx.check('exactly one crafting table now stands beside the start', after.tables.length === 1, {
+    tables: after.tables,
+  });
+  ctx.check(
+    'the stone_pickaxe job placed it and reported its block',
+    !!reported && after.tables.some((cell) => cell.x === reported.x && cell.y === reported.y && cell.z === reported.z),
+    { reported, tables: after.tables },
+  );
+  ctx.check(
+    'the wooden_pickaxe job reused the placed table',
+    !/Placed a crafting table/.test(jobs.wooden_pickaxe?.message || ''),
+    {
+      message: jobs.wooden_pickaxe?.message,
+    },
+  );
+  const bridgeInventory = {};
+  for (const item of state.inventory || []) bridgeInventory[item.name] = (bridgeInventory[item.name] || 0) + item.count;
+  ctx.check('bridge inventory agrees with the server', sameTotals(bridgeInventory, after.inventory), {
+    bridge: bridgeInventory,
+    server: after.inventory,
+  });
+  ctx.check('the bot stayed at the start (server Pos within 1.5 blocks)', distance(after.position, start) <= 1.5, {
+    distance: distance(after.position, start),
+  });
+}
+
 /** Shared by the two return-home inspection scenarios. variant: preserve | blocked. */
 async function runInspectHome(ctx, plan, variant) {
   const { chest, start } = plan.points;
@@ -690,6 +925,39 @@ export const scenarios = [
       'storedAdditional equals the server chest change',
     ],
   },
+  {
+    id: 'withdraw',
+    lane: 9,
+    title: 'Withdraw from a seeded chest; server reads confirm the move and the reported baseline',
+    release: [RELEASE.withdraw],
+    plan: withdrawPlan,
+    run: (ctx, plan) => runWithdraw(ctx, plan),
+    actions: ['bridge: withdraw oak_log 8 (chest seeded with 20 oak logs and 5 cobblestone, in reach of the start)'],
+    expect: [
+      'job completed with "Withdrew 8 oak_log"; it names the seeded chest',
+      'server chest −8 oak logs, cobblestone untouched; server inventory +8 oak logs',
+      'job container.before equals the seeded contents read by the server before the action',
+      'bridge inventory and container observation agree with the server',
+    ],
+  },
+  {
+    id: 'craft-bootstrap',
+    lane: 10,
+    title: 'Craft from logs to a stone pickaxe, placing the crafting table the craft made',
+    release: [RELEASE.craft],
+    plan: craftPlan,
+    run: (ctx, plan) => runCraft(ctx, plan),
+    actions: CRAFT_SEQUENCE.map(
+      ([item, count]) =>
+        `bridge: craft ${item} ${count}${item === 'stone_pickaxe' ? ' (no table within 16 blocks: places the held one beside the bot)' : item === 'wooden_pickaxe' ? ' (reuses the placed table)' : ''}`,
+    ),
+    expect: [
+      'every craft completed and reports the amount crafted',
+      'server inventory: 1 stone_pickaxe, 1 wooden_pickaxe, 3 oak_planks; no logs, cobblestone, sticks, or crafting table left',
+      'no crafting table beside the start before; exactly one after, at the block the stone_pickaxe job reported',
+      'bridge inventory agrees with the server',
+    ],
+  },
 ];
 
 export const scenarioIds = scenarios.map((scenario) => scenario.id);
@@ -700,7 +968,7 @@ export function scenarioPlan(scenario, { bot }) {
   const resolve = (value) => (typeof value === 'function' ? value(plan) : (value ?? []));
   return {
     ...plan,
-    verify: readCommands(bot, plan.points.chest),
+    verify: [...readCommands(bot, plan.points.chest), ...(plan.reads ?? [])],
     during: resolve(scenario.during),
     actions: resolve(scenario.actions),
     expect: scenario.expect,

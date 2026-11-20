@@ -4,7 +4,7 @@ import { assertPlayable, normalizeAction } from './protocol.js';
 const COLLECT_RETURN_MS = 60_000;
 const COLLECT_MARGIN_MS = 15_000;
 
-// A deposit names the container it used and that container's contents just before the deposit, so a planner can scope verification to it.
+// A deposit or withdrawal names the container it used and that container's contents just before the transfer, so a planner can scope verification to it.
 function reportContainer(job, container) {
   if (!container) return;
   const { name, x, y, z, before } = container;

@@ -224,6 +224,9 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       items: async ({ x, y, z }) => serverConsole.blockData(x, y, z, 'Items', { signal }),
       inventory: async () => serverConsole.entityData(options.account, 'Inventory', { signal }),
       position: async () => toPosition(await serverConsole.entityData(options.account, 'Pos', { signal })),
+      // `execute if block X Y Z BLOCK`: true when the server reports "Test passed".
+      testBlock: async ({ x, y, z }, block) =>
+        /^Test passed/.test(await serverConsole.command(`execute if block ${x} ${y} ${z} ${block}`, { signal })),
     },
     bridge: {
       async execute(action, extra = {}) {

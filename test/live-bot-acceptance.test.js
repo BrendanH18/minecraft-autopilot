@@ -261,6 +261,17 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
   assert.match(text, /awaits the done decision: > data remove block \d+ -60 0 Items/);
   assert.match(text, /awaits the done decision: > setblock \d+ -59 0 stone/);
   assert.match(text, /mining_fatigue/);
+  const craft = plan.scenarios.find((scenario) => scenario.id === 'craft-bootstrap');
+  assert.equal(
+    craft.verify.filter((command) => /^execute if block -?\d+ -60 -?\d+ minecraft:crafting_table$/.test(command))
+      .length,
+    8,
+  );
+  assert.match(text, /bridge: craft stone_pickaxe 1 \(no table within 16 blocks/);
+  assert.match(
+    text,
+    /\[withdraw\][\s\S]*setblock \d+ -60 0 minecraft:chest\[facing=west\]\{Items:\[\{Slot:0b,id:"minecraft:oak_log",count:20\}/,
+  );
 });
 
 test('options require an explicit selection and validate ids, ports, and names', () => {
@@ -313,6 +324,8 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
     pos: { ...start },
     inventory: [],
     chest: [],
+    blocks: {},
+    containers: undefined,
     written: [],
     job: null,
     mode: 'manual',
@@ -346,11 +359,16 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
       return `No items were found on player ${BOT}`;
     }
     if (verb === 'setblock' && /chest/.test(rest[3] || '')) {
-      world.chest = [
-        { id: 'minecraft:cobblestone', count: 5 },
-        { id: 'minecraft:oak_log', count: 3 },
-      ];
+      const seeded = [...(rest[3].match(/Items:\[.*\]/)?.[0] ?? '').matchAll(/id:"([^"]+)",count:(\d+)/g)];
+      world.chest = seeded.length
+        ? seeded.map(([, id, count]) => ({ id, count: Number(count) }))
+        : [
+            { id: 'minecraft:cobblestone', count: 5 },
+            { id: 'minecraft:oak_log', count: 3 },
+          ];
     }
+    if (verb === 'execute' && rest[0] === 'if' && rest[1] === 'block')
+      return world.blocks[`${rest[2]} ${rest[3]} ${rest[4]}`] === rest[5] ? 'Test passed' : 'Test failed';
     return {
       fill: 'Successfully filled 9 block(s)',
       setblock: 'Changed the block at 1, 2, 3',
@@ -374,15 +392,16 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
     },
   });
   world.console = serverConsole;
-  const held = () =>
-    world.inventory.filter((item) => /oak_log/.test(item.id)).reduce((total, item) => total + item.count, 0);
   world.state = () => ({
     connected: true,
     mode: world.mode,
     stopping: world.stopping,
     job: world.job && { ...world.job },
     player: { position: { ...world.pos } },
-    inventory: held() ? [{ slot: 36, name: 'minecraft:oak_log', count: held() }] : [],
+    inventory: world.inventory
+      .filter((item) => item.count > 0)
+      .map((item, slot) => ({ slot: 9 + slot, name: item.id, count: item.count })),
+    ...(world.containers && { containers: world.containers }),
   });
   world.adapter = (behaviors = {}) => ({
     observe: async () => world.state(),
@@ -729,6 +748,91 @@ test('inspect-return-blocked passes on reported failure and inspect-preserves-ho
   );
   assert.equal(failed.status, 'fail');
   assert.match(failed.reason, /agent home distance agrees with server Pos/);
+});
+
+test('withdraw passes when server reads confirm the move and the reported baseline, and fails on an unbacked report', async () => {
+  const lane = laneOrigin(byId('withdraw').lane);
+  const chest = { x: lane.x + 2, y: -60, z: 0 };
+  const start = { x: lane.x + 0.5, y: -60, z: 0.5 };
+  const totals = (items) => items.map((item) => ({ name: item.id, count: item.count }));
+  const withdraw = (world, { move = true } = {}) => ({
+    withdraw: async (action) => {
+      assert.deepEqual(action, { type: 'withdraw', item: 'oak_log', count: 8 });
+      const before = totals(world.chest);
+      if (move) {
+        world.chest.find((item) => item.id === 'minecraft:oak_log').count -= 8;
+        world.inventory.push({ id: 'minecraft:oak_log', count: 8 });
+      }
+      world.containers = [{ name: 'minecraft:chest', ...chest, items: totals(world.chest) }];
+      world.job = { status: 'completed', message: `Withdrew 8 oak_log from the chest at ${chest.x} -60 0.` };
+      return { ...world.job, container: { name: 'minecraft:chest', ...chest, before } };
+    },
+  });
+  const world = fakeWorld({ start });
+  const record = await runScenario(byId('withdraw'), env(world, fakeDeps(world, { behaviors: withdraw(world) })));
+  assert.equal(record.status, 'pass', JSON.stringify(record.checks.filter((check) => !check.pass)));
+  assert.deepEqual(record.observations.baseline.chest, { 'minecraft:oak_log': 20, 'minecraft:cobblestone': 5 });
+  assert.ok(world.written.includes(`data get block ${chest.x} -60 0 Items`));
+  const lying = fakeWorld({ start });
+  const failed = await runScenario(
+    byId('withdraw'),
+    env(lying, fakeDeps(lying, { behaviors: withdraw(lying, { move: false }) })),
+  );
+  assert.equal(failed.status, 'fail');
+  assert.match(failed.reason, /server chest holds exactly 8 fewer oak logs/);
+  assert.match(failed.reason, /server inventory holds 8 more oak logs/);
+});
+
+test('craft-bootstrap passes only when the server shows the crafted items and the one table the craft placed', async () => {
+  const lane = laneOrigin(byId('craft-bootstrap').lane);
+  const start = { x: lane.x + 0.5, y: -60, z: 0.5 };
+  const effects = {
+    oak_planks: [{ oak_log: 3 }, { oak_planks: 12 }],
+    crafting_table: [{ oak_planks: 4 }, { crafting_table: 1 }],
+    stick: [{ oak_planks: 2 }, { stick: 4 }],
+    stone_pickaxe: [{ cobblestone: 3, stick: 2, crafting_table: 1 }, { stone_pickaxe: 1 }],
+    wooden_pickaxe: [{ oak_planks: 3, stick: 2 }, { wooden_pickaxe: 1 }],
+  };
+  const crafting = (world, { place = true } = {}) => ({
+    craft: async ({ item, count }) => {
+      const [used, made] = effects[item];
+      for (const [name, amount] of Object.entries(used)) {
+        const stack = world.inventory.find((entry) => entry.id === `minecraft:${name}` && entry.count >= amount);
+        if (!stack) throw new Error(`Missing ingredients for ${count} ${item}.`);
+        stack.count -= amount;
+      }
+      world.inventory = world.inventory.filter((entry) => entry.count > 0);
+      for (const [name, amount] of Object.entries(made))
+        world.inventory.push({ id: `minecraft:${name}`, count: amount });
+      let placed = '';
+      if (item === 'stone_pickaxe') {
+        if (place) world.blocks[`${lane.x + 1} -60 0`] = 'minecraft:crafting_table';
+        placed = `Placed a crafting table at ${lane.x + 1} -60 0. `;
+      }
+      world.job = { status: 'completed', message: `${placed}Crafted ${count} ${item}.` };
+      return world.job;
+    },
+  });
+  const world = fakeWorld({ start });
+  const record = await runScenario(
+    byId('craft-bootstrap'),
+    env(world, fakeDeps(world, { behaviors: crafting(world) })),
+  );
+  assert.equal(record.status, 'pass', JSON.stringify(record.checks.filter((check) => !check.pass)));
+  assert.deepEqual(record.observations.baseline.inventory, { 'minecraft:oak_log': 3, 'minecraft:cobblestone': 3 });
+  assert.equal(
+    world.written.filter((command) => /^execute if block .* minecraft:crafting_table$/.test(command)).length,
+    16,
+    'eight cells read before and after',
+  );
+  const lying = fakeWorld({ start });
+  const failed = await runScenario(
+    byId('craft-bootstrap'),
+    env(lying, fakeDeps(lying, { behaviors: crafting(lying, { place: false }) })),
+  );
+  assert.equal(failed.status, 'fail');
+  assert.match(failed.reason, /exactly one crafting table now stands beside the start/);
+  assert.doesNotMatch(failed.reason, /server inventory holds the crafted results/);
 });
 
 test('model-only scenarios are skipped without --model and never faked', async () => {

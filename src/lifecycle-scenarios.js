@@ -12,7 +12,7 @@ export const BACKENDS = Object.freeze(['demo', 'mineflayer', 'fabric']);
 
 export const TRANSITIONS = deep({
   f8: 'The player presses F8 (the takeover binding), also while a screen is open.',
-  menu: 'The player opens or closes a game screen (pause menu, inventory, or the storage screen the agent opened).',
+  menu: 'The player opens or closes a game screen (pause menu, inventory, or the storage or crafting screen the agent opened).',
   stop: 'Emergency stop: `/v1/stop` (`mc-agent stop`, `minecraft_stop`) from any process.',
   cancel: 'Agent cancel: `/v1/cancel` (`minecraft_cancel`) with the session lease; control is kept.',
   expiry: 'Lease expiry: the controlling process stops heartbeating for the 8 s lease.',
@@ -32,6 +32,8 @@ export const ACTIVITIES = deep({
   'collect-recovery': 'Returning to the collection start after mining ended (deadline or failure).',
   eat: 'Equipping and consuming food.',
   deposit: 'Moving stacks into a chest or barrel.',
+  withdraw: 'Taking stacks out of a chest or barrel.',
+  craft: 'Repeating a crafting recipe in the inventory grid or at a crafting table.',
   wait: 'A timed wait.',
 });
 
@@ -50,6 +52,14 @@ export const HALTS = deep({
     text: 'no further items moved into the container',
     observe: '`data get block <x> <y> <z> Items` reads 5 s apart match',
   },
+  withdraw: {
+    text: 'no further items taken from the container',
+    observe: '`data get block <x> <y> <z> Items` reads 5 s apart match',
+  },
+  crafting: {
+    text: 'no further crafts',
+    observe: '`data get entity <player> Inventory` item counts stay the same 5 s apart',
+  },
 });
 
 const M = {
@@ -62,6 +72,7 @@ const M = {
   f8: 'Control returned to the player with (F8|the takeover binding)',
   menu: 'game menu was opened',
   storageScreen: 'Storage screen was closed or replaced',
+  craftingScreen: '(?:Storage|Crafting(?: table)?) screen was closed or replaced',
   inventoryFull: 'Inventory full; collected \\d+ of \\d+ \\w+\\.',
 };
 const NEW_SESSION = { lease: 'new' };
@@ -222,6 +233,60 @@ const SCENARIOS = [
       observe: 'Chest `Items` reads 5 s apart.',
     },
   },
+  {
+    id: 'f8-withdraw',
+    title: 'F8 between withdraw stacks',
+    transition: 'f8',
+    interrupts: 'withdraw',
+    ...FABRIC_ONLY(NO_INPUT),
+    expect: released(M.f8, ['withdraw']),
+    fabric: {
+      setup:
+        'Fill a double chest within 16 blocks with at least three stacks of logs (`/give` them, then `mc-agent deposit oak_log`); run `mc-agent withdraw oak_log`.',
+      action: 'Press F8 while the chest screen is open and stacks are moving.',
+      observe: 'Chest `Items` and player `Inventory` reads 5 s apart.',
+    },
+  },
+  {
+    id: 'menu-storage-close-withdraw',
+    title: 'Player closes the storage screen a withdrawal opened',
+    transition: 'menu',
+    interrupts: 'withdraw',
+    ...FABRIC_ONLY(NO_INPUT),
+    expect: released(M.storageScreen, ['withdraw']),
+    fabric: {
+      setup: 'Run `mc-agent withdraw oak_log` beside a chest holding three stacks of logs.',
+      action: 'Press Escape while the agent has the chest screen open.',
+      observe: 'Chest `Items` reads 5 s apart.',
+    },
+  },
+  {
+    id: 'f8-craft',
+    title: 'F8 between crafts',
+    transition: 'f8',
+    interrupts: 'craft',
+    ...FABRIC_ONLY(NO_INPUT),
+    expect: released(M.f8, ['crafting']),
+    fabric: {
+      setup: 'Hold 32 planks within 16 blocks of a crafting table; run `mc-agent craft chest 4`.',
+      action: 'Press F8 while the crafting table screen is open and chests are being crafted.',
+      observe: 'Plank and chest counts in `data get entity <player> Inventory` at F8 and 5 s later.',
+    },
+  },
+  {
+    id: 'menu-crafting-close',
+    title: 'Player closes the crafting table screen the agent opened',
+    transition: 'menu',
+    interrupts: 'craft',
+    ...FABRIC_ONLY(NO_INPUT),
+    expect: released(M.craftingScreen, ['crafting']),
+    fabric: {
+      setup: 'Hold 32 planks within 16 blocks of a crafting table; run `mc-agent craft chest 4`.',
+      action: 'Press Escape while the agent has the crafting table screen open.',
+      expected: 'Closing the screen does not resume crafting.',
+      observe: 'Plank and chest counts 5 s after closing.',
+    },
+  },
 
   // Shared transitions automated against the Harness.
   {
@@ -291,6 +356,53 @@ const SCENARIOS = [
       setup: 'Run `mc-agent deposit oak_log` with three stacks held and an empty double chest nearby.',
       action: 'Run `mc-agent stop` while stacks are moving.',
       observe: 'Chest `Items` reads 5 s apart.',
+    },
+  },
+  {
+    id: 'stop-withdraw',
+    title: 'Emergency stop between withdraw stacks',
+    transition: 'stop',
+    interrupts: 'withdraw',
+    ...ALL,
+    expect: released(M.stop, ['withdraw']),
+    fabric: {
+      setup: 'Run `mc-agent withdraw oak_log` beside a double chest holding at least three stacks of logs.',
+      action: 'Run `mc-agent stop` while stacks are moving.',
+      observe: 'Chest `Items` reads 5 s apart.',
+    },
+  },
+  {
+    id: 'stop-craft',
+    title: 'Emergency stop between crafts',
+    transition: 'stop',
+    interrupts: 'craft',
+    ...ALL,
+    expect: released(M.stop, ['crafting']),
+    fabric: {
+      setup: 'Hold 16 oak logs; run `mc-agent craft oak_planks 64`.',
+      action: 'Run `mc-agent stop` while planks are being crafted.',
+      observe: 'Log and plank counts in `data get entity <player> Inventory` 5 s apart.',
+    },
+  },
+  {
+    id: 'cancel-craft',
+    title: 'Agent cancel between crafts keeps control',
+    transition: 'cancel',
+    interrupts: 'craft',
+    ...ALL,
+    expect: {
+      mode: 'agent',
+      job: { status: 'cancelled', message: M.cancel },
+      halts: ['crafting'],
+      stoppingWindow: false,
+      next: { lease: 'same' },
+    },
+    fabric: {
+      setup:
+        'Hold 16 oak logs; from an MCP client take control and call `minecraft_action` with `{"type":"craft","item":"oak_planks","count":64}`.',
+      action: 'Cancel that call (or call `minecraft_cancel`) while planks are being crafted.',
+      observe:
+        'Log and plank counts 5 s apart; `mc-agent job` shows `agent` and the next `minecraft_action` is accepted without taking control again.',
     },
   },
   {
@@ -448,6 +560,40 @@ const SCENARIOS = [
       expected:
         'If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.',
       observe: '`mc-agent job` in a loop (`mc-agent watch`); chest `Items` reads.',
+    },
+  },
+  {
+    id: 'takeover-while-stopping-withdraw',
+    title: 'New session while a withdrawal is still opening its container',
+    transition: 'takeover-while-stopping',
+    interrupts: 'withdraw',
+    ...ALL,
+    expect: released(M.stop, ['withdraw'], { stoppingWindow: true }),
+    fabric: {
+      setup:
+        'Use a server with noticeable latency (e.g. a remote server); run `mc-agent withdraw oak_log` beside a chest holding logs.',
+      action:
+        'Run `mc-agent stop` immediately after the agent clicks the chest, then immediately start `mc-agent goto` nearby.',
+      expected:
+        'If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.',
+      observe: '`mc-agent job` in a loop (`mc-agent watch`); chest `Items` reads.',
+    },
+  },
+  {
+    id: 'takeover-while-stopping-craft',
+    title: 'New session while a cancelled craft is still clicking',
+    transition: 'takeover-while-stopping',
+    interrupts: 'craft',
+    ...ALL,
+    expect: released(M.stop, ['crafting'], { stoppingWindow: true }),
+    fabric: {
+      setup:
+        'Use a server with noticeable latency; hold 32 planks within 16 blocks of a crafting table and run `mc-agent craft chest 4`.',
+      action:
+        'Run `mc-agent stop` immediately after the agent clicks the crafting table, then immediately start `mc-agent goto` nearby.',
+      expected:
+        'If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.',
+      observe: '`mc-agent job` in a loop (`mc-agent watch`); plank and chest counts.',
     },
   },
 

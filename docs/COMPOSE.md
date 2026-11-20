@@ -50,7 +50,7 @@ before the arguments when passing negative numbers or coordinates.
 | `gather-store <file> <item> <count> <batch> <source> <depot>` | Append repeated source goto → collect → depot goto → inspect storage → deposit trips. Count is 1–2304; each batch is 1–64 and the final batch is reduced to the remainder. Supports the existing collection target list. |
 
 Type selection accepts `goto`, `home`, `set_home`, `collect`, `eat`,
-`inspect_storage`, `deposit`, and `wait`. It selects original steps only. A valid
+`inspect_storage`, `deposit`, `withdraw`, `craft`, and `wait`. It selects original steps only. A valid
 but absent target type or item leaves the input unchanged. Coordinate edits affect
 only explicit goto actions; they do not move a saved home or change where
 collection searches or deposits happen.

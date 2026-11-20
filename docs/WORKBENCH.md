@@ -55,7 +55,7 @@ mc-agent workbench translate trip.json -- -10 0 5 > shifted-trip.json
 ## Meaning and limits
 
 Valid action types are `goto`, `home`, `set_home`, `collect`, `eat`,
-`inspect_storage`, `deposit`, and `wait`. Unknown types are rejected, including
+`inspect_storage`, `deposit`, `withdraw`, `craft`, and `wait`. Unknown types are rejected, including
 when the routine has no matching steps. Filters refuse an empty result. Edits
 that exceed 100 steps or protocol bounds fail before printing anything.
 

@@ -172,6 +172,7 @@ public final class AgentController {
         String block = null;
         double wait = 0;
         Item depositItem = null;
+        CraftingRecipes.Recipe recipe = null;
         List<BlockPos> inspectTargets = null;
         switch (type) {
             case "goto":
@@ -210,16 +211,29 @@ public final class AgentController {
                 break;
             case "deposit": {
                 String name = string(requested, "item");
-                if (!name.matches("(?:minecraft:)?[a-z0-9_]{1,100}"))
-                    throw new IllegalArgumentException("Invalid item identifier.");
-                Identifier id = Identifier.of(name.contains(":") ? name : "minecraft:" + name);
-                if (!Registries.ITEM.containsId(id)) throw new IllegalArgumentException("Unknown item " + name);
-                depositItem = Registries.ITEM.get(id);
+                depositItem = item(name);
+                Identifier id = Registries.ITEM.getId(depositItem);
                 int held = inventoryCount(id.getPath());
                 double quantity = requested.has("count") ? number(requested, "count", 1, 2304) : held;
                 if (quantity < 1 || quantity > held || quantity != Math.floor(quantity))
                     throw new IllegalArgumentException("Not enough matching items in inventory, or invalid count.");
                 count = (int) quantity;
+                break;
+            }
+            case "withdraw":
+                depositItem = item(string(requested, "item"));
+                // Omitted, it takes every matching item from the chosen container.
+                count = requested.has("count") ? integer(requested, "count", 1, 2304) : 0;
+                break;
+            case "craft": {
+                String name = string(requested, "item");
+                if (!name.matches("(?:minecraft:)?[a-z0-9_]{1,100}"))
+                    throw new IllegalArgumentException("Invalid item identifier.");
+                recipe = CraftingRecipes.get(name);
+                if (recipe == null)
+                    throw new IllegalArgumentException("Not a supported crafting output. Craftable: "
+                            + String.join(", ", CraftingRecipes.outputs()));
+                count = integer(requested, "count", 1, CraftingRecipes.MAX_COUNT);
                 break;
             }
             case "inspect_storage":
@@ -275,10 +289,16 @@ public final class AgentController {
                 case "wait":
                     break;
                 case "deposit":
-                    storage.begin(identity(), depositItem, count, null);
+                    storage.beginDeposit(identity(), depositItem, count);
+                    break;
+                case "withdraw":
+                    storage.beginWithdraw(identity(), depositItem, count);
+                    break;
+                case "craft":
+                    storage.beginCraft(identity(), recipe, count);
                     break;
                 case "inspect_storage":
-                    storage.begin(identity(), null, 0, inspectTargets);
+                    storage.beginInspect(identity(), inspectTargets);
                     break;
             }
         } catch (Exception exception) {
@@ -441,6 +461,8 @@ public final class AgentController {
                     finish("completed", "Wait finished.");
                 break;
             case "deposit":
+            case "withdraw":
+            case "craft":
             case "inspect_storage": {
                 FabricStorage.Result result = storage.tick(now);
                 if (result != null) finish(result.success() ? "completed" : "failed", result.message());
@@ -555,9 +577,11 @@ public final class AgentController {
     private void finishWithoutStopping(String status, String message) {
         job.addProperty("status", status);
         job.addProperty("message", message);
-        // A deposit whose container opened names it on every terminal status: items may have moved before a failure or
-        // cancel.
-        JsonObject container = job.get("type").getAsString().equals("deposit") ? storage.depositContainer() : null;
+        // A deposit or withdrawal whose container opened names it on every terminal status: items may have moved before
+        // a failure or cancel.
+        String type = job.get("type").getAsString();
+        JsonObject container =
+                type.equals("deposit") || type.equals("withdraw") ? storage.transferContainer() : null;
         if (container != null) job.add("container", container);
     }
 
@@ -847,6 +871,16 @@ public final class AgentController {
                     integer(position, "z", -29_999_984, 29_999_984)));
         }
         return positions;
+    }
+
+    /** A namespaced or bare item identifier that names a registered item. */
+    private static Item item(String name) {
+        if (!name.matches("(?:minecraft:)?[a-z0-9_]{1,100}"))
+            throw new IllegalArgumentException("Invalid item identifier.");
+        Identifier id = Identifier.of(name.contains(":") ? name : "minecraft:" + name);
+        if (!Registries.ITEM.containsId(id) || id.getPath().equals("air"))
+            throw new IllegalArgumentException("Unknown item " + name);
+        return Registries.ITEM.get(id);
     }
 
     private static int integer(JsonObject object, String key, int min, int max) {

@@ -12,11 +12,14 @@ import { DemoDriver, demoScenarios } from './demo-driver.js';
 import {
   parseCollectionCriterion,
   parseDepositCriterion,
+  parseWithdrawCriterion,
+  parseCraftCriterion,
   parseInventoryCriterion,
   parseDestinationCriterion,
   parseMaxInventoryCriterion,
 } from './objective.js';
 import { positionSchema, normalizeAction } from './protocol.js';
+import { CRAFTABLE_ITEMS, MAX_CRAFT_COUNT, RECIPES } from './recipes.js';
 import {
   inventoryView,
   nearbyView,
@@ -297,6 +300,28 @@ program
   .argument('<item>', 'Minecraft item name')
   .argument('[count]', 'items to store; all when omitted', positiveInteger)
   .action((item, count) => perform({ type: 'deposit', item, ...(count !== undefined && { count }) }));
+program
+  .command('withdraw')
+  .description('Take an item from a chest or barrel within 16 blocks, preferring one last seen holding it.')
+  .argument('<item>', 'Minecraft item name')
+  .argument('[count]', 'items to take; all in that container when omitted', positiveInteger)
+  .action((item, count) => perform({ type: 'withdraw', item, ...(count !== undefined && { count }) }));
+program
+  .command('craft')
+  .description(
+    `Craft at least <count> of an allowlisted item; tools, chests, and furnaces need a crafting table within 16 blocks. Craftable: ${CRAFTABLE_ITEMS.join(', ')}.`,
+  )
+  .argument('<item>', 'craftable item name', (value) => {
+    if (!RECIPES[value.includes(':') ? value : `minecraft:${value}`])
+      throw new InvalidArgumentError(`Not craftable. Use one of: ${CRAFTABLE_ITEMS.join(', ')}.`);
+    return value;
+  })
+  .argument('<count>', `items wanted, 1 to ${MAX_CRAFT_COUNT}`, (value) => {
+    const parsed = positiveInteger(value);
+    if (parsed > MAX_CRAFT_COUNT) throw new InvalidArgumentError(`Must be an integer from 1 to ${MAX_CRAFT_COUNT}.`);
+    return parsed;
+  })
+  .action((item, count) => perform({ type: 'craft', item, count }));
 async function view(select) {
   const adapter = await connect();
   try {
@@ -767,6 +792,16 @@ program
     'verify additional items stored in nearby containers, for example oak_log:8',
     parseDepositCriterion,
   )
+  .option(
+    '--verify-withdraw <item:count>',
+    'verify additional items held after taking them from storage, for example cobblestone:3',
+    parseWithdrawCriterion,
+  )
+  .option(
+    '--verify-craft <item:count>',
+    'verify additional crafted items held at completion, for example stone_pickaxe:1',
+    parseCraftCriterion,
+  )
   .option('--verify-home', 'verify return within two blocks of the home saved before the task')
   .option('--verify-health <n>', 'minimum final health, from 1 to 20', number)
   .option('--verify-hunger <n>', 'minimum final hunger, from 0 to 20', number)
@@ -841,6 +876,8 @@ program
         criteria: {
           collect: options.verifyCollect,
           deposit: options.verifyDeposit,
+          withdraw: options.verifyWithdraw,
+          craft: options.verifyCraft,
           returnHome: options.verifyHome,
           minHealth: options.verifyHealth,
           minHunger: options.verifyHunger,

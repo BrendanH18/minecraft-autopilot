@@ -17,13 +17,14 @@ Minecraft Autopilot combines a Fabric client mod, a standalone server bot, a CLI
 | Navigate | Walk to coordinates or a saved home |
 | Collect | Additional logs, dirt, sand, or cobblestone, with a bounded return attempt |
 | Eat and guard | Eat supported food and attempt a low-health retreat to a saved shelter |
-| Store | Deposit items into the nearest chest or barrel (Fabric, server bot, and demo) |
+| Store | Deposit items into, or withdraw them from, a chest or barrel within 16 blocks (Fabric, server bot, and demo; withdraw is experimental) |
+| Craft | Experimental: planks, sticks, crafting tables, torches, chests, furnaces, and wooden or stone pickaxes, axes, and shovels, using a nearby or held crafting table |
 | Local planning | One validated Ollama action at a time, with time and step limits |
 | Agent integration | Eight MCP tools for observation, inventory, nearby lookups, takeover, actions, cancellation, release, and stop |
 | Handoff | F8/menu takeover in Fabric, emergency stop, and heartbeat expiry |
-| Verify tasks | Check additional inventory, items stored in containers, and return to the original home independently of the model |
+| Verify tasks | Check additional inventory, withdrawn or crafted items, items stored in containers, and return to the original home independently of the model |
 
-Combat, crafting, building, automatic reconnect transfer, and ordinary mouse/movement takeover are future work. Guard reacts to hunger and health; it does not fight enemies or construct shelter.
+Combat, building, automatic reconnect transfer, and ordinary mouse/movement takeover are future work. Guard reacts to hunger and health; it does not fight enemies or construct shelter.
 
 ## Planning and reports
 
@@ -155,7 +156,7 @@ npm start -- agent "Collect eight additional oak logs and return home" \
   --verify-collect oak_log:8 --verify-home
 ```
 
-The planner chooses one bounded action at a time. Explicit criteria compare final inventory to starting inventory and check return within two blocks of the original home. For gather-and-store, combine `--verify-collect oak_log:8` with `--verify-deposit oak_log:8`: net new items in inventory and storage count toward collection. Deposit verification reopens known storage before final success; see the [verification limits](docs/USAGE.md#run-an-ollama-task). Results are `criteria_met` or `criteria_unmet`; unmet criteria exit with code 2. These checks verify only the supplied criteria, not every requirement in free-form goal text.
+The planner chooses one bounded action at a time. Explicit criteria compare final inventory to starting inventory and check return within two blocks of the original home. For gather-and-store, combine `--verify-collect oak_log:8` with `--verify-deposit oak_log:8`: net new items in inventory and storage count toward collection. `--verify-withdraw` and `--verify-craft` likewise check the final held increase. Deposit verification reopens known storage before final success; see the [verification limits](docs/USAGE.md#run-an-ollama-task). Results are `criteria_met` or `criteria_unmet`; unmet criteria exit with code 2. These checks verify only the supplied criteria, not every requirement in free-form goal text.
 
 Without verification flags, `model_finished` records the model's explanation and does not independently prove success. Requests are restricted to a local Ollama endpoint. The planner rechecks control after inference and releases its lease on exit.
 
@@ -209,8 +210,8 @@ provide [expedition budgets](docs/EXPEDITION.md),
 [saved-snapshot checks](docs/CHECKPOINT.md), and
 [routine composition](docs/COMPOSE.md), with 25 commands per group.
 Expedition reads one observation; the other three groups run offline.
-Construction and production plans are estimates; gameplay building and crafting
-remain future work. Generated routines print validated JSON for review before execution.
+Construction and production plans are estimates; gameplay building remains
+future work, and gameplay crafting covers only the bounded allowlist above. Generated routines print validated JSON for review before execution.
 
 The [200 batch 8 additions](docs/IMPROVEMENTS.md#batch-8-200-offline-planning-and-evidence-analysis-additions)
 add eight groups of 25 offline commands:

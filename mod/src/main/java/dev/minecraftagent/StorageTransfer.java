@@ -3,7 +3,10 @@ package dev.minecraftagent;
 import java.util.function.IntBinaryOperator;
 import java.util.function.IntPredicate;
 
-/** Counts only transfers verified by reopening the server inventory, never client click prediction. */
+/**
+ * Counts only transfers verified by reopening the server inventory, never client click prediction. {@code stored} counts
+ * the destination and {@code held} the source: the container and player for a deposit, swapped for a withdrawal.
+ */
 final class StorageTransfer {
     private final int requested;
     private final int initialStored;
@@ -36,13 +39,29 @@ final class StorageTransfer {
 
     record Slots(int source, int destination, int capacity) {}
 
-    /** Try compatible partial stacks across every source before consuming an empty slot. */
+    /** A deposit moves from the player's slots after the container's into the container's first {@code storageSize}. */
     static Slots select(
             int storageSize, int totalSize, IntPredicate matches, IntPredicate empty, IntBinaryOperator capacity) {
+        return select(storageSize, totalSize, 0, storageSize, matches, empty, capacity);
+    }
+
+    /**
+     * Try compatible partial stacks across every source before consuming an empty slot. Sources are slots
+     * {@code [sourceFrom, sourceTo)} and destinations {@code [destinationFrom, destinationTo)}; a withdrawal swaps the
+     * deposit's ranges.
+     */
+    static Slots select(
+            int sourceFrom,
+            int sourceTo,
+            int destinationFrom,
+            int destinationTo,
+            IntPredicate matches,
+            IntPredicate empty,
+            IntBinaryOperator capacity) {
         for (boolean useEmpty : new boolean[] {false, true}) {
-            for (int source = storageSize; source < totalSize; source++) {
+            for (int source = sourceFrom; source < sourceTo; source++) {
                 if (!matches.test(source)) continue;
-                for (int destination = 0; destination < storageSize; destination++) {
+                for (int destination = destinationFrom; destination < destinationTo; destination++) {
                     if (empty.test(destination) != useEmpty) continue;
                     int room = capacity.applyAsInt(source, destination);
                     if (room > 0) return new Slots(source, destination, room);

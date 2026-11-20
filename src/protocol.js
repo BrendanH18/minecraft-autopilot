@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_CRAFT_COUNT, RECIPES } from './recipes.js';
 
 export const positionSchema = z
   .object({
@@ -52,6 +53,31 @@ export const actionSchema = z.discriminatedUnion('type', [
       count: z.number().int().min(1).max(2304).optional(),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal('withdraw'),
+      item: z
+        .string()
+        .regex(/^(?:minecraft:)?[a-z0-9_]+$/)
+        .max(100),
+      // Omitted count takes every matching item from the chosen container.
+      count: z.number().int().min(1).max(2304).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('craft'),
+      item: z
+        .string()
+        .regex(/^(?:minecraft:)?[a-z0-9_]+$/)
+        .max(100)
+        .refine((item) => !!RECIPES[item.includes(':') ? item : `minecraft:${item}`], {
+          message: 'Not a supported crafting output.',
+        }),
+      // The number of output items wanted; whole crafts run until at least this many are made.
+      count: z.number().int().min(1).max(MAX_CRAFT_COUNT),
+    })
+    .strict(),
   z.object({ type: z.literal('wait'), seconds: z.number().min(1).max(3600) }).strict(),
 ]);
 
@@ -60,7 +86,8 @@ export const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
 export function normalizeAction(action) {
   const parsed = actionSchema.parse(action);
   if (parsed.type === 'collect' && !parsed.block.includes(':')) parsed.block = `minecraft:${parsed.block}`;
-  if (parsed.type === 'deposit' && !parsed.item.includes(':')) parsed.item = `minecraft:${parsed.item}`;
+  if (['deposit', 'withdraw', 'craft'].includes(parsed.type) && !parsed.item.includes(':'))
+    parsed.item = `minecraft:${parsed.item}`;
   return parsed;
 }
 export function assertPlayable(state) {

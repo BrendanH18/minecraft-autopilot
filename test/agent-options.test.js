@@ -285,6 +285,8 @@ test('allowed actions restrict the schema and refuse other decisions without exe
     'eat',
     'inspect_storage',
     'deposit',
+    'withdraw',
+    'craft',
     'wait',
   ]);
   const adapter = fakeAdapter();

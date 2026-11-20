@@ -6,6 +6,17 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Experimental `withdraw` and `craft` actions. `withdraw ITEM [COUNT]` takes an
+  item from a chest or barrel within 16 blocks and reports the container like a
+  deposit. `craft ITEM COUNT` makes 1–64 of an allowlisted item (planks, sticks,
+  crafting tables, torches, chests, furnaces, wooden and stone pickaxes, axes
+  and shovels), using a crafting table within 16 blocks or placing a held one.
+  Both are available from the CLI, routines, MCP, and the Ollama planner, with
+  `--verify-withdraw` and `--verify-craft` criteria that check the final held
+  increase. The planner refuses actions that would satisfy one gain criterion
+  through another, such as withdrawing a collection quota. Fabric and bot
+  behaviour still need live acceptance.
+
 - [200 settlement planners](docs/IMPROVEMENTS.md#batch-15-200-settlement-planners) cover gardens, map rooms, books, banners, and crossings. All support the nine planning study workflows.
 
 - 200 offline build planners for scaffolds, beacon bases, tunnel ventilation

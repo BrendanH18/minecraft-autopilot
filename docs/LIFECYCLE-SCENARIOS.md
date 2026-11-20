@@ -4,7 +4,7 @@ Control can end or change in many ways: the player presses F8 or opens a menu, a
 
 - the control mode (`manual`, or `agent` when the agent only cancelled);
 - the job status and a message pattern that both the Harness and the Fabric controller messages satisfy;
-- what must not happen any more (movement, mining, food consumption, deposits);
+- what must not happen any more (movement, mining, food consumption, deposits, withdrawals, crafts);
 - whether a new session must wait while the interrupted work is still `stopping`;
 - what the next session needs: the old lease is rejected, and a new session starts only when explicitly requested (or is refused while the player is dead or disconnected).
 
@@ -15,9 +15,9 @@ Every scenario assigns each backend exactly once: `automated` (run by `node --te
 [`test/lifecycle-scenarios.test.js`](../test/lifecycle-scenarios.test.js) runs each automated scenario through a real `Harness`:
 
 - **demo**: the `DemoDriver` simulation. It has one fixed, always-connected world, so disconnects, dimension changes, and collection recovery are gaps.
-- **mineflayer**: the real `MineflayerDriver` on a mocked bot (EventEmitter, minecraft-data 1.21.1, Vec3) whose pathfinder walks one block per tick, whose digging, equipping, and container openings stay pending like real server replies, and which emits mineflayer's `death`, `end`, and `game` events.
+- **mineflayer**: the real `MineflayerDriver` on a mocked bot (EventEmitter, minecraft-data 1.21.1, Vec3) whose pathfinder walks one block per tick, whose digging, equipping, container openings, and crafts stay pending like real server replies, and which emits mineflayer's `death`, `end`, and `game` events.
 
-The rigs interrupt at exact milestones (first step, dig, equip, first stack, return trip) and use an injected clock for lease expiry. Death, disconnect, dimension changes, and expiry are detected by the Harness's own tick, as they would be live. The `inventory-full-collect` row is a failure rather than a handoff: the rigs fill the inventory mid-collection, and the job must fail on its own (no collection deadline is shortened) while the session keeps control. Every automated case asserts the shared expectation strictly. Mark a newly found mismatch as a `todo` in the test's `KNOWN` table until the source is fixed.
+The rigs interrupt at exact milestones (first step, dig, equip, first stack, first craft, return trip) and use an injected clock for lease expiry. Death, disconnect, dimension changes, and expiry are detected by the Harness's own tick, as they would be live. The `inventory-full-collect` row is a failure rather than a handoff: the rigs fill the inventory mid-collection, and the job must fail on its own (no collection deadline is shortened) while the session keeps control. Every automated case asserts the shared expectation strictly. Mark a newly found mismatch as a `todo` in the test's `KNOWN` table until the source is fixed.
 
 The table first exposed `death-goto`, `dimension-goto`, and `disconnect-collect` on mineflayer: the driver aborted on the bot event before the Harness tick, so the job ended `failed` with the driver's raw reason. The Harness now runs its lifecycle check when an action fails, so these end `cancelled` with the shared message on every backend.
 
@@ -90,77 +90,122 @@ Fabric needs a person at the keyboard. Use the packaged mod in a normal launcher
     - Action: Press Escape while the agent has the chest screen open.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Storage screen was closed or replaced/i`; no further items moved into the container; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: Chest `Items` reads 5 s apart. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
-11. **Emergency stop while idle** (`stop-idle`; stop during idle)
+11. **F8 between withdraw stacks** (`f8-withdraw`; f8 during withdraw)
+    - Setup: Fill a double chest within 16 blocks with at least three stacks of logs (`/give` them, then `mc-agent deposit oak_log`); run `mc-agent withdraw oak_log`.
+    - Action: Press F8 while the chest screen is open and stacks are moving.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Control returned to the player with (F8|the takeover binding)/i`; no further items taken from the container; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
+    - Observe: Chest `Items` and player `Inventory` reads 5 s apart. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
+12. **Player closes the storage screen a withdrawal opened** (`menu-storage-close-withdraw`; menu during withdraw)
+    - Setup: Run `mc-agent withdraw oak_log` beside a chest holding three stacks of logs.
+    - Action: Press Escape while the agent has the chest screen open.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Storage screen was closed or replaced/i`; no further items taken from the container; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
+    - Observe: Chest `Items` reads 5 s apart. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
+13. **F8 between crafts** (`f8-craft`; f8 during craft)
+    - Setup: Hold 32 planks within 16 blocks of a crafting table; run `mc-agent craft chest 4`.
+    - Action: Press F8 while the crafting table screen is open and chests are being crafted.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Control returned to the player with (F8|the takeover binding)/i`; no further crafts; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
+    - Observe: Plank and chest counts in `data get entity <player> Inventory` at F8 and 5 s later. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart.
+14. **Player closes the crafting table screen the agent opened** (`menu-crafting-close`; menu during craft)
+    - Setup: Hold 32 planks within 16 blocks of a crafting table; run `mc-agent craft chest 4`.
+    - Action: Press Escape while the agent has the crafting table screen open.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/(?:Storage|Crafting(?: table)?) screen was closed or replaced/i`; no further crafts; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. Closing the screen does not resume crafting.
+    - Observe: Plank and chest counts 5 s after closing. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart.
+15. **Emergency stop while idle** (`stop-idle`; stop during idle)
     - Setup: Acquire control with `mc-agent agent` waiting for a model decision.
     - Action: Run `mc-agent stop` from a second terminal.
     - Expected: mode becomes `manual`; no job is started or resumed; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: The agent CLI reports that control returned to the player; `mc-agent job` shows `manual`. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-12. **Emergency stop during navigation** (`stop-goto`; stop during goto)
+16. **Emergency stop during navigation** (`stop-goto`; stop during goto)
     - Setup: Run `mc-agent goto <x> <y> <z>` about 40 blocks away.
     - Action: Run `mc-agent stop` from a second terminal mid-walk.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: Position reads 5 s apart. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-13. **Emergency stop while mining** (`stop-collect`; stop during collect)
+17. **Emergency stop while mining** (`stop-collect`; stop during collect)
     - Setup: Run `mc-agent collect oak_log 8` near trees.
     - Action: Run `mc-agent stop` while a log is being broken.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further blocks broken; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: Log count and position 5 s apart. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart; two `data get entity <player> Pos` reads 5 s apart match.
-14. **Emergency stop during recovery after a mining timeout** (`stop-collect-recovery`; stop during collect-recovery)
+18. **Emergency stop during recovery after a mining timeout** (`stop-collect-recovery`; stop during collect-recovery)
     - Setup: Set up the failing sand collection from the F8 return check (Fabric returns after a failure or its 180 s mining deadline).
     - Action: Run `mc-agent stop` during "returning to where collection started".
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further movement; no further blocks broken; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. The return does not fall back to digging after the stop.
     - Observe: Position and nearby blocks 5 s apart. Independently: two `data get entity <player> Pos` reads 5 s apart match; `data get entity <player> Inventory` item counts stay the same 5 s apart.
-15. **Emergency stop between deposit stacks** (`stop-deposit`; stop during deposit)
+19. **Emergency stop between deposit stacks** (`stop-deposit`; stop during deposit)
     - Setup: Run `mc-agent deposit oak_log` with three stacks held and an empty double chest nearby.
     - Action: Run `mc-agent stop` while stacks are moving.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further items moved into the container; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: Chest `Items` reads 5 s apart. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
-16. **Agent cancel during a wait keeps control** (`cancel-wait`; cancel during wait)
+20. **Emergency stop between withdraw stacks** (`stop-withdraw`; stop during withdraw)
+    - Setup: Run `mc-agent withdraw oak_log` beside a double chest holding at least three stacks of logs.
+    - Action: Run `mc-agent stop` while stacks are moving.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further items taken from the container; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
+    - Observe: Chest `Items` reads 5 s apart. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
+21. **Emergency stop between crafts** (`stop-craft`; stop during craft)
+    - Setup: Hold 16 oak logs; run `mc-agent craft oak_planks 64`.
+    - Action: Run `mc-agent stop` while planks are being crafted.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further crafts; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
+    - Observe: Log and plank counts in `data get entity <player> Inventory` 5 s apart. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart.
+22. **Agent cancel between crafts keeps control** (`cancel-craft`; cancel during craft)
+    - Setup: Hold 16 oak logs; from an MCP client take control and call `minecraft_action` with `{"type":"craft","item":"oak_planks","count":64}`.
+    - Action: Cancel that call (or call `minecraft_cancel`) while planks are being crafted.
+    - Expected: mode stays `agent`; the job ends `cancelled` with a message matching `/Cancelled by agent/i`; no further crafts; the same session can start its next action once `stopping` is `false`.
+    - Observe: Log and plank counts 5 s apart; `mc-agent job` shows `agent` and the next `minecraft_action` is accepted without taking control again. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart.
+23. **Agent cancel during a wait keeps control** (`cancel-wait`; cancel during wait)
     - Setup: From an MCP client, call `minecraft_take_control`, then `minecraft_action` with `{"type":"wait","seconds":30}`.
     - Action: Cancel the in-flight `minecraft_action` call from the MCP client (or call `minecraft_cancel` if the client allows concurrent calls).
     - Expected: mode stays `agent`; the job ends `cancelled` with a message matching `/Cancelled by agent/i`; no further movement; the same session can start its next action once `stopping` is `false`.
     - Observe: `mc-agent job` shows `agent`; the next `minecraft_action` is accepted without taking control again. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-17. **Agent cancel during eating** (`cancel-eat`; cancel during eat)
+24. **Agent cancel during eating** (`cancel-eat`; cancel during eat)
     - Setup: Lower food to about 10; from an MCP client take control and call `minecraft_action` with `{"type":"eat"}`.
     - Action: Cancel that call (or call `minecraft_cancel`) during the eating animation.
     - Expected: mode stays `agent`; the job ends `cancelled` with a message matching `/Cancelled by agent/i`; no food consumed after the transition; the same session can start its next action once `stopping` is `false`.
     - Observe: Bread count and `foodLevel` before and 5 s after the cancel. Independently: `data get entity <player> Inventory` keeps the food count and `foodLevel` does not rise.
-18. **Lease expiry while idle** (`expiry-idle`; expiry during idle)
+25. **Lease expiry while idle** (`expiry-idle`; expiry during idle)
     - Setup: Start `mc-agent agent "<goal>" --model <model>` and wait for a model decision.
     - Action: Suspend the CLI (Ctrl+Z) and wait 10 s, then resume it with `fg`.
     - Expected: mode becomes `manual`; no job is started or resumed; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. The resumed CLI does not regain control or act.
     - Observe: `mc-agent job` from a second terminal during the suspension. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-19. **Lease expiry during navigation** (`expiry-goto`; expiry during goto)
+26. **Lease expiry during navigation** (`expiry-goto`; expiry during goto)
     - Setup: Run `mc-agent goto <x> <y> <z>` about 60 blocks away.
     - Action: Kill the CLI process (`kill -9 <pid>`) mid-walk; wait 10 s.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/lease expired/i`; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: Position reads after expiry, 5 s apart. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-20. **Disconnect while mining** (`disconnect-collect`; disconnect during collect)
+27. **Disconnect while mining** (`disconnect-collect`; disconnect during collect)
     - Setup: Join a local server and run `mc-agent collect oak_log 8`.
     - Action: Stop the server (or `/kick <player>`) while mining.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Disconnected/i`; no further blocks broken; no further movement; the old session cannot heartbeat or act; a new session is refused with a message matching `/Enter a (Minecraft )?world/i` until the player recovers. After rejoining, the session does not resume; a new one must be started explicitly.
     - Observe: `mc-agent job` at the title screen and after rejoining. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart; two `data get entity <player> Pos` reads 5 s apart match.
-21. **Death during navigation** (`death-goto`; death during goto)
+28. **Death during navigation** (`death-goto`; death during goto)
     - Setup: Run `mc-agent goto <x> <y> <z>` about 40 blocks away.
     - Action: Run `/kill <player>` in the server console mid-walk; respawn manually afterwards.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/died/i`; no further movement; the old session cannot heartbeat or act; a new session is refused with a message matching `/dead|Respawn/i` until the player recovers. After the manual respawn, the session does not resume.
     - Observe: `mc-agent job` at the death screen and after respawning. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-22. **Dimension change while idle** (`dimension-idle`; dimension during idle)
+29. **Dimension change while idle** (`dimension-idle`; dimension during idle)
     - Setup: Start `mc-agent agent "<goal>" --model <model>` and wait for a model decision.
     - Action: Run `/execute in minecraft:the_nether run tp <player> 0 100 0`.
     - Expected: mode becomes `manual`; no job is started or resumed; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: `mc-agent job` and `data get entity <player> Dimension`. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-23. **Dimension change during navigation** (`dimension-goto`; dimension during goto)
+30. **Dimension change during navigation** (`dimension-goto`; dimension during goto)
     - Setup: Run `mc-agent goto <x> <y> <z>` about 40 blocks away.
     - Action: Run `/execute in minecraft:the_nether run tp <player> 0 100 0` mid-walk.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/dimension changed/i`; no further movement; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted.
     - Observe: Position and `Dimension` reads 5 s apart. Independently: two `data get entity <player> Pos` reads 5 s apart match.
-24. **New session while a container opening is still awaiting the server** (`takeover-while-stopping-deposit`; takeover-while-stopping during deposit)
+31. **New session while a container opening is still awaiting the server** (`takeover-while-stopping-deposit`; takeover-while-stopping during deposit)
     - Setup: Use a server with noticeable latency (e.g. a remote server); run `mc-agent deposit oak_log` with a chest nearby.
     - Action: Run `mc-agent stop` immediately after the agent clicks the chest, then immediately start `mc-agent goto` nearby.
     - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further items moved into the container; while `stopping` is `true` a new session cannot start work, and it can once the interrupted work settles; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.
     - Observe: `mc-agent job` in a loop (`mc-agent watch`); chest `Items` reads. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
-25. **Inventory fills while mining for a collection quota** (`inventory-full-collect`; inventory-full during collect)
+32. **New session while a withdrawal is still opening its container** (`takeover-while-stopping-withdraw`; takeover-while-stopping during withdraw)
+    - Setup: Use a server with noticeable latency (e.g. a remote server); run `mc-agent withdraw oak_log` beside a chest holding logs.
+    - Action: Run `mc-agent stop` immediately after the agent clicks the chest, then immediately start `mc-agent goto` nearby.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further items taken from the container; while `stopping` is `true` a new session cannot start work, and it can once the interrupted work settles; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.
+    - Observe: `mc-agent job` in a loop (`mc-agent watch`); chest `Items` reads. Independently: `data get block <x> <y> <z> Items` reads 5 s apart match.
+33. **New session while a cancelled craft is still clicking** (`takeover-while-stopping-craft`; takeover-while-stopping during craft)
+    - Setup: Use a server with noticeable latency; hold 32 planks within 16 blocks of a crafting table and run `mc-agent craft chest 4`.
+    - Action: Run `mc-agent stop` immediately after the agent clicks the crafting table, then immediately start `mc-agent goto` nearby.
+    - Expected: mode becomes `manual`; the job ends `cancelled` with a message matching `/Emergency stop requested/i`; no further crafts; while `stopping` is `true` a new session cannot start work, and it can once the interrupted work settles; the old session cannot heartbeat or act; a new session starts only when explicitly requested and is then accepted. If `stopping` never appears because the reply was too fast, record "not observed" rather than passing.
+    - Observe: `mc-agent job` in a loop (`mc-agent watch`); plank and chest counts. Independently: `data get entity <player> Inventory` item counts stay the same 5 s apart.
+34. **Inventory fills while mining for a collection quota** (`inventory-full-collect`; inventory-full during collect)
     - Setup: Stand near trees holding an axe and no oak logs; fill all but one of the other main slots (hotbar and inventory) with full stacks, e.g. `/give <player> minecraft:cobblestone 2176` (34 stacks). From an MCP client, call `minecraft_take_control`.
     - Action: Call `minecraft_action` with `{"type":"collect","block":"oak_log","count":8}`; while the first log is being broken, run `/give <player> minecraft:dirt 64` to fill the last slot. Start over if a log was picked up first.
     - Expected: mode stays `agent`; the job ends `failed` with a message matching `/Inventory full; collected \d+ of \d+ \w+\./i`; no further blocks broken; the same session can start its next action once `stopping` is `false`. The job fails within seconds of the last slot filling rather than at the 180 s mining deadline, after the bounded return to where collection started.

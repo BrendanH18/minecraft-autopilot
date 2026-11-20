@@ -33,7 +33,7 @@ Evaluate these in order of evidence from actual use:
 
 1. Shared behavioral scenarios for Fabric and bot lifecycle transitions, plus better terrain/tool/inventory recovery. *(The [lifecycle scenario table](LIFECYCLE-SCENARIOS.md) now runs against the demo driver and the bot driver on a mocked bot and generates the Fabric checklist. All three backends stop collection promptly when the inventory is full; Fabric's check still needs live acceptance, and terrain/tool recovery remains.)*
 2. Richer task criteria and storage inspection scoped to the task rather than every container opened in the bot session. *(Deposit verification is now task-scoped on all three backends; Fabric's scoped path still needs live acceptance.)*
-3. Crafting/building and richer survival or combat, after current actions are reliable.
+3. Crafting/building and richer survival or combat, after current actions are reliable. *(Crafting has started with a bounded allowlist: planks, sticks, crafting tables, torches, chests, furnaces, and wooden and stone tools, plus chest withdrawals to supply ingredients. Both need live acceptance on Fabric and the bot; building, smelting, and other recipes remain.)*
 4. Easier client/bot transfer and optional ordinary-input takeover.
 
 Each new action needs preconditions, observable completion, execution limits, and cancellation that respects player takeover. Do not expand the action set at the expense of the Fabric acceptance path.

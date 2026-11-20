@@ -68,4 +68,18 @@ class InventoryRoomTest {
         assertTrue(InventoryRoom.fullMessage(0, 64, "cobblestone")
                 .matches("Inventory full; collected \\d+ of \\d+ \\w+\\."));
     }
+
+    @Test
+    void capacityCountsEmptySlotsAndMatchingSpaceOnly() {
+        List<InventoryRoom.Slot> slots = full();
+        assertEquals(0, InventoryRoom.capacity(slots, LOG, 64));
+        slots.set(3, new InventoryRoom.Slot(LOG, 61, 64));
+        assertEquals(3, InventoryRoom.capacity(slots, LOG, 64));
+        slots.set(4, InventoryRoom.Slot.EMPTY);
+        assertEquals(3 + 64, InventoryRoom.capacity(slots, LOG, 64));
+        assertEquals(1, InventoryRoom.capacity(slots, "minecraft:wooden_pickaxe", 1), "only the empty slot fits a tool");
+        List<InventoryRoom.Slot> longer = new ArrayList<>(full());
+        longer.add(InventoryRoom.Slot.EMPTY);
+        assertEquals(0, InventoryRoom.capacity(longer, LOG, 64), "offhand and armour slots never count");
+    }
 }
