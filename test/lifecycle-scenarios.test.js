@@ -140,6 +140,7 @@ const RIGS = {
       const sand = new Vec3(3, 64, 0);
       const chest = new Vec3(2, 64, 2);
       const log = { steps: 0, trips: [], digs: 0, consumed: 0, batches: 0, equips: 0, crafts: 0 };
+      let result = null;
       const replies = []; // Native replies (equip, a container opening) the server has not sent yet.
       const later = (value) => new Promise((resolve) => replies.push(() => resolve(value)));
       let movements,
@@ -221,6 +222,23 @@ const RIGS = {
         health: 20,
         food: activity === 'eat' ? 18 : 20,
         inventory: {
+          // The player's own window: result slot 0, 2x2 grid 1-4, main slots from 9.
+          inventoryStart: 9,
+          inventoryEnd: 45,
+          selectedItem: null,
+          grid: new Map(),
+          get slots() {
+            const slots = Array(45).fill(null);
+            for (const [slot, name] of this.grid) slots[slot] = { name };
+            if (this.grid.size) slots[0] = { type: result.id, count: result.count };
+            return slots;
+          },
+          updateSlot(slot) {
+            this.grid.delete(slot);
+          },
+          findInventoryItem(id) {
+            return held[registry.items[id].name] > 0 ? { type: id, slot: 9 } : null;
+          },
           items() {
             const stacks = Object.entries(held)
               .filter(([, count]) => count > 0)
@@ -297,14 +315,35 @@ const RIGS = {
           reached.emit('batch');
           await delay(20);
         },
-        recipesAll: (id, metadata, table) =>
-          Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table),
-        // One craft moves its ingredients and result at once; a stopped craft keeps clicking until the server answers.
-        craft: (recipe) => {
-          for (const cell of [...(recipe.inShape?.flat() ?? []), ...(recipe.ingredients ?? [])])
-            if (cell.id !== -1) held[registry.items[cell.id].name]--;
-          const output = registry.items[recipe.result.id].name;
-          held[output] = (held[output] || 0) + recipe.result.count;
+        recipesAll: (id, metadata, table) => {
+          // The allowlisted recipe yields the most (minecraft-data also lists single-item variants).
+          result = Recipe.find(id, metadata)
+            .map((recipe) => recipe.result)
+            .reduce((best, next) => (next.count > best.count ? next : best));
+          return Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table);
+        },
+        // Clicks fill the 2x2 grid one ingredient at a time; a shift-click moves a grid item back.
+        clickWindow: async (slot, _button, mode) => {
+          const grid = bot.inventory.grid;
+          if (mode === 1) {
+            held[grid.get(slot)]++;
+            grid.delete(slot);
+          } else if (slot >= bot.inventory.inventoryStart) {
+            bot.inventory.selectedItem = { type: ids.log };
+          } else {
+            const name = registry.items[bot.inventory.selectedItem.type].name;
+            held[name]--;
+            grid.set(slot, name);
+          }
+        },
+        putSelectedItemRange: async () => {
+          bot.inventory.selectedItem = null;
+        },
+        // Taking the result finishes one craft; a stopped craft keeps waiting until the server answers.
+        putAway: () => {
+          bot.inventory.grid.clear();
+          const output = registry.items[result.id].name;
+          held[output] = (held[output] || 0) + result.count;
           log.crafts++;
           reached.emit('craft');
           return scenario.transition === 'takeover-while-stopping' ? later() : delay(20);
