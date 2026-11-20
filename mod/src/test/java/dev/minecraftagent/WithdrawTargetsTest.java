@@ -41,6 +41,7 @@ class WithdrawTargetsTest {
 
     @Test
     void fullMessageMatchesTheProtocol() {
-        assertEquals("Inventory full; withdrew 3 of 8 oak_log.", WithdrawTargets.fullMessage(3, 8, "minecraft:oak_log"));
+        assertEquals(
+                "Inventory full; withdrew 3 of 8 oak_log.", WithdrawTargets.fullMessage(3, 8, "minecraft:oak_log"));
     }
 }

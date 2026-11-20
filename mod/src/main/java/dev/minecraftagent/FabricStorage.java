@@ -74,6 +74,7 @@ final class FabricStorage {
     private long openingGeneration;
     /** The chest/barrel or crafting-table handler bound to the agent's own opening. */
     private ScreenHandler owned;
+
     private final StorageOpening opening = new StorageOpening();
     private boolean agentOpening;
     private Object openingWorld;
@@ -137,7 +138,10 @@ final class FabricStorage {
     void beginInspect(String identity, List<BlockPos> requested) {
         reset(identity, Mode.INSPECT, null, 0);
         scoped = requested != null;
-        targets = new ArrayDeque<>(scoped ? requestedTargets(identity, requested) : normalize(identity).keySet());
+        targets = new ArrayDeque<>(
+                scoped
+                        ? requestedTargets(identity, requested)
+                        : normalize(identity).keySet());
         nextTarget();
     }
 
@@ -267,7 +271,8 @@ final class FabricStorage {
                             true,
                             scoped
                                     ? "Refreshed the requested storage from the server."
-                                    : "Refreshed previously opened storage from the server and returned to inspection start.");
+                                    : "Refreshed previously opened storage from the server and returned to inspection"
+                                            + " start.");
                 if (now - phaseStarted > 3_000_000_000L && !pathing())
                     throw new IllegalStateException("Storage refreshed, but could not return to inspection start.");
                 return null;
@@ -283,14 +288,16 @@ final class FabricStorage {
                         mode == Mode.CRAFT
                                 ? "Crafting requires the crafting table within 16 blocks."
                                 : scoped
-                                ? "Storage inspection requires the requested containers to be within 16 blocks; the "
-                                        + Registries.BLOCK
-                                                .getId(client.world
-                                                        .getBlockState(target)
-                                                        .getBlock())
-                                                .getPath()
-                                        + " at " + describe(target) + " is farther. Return near it before finishing."
-                                : "Storage requires containers within 16 blocks. Return near storage first.");
+                                        ? "Storage inspection requires the requested containers to be within 16"
+                                                + " blocks; the "
+                                                + Registries.BLOCK
+                                                        .getId(client.world
+                                                                .getBlockState(target)
+                                                                .getBlock())
+                                                        .getPath()
+                                                + " at " + describe(target)
+                                                + " is farther. Return near it before finishing."
+                                        : "Storage requires containers within 16 blocks. Return near storage first.");
             if (phase == Phase.APPROACH) {
                 if (opening.pending()) return null;
                 BlockHitResult hit = visibleHit();
@@ -302,7 +309,9 @@ final class FabricStorage {
                     open(hit);
                 } else if (now - phaseStarted > 3_000_000_000L && !pathing())
                     throw new IllegalStateException(
-                            mode == Mode.CRAFT ? "Could not reach the crafting table." : "Could not reach the container.");
+                            mode == Mode.CRAFT
+                                    ? "Could not reach the crafting table."
+                                    : "Could not reach the container.");
                 return null;
             }
             if (now - phaseStarted > 5_000_000_000L)
@@ -376,7 +385,8 @@ final class FabricStorage {
         String where = "The " + blockName(canonical(target)) + " at " + describe(canonical(target));
         withdrawTotal = withdrawRequested > 0 ? withdrawRequested : stored;
         if (withdrawTotal == 0) return new Result(false, where + " holds no " + name + ".");
-        if (stored == 0) return new Result(false, where + " holds no " + name + "; withdrew 0 of " + withdrawTotal + ".");
+        if (stored == 0)
+            return new Result(false, where + " holds no " + name + "; withdrew 0 of " + withdrawTotal + ".");
         // A deposit's destination is the container; a withdrawal's is the player, so the roles swap.
         transfer = new StorageTransfer(Math.min(withdrawTotal, stored), held, stored);
         return withdrawStack(stacks, size, now);
@@ -590,11 +600,7 @@ final class FabricStorage {
         else
             // Like eating, swap the table into the selected hotbar slot; the swapped item stays in the inventory.
             client.interactionManager.clickSlot(
-                    client.player.playerScreenHandler.syncId,
-                    slot,
-                    previous,
-                    SlotActionType.SWAP,
-                    client.player);
+                    client.player.playerScreenHandler.syncId, slot, previous, SlotActionType.SWAP, client.player);
         BlockPos below = spot.down();
         BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below).add(0, 0.5, 0), Direction.UP, below, false);
         agentOpening = true;
@@ -642,7 +648,9 @@ final class FabricStorage {
     }
 
     private String blockName(BlockPos pos) {
-        return Registries.BLOCK.getId(client.world.getBlockState(pos).getBlock()).toString();
+        return Registries.BLOCK
+                .getId(client.world.getBlockState(pos).getBlock())
+                .toString();
     }
 
     /** Fails before anything moves when a requested position names no inventory this session has opened. */

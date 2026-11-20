@@ -20,8 +20,7 @@ final class CraftingRecipes {
     static final List<String> PLANKS =
             WOODS.stream().map(wood -> id(wood + "_planks")).toList();
     /** {@code #minecraft:stone_tool_materials} and {@code #minecraft:stone_crafting_materials} in 1.21.1. */
-    static final List<String> STONE_MATERIALS =
-            List.of(id("cobblestone"), id("blackstone"), id("cobbled_deepslate"));
+    static final List<String> STONE_MATERIALS = List.of(id("cobblestone"), id("blackstone"), id("cobbled_deepslate"));
 
     /** Interchangeable items one craft consumes {@code count} of, in any mix; listed order is consumption preference. */
     record Ingredient(List<String> items, int count) {}
@@ -166,7 +165,8 @@ final class CraftingRecipes {
      */
     static List<Cell> layout(Recipe recipe, int gridWidth) {
         if (recipe.width() > gridWidth || recipe.height() > gridWidth)
-            throw new IllegalArgumentException(recipe.output() + " does not fit a " + gridWidth + "x" + gridWidth + " grid.");
+            throw new IllegalArgumentException(
+                    recipe.output() + " does not fit a " + gridWidth + "x" + gridWidth + " grid.");
         List<Cell> cells = new ArrayList<>();
         for (int row = 0; row < recipe.height(); row++) {
             String line = recipe.pattern().get(row);

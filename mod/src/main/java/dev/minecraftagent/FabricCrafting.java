@@ -140,7 +140,8 @@ final class FabricCrafting {
                     }
                     return null;
                 }
-                if (InventoryRoom.capacity(mainSlots(client.player.getInventory()), outputName, output.getMaxCount()) < result.getCount()) {
+                if (InventoryRoom.capacity(mainSlots(client.player.getInventory()), outputName, output.getMaxCount())
+                        < result.getCount()) {
                     returnGrid();
                     return new FabricStorage.Result(
                             false, CraftingRecipes.fullMessage(crafted(), requested, outputName));
@@ -193,8 +194,7 @@ final class FabricCrafting {
             ItemStack stack = slot.getStack();
             if (!stack.isEmpty())
                 sources.put(
-                        index,
-                        Map.entry(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount()));
+                        index, Map.entry(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount()));
         }
         return sources;
     }

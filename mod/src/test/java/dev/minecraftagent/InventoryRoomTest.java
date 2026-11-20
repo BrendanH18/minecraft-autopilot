@@ -77,7 +77,8 @@ class InventoryRoomTest {
         assertEquals(3, InventoryRoom.capacity(slots, LOG, 64));
         slots.set(4, InventoryRoom.Slot.EMPTY);
         assertEquals(3 + 64, InventoryRoom.capacity(slots, LOG, 64));
-        assertEquals(1, InventoryRoom.capacity(slots, "minecraft:wooden_pickaxe", 1), "only the empty slot fits a tool");
+        assertEquals(
+                1, InventoryRoom.capacity(slots, "minecraft:wooden_pickaxe", 1), "only the empty slot fits a tool");
         List<InventoryRoom.Slot> longer = new ArrayList<>(full());
         longer.add(InventoryRoom.Slot.EMPTY);
         assertEquals(0, InventoryRoom.capacity(longer, LOG, 64), "offhand and armour slots never count");

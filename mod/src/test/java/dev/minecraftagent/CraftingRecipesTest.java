@@ -99,9 +99,9 @@ class CraftingRecipesTest {
         assertEquals(
                 "Missing ingredients for 1 stone_pickaxe: 1 more of cobblestone/blackstone/cobbled_deepslate.",
                 CraftingRecipes.missingMessage(pickaxe, 1, plan.missing()));
-        CraftingRecipes.Plan torches = CraftingRecipes.plan(CraftingRecipes.get("torch"), 2, Map.of("minecraft:coal", 1));
-        assertEquals(
-                "1 more of coal/charcoal and 2 more stick", CraftingRecipes.describeMissing(torches.missing()));
+        CraftingRecipes.Plan torches =
+                CraftingRecipes.plan(CraftingRecipes.get("torch"), 2, Map.of("minecraft:coal", 1));
+        assertEquals("1 more of coal/charcoal and 2 more stick", CraftingRecipes.describeMissing(torches.missing()));
         assertEquals("Inventory full; crafted 4 of 8 stick.", CraftingRecipes.fullMessage(4, 8, STICK));
     }
 
@@ -163,7 +163,15 @@ class CraftingRecipesTest {
         sources.put(40, Map.entry(OAK, 2));
         // Oak is listed before birch, so both oak stacks are used up first, with no put-back for exhausted stacks.
         assertEquals(
-                List.of(click(36, 0), click(1, 1), click(40, 0), click(2, 1), click(3, 1), click(9, 0), click(4, 1), click(9, 0)),
+                List.of(
+                        click(36, 0),
+                        click(1, 1),
+                        click(40, 0),
+                        click(2, 1),
+                        click(3, 1),
+                        click(9, 0),
+                        click(4, 1),
+                        click(9, 0)),
                 CraftingRecipes.fill(table, CraftingRecipes.layout(table, 2), sources));
     }
 

@@ -580,8 +580,7 @@ public final class AgentController {
         // A deposit or withdrawal whose container opened names it on every terminal status: items may have moved before
         // a failure or cancel.
         String type = job.get("type").getAsString();
-        JsonObject container =
-                type.equals("deposit") || type.equals("withdraw") ? storage.transferContainer() : null;
+        JsonObject container = type.equals("deposit") || type.equals("withdraw") ? storage.transferContainer() : null;
         if (container != null) job.add("container", container);
     }
 

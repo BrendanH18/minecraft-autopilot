@@ -246,7 +246,10 @@ function botFixture(
       if (recipe.requiresTable) assert.equal(table?.name, 'crafting_table');
       else assert.equal(table, null);
       const cells = [...(recipe.inShape?.flat() ?? []), ...(recipe.ingredients ?? [])].filter((cell) => cell.id !== -1);
-      log.crafts.push({ table: table?.position.toString(), cells: cells.map((cell) => registry.items[cell.id].name) });
+      log.crafts.push({
+        table: table ? table.position.toString() : null,
+        cells: cells.map((cell) => registry.items[cell.id].name),
+      });
       for (const cell of cells) take(registry.items[cell.id].name, 1);
       assert.equal(give(registry.items[recipe.result.id].name, recipe.result.count), 0, 'result had room');
       onCraft?.();
