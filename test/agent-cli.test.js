@@ -187,6 +187,7 @@ test('CLI validates withdraw and craft commands and passes their criteria to the
   assert.match(help.stdout, /Craftable: oak_planks,[\s\S]*stone_shovel\./);
   assert.equal(notCraftable.error?.code, 1);
   assert.match(notCraftable.stderr, /Not craftable/);
+  assert.equal(tooMany.error?.code, 1);
   assert.match(tooMany.stderr, /from 1 to 64/);
   assert.equal(badCriterion.error?.code, 1);
   assert.match(badCriterion.stderr, /craftable item and count/);

@@ -41,6 +41,7 @@ const SAFE_FOOD = new Set([
 ]);
 const CONTAINERS = new Set(['chest', 'trapped_chest', 'barrel']);
 const AIR = new Set(['air', 'cave_air', 'void_air']);
+const USABLE_SUPPORT = new Set([...CONTAINERS, 'crafting_table', 'furnace', 'blast_furnace', 'smoker']);
 // Neighbours of the player's feet block tried for a crafting table, sides before corners.
 const BESIDE = [
   [1, 0],
@@ -1085,6 +1086,8 @@ export class MineflayerDriver {
       (cell) =>
         AIR.has(this.bot.blockAt(cell)?.name) &&
         this.bot.blockAt(cell.offset(0, -1, 0))?.boundingBox === 'block' &&
+        // Clicking a block with a screen opens it instead of placing the table on it.
+        !USABLE_SUPPORT.has(this.bot.blockAt(cell.offset(0, -1, 0))?.name) &&
         clear(cell),
     );
     if (!cell)
@@ -1125,54 +1128,90 @@ export class MineflayerDriver {
     };
   }
 
-  // One craft at a crafting table. mineflayer's own table crafting waits for the window without a limit and keeps
-  // clicking after a takeover, so this opens the table within the container timeout and places one ingredient per
-  // click, stopping before the next click once the signal aborts. Closing the table returns grid and cursor items.
+  // One craft at a crafting table, opened within the container timeout. Closing the table returns grid and cursor items.
   async craftAtTable(block, shaped, signal) {
     let timer;
+    let expired = false;
+    const opening = this.bot.openBlock(block);
+    // A table that opens after the timeout is closed at once, so no screen stays open behind the failed craft.
+    opening.then(
+      (late) => {
+        if (expired) this.bot.closeWindow(late);
+      },
+      () => {},
+    );
     const window = await Promise.race([
-      this.bot.openBlock(block),
+      opening,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('The crafting table did not open.')), this.containerTimeoutMs);
+        timer = setTimeout(() => {
+          expired = true;
+          reject(new Error('The crafting table did not open.'));
+        }, this.containerTimeoutMs);
       }),
     ]).finally(() => clearTimeout(timer));
     try {
       if (!window.type?.startsWith('minecraft:crafting')) throw new Error('The crafting table did not open.');
-      const cells = [];
-      (shaped.inShape ?? []).forEach((row, y) => {
-        row.forEach((cell, x) => {
-          if (cell.id !== -1) cells.push({ id: cell.id, slot: 1 + x + 3 * y });
-        });
-      });
-      (shaped.ingredients ?? []).forEach((cell, index) => {
-        cells.push({ id: cell.id, slot: 1 + index });
-      });
-      const putBack = async () => {
-        if (window.selectedItem)
-          await this.bot.putSelectedItemRange(window.inventoryStart, window.inventoryEnd, window, null);
-      };
-      for (const { id, slot } of cells) {
-        if (signal.aborted) break;
-        if (window.selectedItem?.type !== id) {
-          await putBack();
-          const source = window.findInventoryItem(id, null);
-          if (!source) throw new Error('An ingredient went missing while crafting.');
-          await this.bot.clickWindow(source.slot, 0, 0);
-        }
-        await this.bot.clickWindow(slot, 1, 0);
-      }
-      await putBack();
-      signal.throwIfAborted();
-      // The server fills the result slot; every cell holds one item, so taking it crafts exactly once.
-      for (let waited = 0; window.slots[0]?.type !== shaped.result.id; waited += 50) {
-        signal.throwIfAborted();
-        if (waited >= this.containerTimeoutMs) throw new Error('The crafting table produced no result.');
-        await delay(50);
-      }
-      await this.bot.putAway(0);
+      await this.craftInGrid(window, 3, shaped, signal);
     } finally {
       this.bot.closeWindow(window);
     }
+  }
+
+  // One craft in the player's own 2x2 grid. Nothing closes that grid, so items left in it are moved back by hand.
+  async craftInInventory(shaped, signal) {
+    const window = this.bot.inventory;
+    let crafted = false;
+    try {
+      await this.craftInGrid(window, 2, shaped, signal);
+      crafted = true;
+    } finally {
+      // A shift-click moves each leftover ingredient back without waiting on a reply that may never come.
+      if (!crafted)
+        for (let slot = 1; slot <= 4; slot++) if (window.slots[slot]) await this.bot.clickWindow(slot, 0, 1);
+    }
+  }
+
+  // Places one ingredient per click, checking cancellation before every click, then takes the result only once the
+  // server has put it in slot 0. mineflayer's own crafting predicts the result instead, which loses items when the
+  // server's reply lags, and keeps clicking after a takeover.
+  async craftInGrid(window, width, shaped, signal) {
+    const cells = [];
+    (shaped.inShape ?? []).forEach((row, y) => {
+      row.forEach((cell, x) => {
+        if (cell.id !== -1) cells.push({ id: cell.id, slot: 1 + x + width * y });
+      });
+    });
+    (shaped.ingredients ?? []).forEach((cell, index) => {
+      cells.push({ id: cell.id, slot: 1 + index });
+    });
+    const putBack = async () => {
+      if (window.selectedItem)
+        await this.bot.putSelectedItemRange(window.inventoryStart, window.inventoryEnd, window, null);
+    };
+    for (const { id, slot } of cells) {
+      if (signal.aborted) break;
+      if (window.selectedItem?.type !== id) {
+        await putBack();
+        if (signal.aborted) break;
+        const source = window.findInventoryItem(id, null);
+        if (!source) throw new Error('An ingredient went missing while crafting.');
+        await this.bot.clickWindow(source.slot, 0, 0);
+        if (signal.aborted) break;
+      }
+      await this.bot.clickWindow(slot, 1, 0);
+    }
+    await putBack();
+    signal.throwIfAborted();
+    // Every cell holds one item, so taking the result crafts exactly once.
+    for (let waited = 0; window.slots[0]?.type !== shaped.result.id; waited += 50) {
+      signal.throwIfAborted();
+      if (waited >= this.containerTimeoutMs) throw new Error('The crafting grid produced no result.');
+      await delay(50);
+    }
+    signal.throwIfAborted();
+    await this.bot.putAway(0);
+    // Each cell's single item was used up; mirror that locally as mineflayer's own crafting does.
+    for (let slot = 1; slot <= width * width; slot++) window.updateSlot(slot, null);
   }
 
   // Room for one craft's output in the main slots once that craft's ingredients are used up.
@@ -1240,7 +1279,7 @@ export class MineflayerDriver {
         throw new Error(`${placed}Inventory full; crafted ${made()} of ${action.count} ${name}.`);
       const shaped = this.craftingRecipe(recipe, once.consume, !!table);
       await this.abortable(
-        () => (table ? this.craftAtTable(table, shaped, signal) : this.bot.craft(shaped, 1, null)),
+        () => (table ? this.craftAtTable(table, shaped, signal) : this.craftInInventory(shaped, signal)),
         signal,
       ).catch((error) => {
         if (signal.aborted) throw error;

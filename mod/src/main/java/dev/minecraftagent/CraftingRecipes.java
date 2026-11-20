@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * The bounded crafting allowlist, mirroring {@code src/recipes.js}, plus each vanilla 1.21.1 recipe's shape so the grid
@@ -16,9 +17,10 @@ final class CraftingRecipes {
 
     static final List<String> WOODS =
             List.of("oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cherry", "mangrove");
-    /** Every plank type the shared {@code #minecraft:planks} recipes accept here. */
-    static final List<String> PLANKS =
-            WOODS.stream().map(wood -> id(wood + "_planks")).toList();
+    /** {@code #minecraft:planks} in 1.21.1: the overworld woods plus bamboo, crimson, and warped. */
+    static final List<String> PLANKS = Stream.concat(WOODS.stream(), Stream.of("bamboo", "crimson", "warped"))
+            .map(wood -> id(wood + "_planks"))
+            .toList();
     /** {@code #minecraft:stone_tool_materials} and {@code #minecraft:stone_crafting_materials} in 1.21.1. */
     static final List<String> STONE_MATERIALS = List.of(id("cobblestone"), id("blackstone"), id("cobbled_deepslate"));
 

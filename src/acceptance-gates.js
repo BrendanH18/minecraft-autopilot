@@ -206,6 +206,7 @@ export const ACCEPTANCE_GATES = deep([
     prerequisites: [BOT, 'A chest within 16 blocks holding logs and cobblestone, and a local model.'],
     steps: [
       'Run `npm run acceptance:bot -- --accept-eula --scenario withdraw --scenario craft-bootstrap`.',
+      'Withdraw with the count omitted, reading the chest and inventory on the server before and after.',
       'Repeat the Fabric withdraw and craft failure cases with the bot.',
       'Run a real local model with `--verify-withdraw` and `--verify-craft`.',
     ],

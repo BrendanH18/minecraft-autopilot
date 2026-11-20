@@ -6,7 +6,7 @@ const WOODS = ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak', 'cherry
 const id = (name) => `minecraft:${name}`;
 
 /** Every plank type the shared `#minecraft:planks` recipes accept here. */
-export const PLANKS = Object.freeze(WOODS.map((wood) => id(`${wood}_planks`)));
+export const PLANKS = Object.freeze([...WOODS, 'bamboo', 'crimson', 'warped'].map((wood) => id(`${wood}_planks`)));
 /** `#minecraft:stone_tool_materials` and `#minecraft:stone_crafting_materials` in 1.21.1. */
 export const STONE_MATERIALS = Object.freeze(['cobblestone', 'blackstone', 'cobbled_deepslate'].map(id));
 const STICK = Object.freeze({ items: [id('stick')], count: 2 });
