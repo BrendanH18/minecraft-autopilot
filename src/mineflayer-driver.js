@@ -1021,7 +1021,9 @@ export class MineflayerDriver {
           signal.throwIfAborted();
           const room = windowRoom(window, type, stackSize);
           if (room === 0) throw new Error('inventory full');
-          const batch = Math.min(stackSize, goal - moved, room);
+          // At most the next source slot, so a takeover between calls cannot let one call sweep further stacks.
+          const next = window.slots.slice(0, window.inventoryStart).find((item) => item?.type === type);
+          const batch = Math.min(stackSize, goal - moved, room, next?.count ?? stackSize);
           await this.bot.transfer({
             window,
             itemType: type,
@@ -1133,16 +1135,20 @@ export class MineflayerDriver {
     let timer;
     let onOpen;
     const window = await new Promise((resolve, reject) => {
-      // Our own listener, removed on timeout: mineflayer's openBlock would accept a later action's window instead.
+      // Our own listener, removed on every exit: mineflayer's openBlock would accept a later action's window instead.
       onOpen = resolve;
       this.bot.once('windowOpen', onOpen);
       timer = setTimeout(() => {
-        this.bot.removeListener('windowOpen', onOpen);
         this.closeLateTable();
         reject(new Error('The crafting table did not open.'));
       }, this.containerTimeoutMs);
-      this.bot.activateBlock(block);
-    }).finally(() => clearTimeout(timer));
+      Promise.resolve()
+        .then(() => this.bot.activateBlock(block))
+        .catch(reject);
+    }).finally(() => {
+      clearTimeout(timer);
+      this.bot.removeListener('windowOpen', onOpen);
+    });
     try {
       if (!window.type?.startsWith('minecraft:crafting')) throw new Error('The crafting table did not open.');
       await this.craftInGrid(window, 3, shaped, signal);
@@ -1178,7 +1184,13 @@ export class MineflayerDriver {
 
   // Waits for a native reply for at most the container timeout, ignoring its failure.
   bounded(promise) {
-    return Promise.race([promise, delay(this.containerTimeoutMs)]).catch(() => {});
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(resolve, this.containerTimeoutMs);
+    });
+    return Promise.race([promise, timeout])
+      .catch(() => {})
+      .finally(() => clearTimeout(timer));
   }
 
   // Places one ingredient per click, checking cancellation before every click, then takes the result only once the
@@ -1211,9 +1223,11 @@ export class MineflayerDriver {
         }
         await this.bot.clickWindow(slot, 1, 0);
       }
+      // On the normal path the rest of the source stack must really go back before the result is taken.
+      await putBack();
     } finally {
-      // Whatever ended the loop, the rest of the source stack goes back from the cursor.
-      if (this.connected) await this.bounded(putBack());
+      // Whatever else ended the fill, try to return the cursor without masking that error.
+      if (window.selectedItem && this.connected) await this.bounded(putBack());
     }
     signal.throwIfAborted();
     // Every cell holds one item, so taking the result crafts exactly once.
@@ -1223,6 +1237,8 @@ export class MineflayerDriver {
       await delay(50);
     }
     signal.throwIfAborted();
+    // A left-click on the result with something else on the cursor is ignored, and putAway would then wait forever.
+    if (window.selectedItem) throw new Error('Could not return the remaining ingredients from the cursor.');
     await this.bot.putAway(0);
     // Each cell's single item was used up; mirror that locally as mineflayer's own crafting does.
     for (let slot = 1; slot <= width * width; slot++) window.updateSlot(slot, null);
