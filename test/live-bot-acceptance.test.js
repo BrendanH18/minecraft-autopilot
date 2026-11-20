@@ -215,7 +215,8 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
   assert.ok(
     plan.serverProperties.includes('online-mode=false') &&
       plan.serverProperties.includes('server-ip=127.0.0.1') &&
-      plan.serverProperties.includes('spawn-protection=0'),
+      plan.serverProperties.includes('spawn-protection=0') &&
+      plan.serverProperties.includes('max-tick-time=-1'),
   );
   assert.match(
     plan.botCommand,

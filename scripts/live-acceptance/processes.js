@@ -87,6 +87,9 @@ export function serverProperties({ port, seed }) {
     'max-players=4',
     'view-distance=8',
     'simulation-distance=6',
+    // A swapping or overloaded host can stall one tick past the 60 s watchdog, which kills the server mid-run;
+    // no check depends on tick timing, so the watchdog is off.
+    'max-tick-time=-1',
     'enable-rcon=false',
     'enable-query=false',
     'motd=minecraft-agent live acceptance',
