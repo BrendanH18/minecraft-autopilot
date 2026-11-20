@@ -1,8 +1,47 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { RECIPES, craftsFor, describeMissing, planCraft } from './recipes.js';
 
 export const demoScenarios = ['default', 'hungry', 'hostile', 'stocked', 'full'];
 const MAIN_SLOTS = 36;
 const STACK_SIZE = 64;
+const short = (name) => name.replace('minecraft:', '');
+// Tools do not stack; every other demo item stacks to 64.
+const stackSize = (name) => (/_(?:pickaxe|axe|shovel)$/.test(name) ? 1 : STACK_SIZE);
+/** Room for `name` in the 36 main slots: empty slots plus partial stacks of it. */
+function roomFor(inventory, name) {
+  const used = inventory.filter((stack) => stack.count > 0);
+  const partial = used
+    .filter((stack) => stack.name === name)
+    .reduce((sum, stack) => sum + Math.max(0, stackSize(name) - stack.count), 0);
+  return (MAIN_SLOTS - used.length) * stackSize(name) + partial;
+}
+/** Adds up to `count` of `name`, partial stacks first, then empty main slots; returns how many fit. */
+function addItems(inventory, name, count) {
+  let remaining = count;
+  for (const stack of inventory.filter((stack) => stack.name === name && stack.count > 0)) {
+    const added = Math.min(remaining, Math.max(0, stackSize(name) - stack.count));
+    stack.count += added;
+    remaining -= added;
+  }
+  while (remaining > 0) {
+    const used = new Set(inventory.filter((stack) => stack.count > 0).map((stack) => stack.slot));
+    const slot = Array.from({ length: MAIN_SLOTS }, (_, index) => index).find((index) => !used.has(index));
+    if (slot === undefined) break;
+    const added = Math.min(remaining, stackSize(name));
+    inventory.push({ slot, name, count: added });
+    remaining -= added;
+  }
+  return count - remaining;
+}
+/** Removes `count` of `name` from the inventory's stacks in slot order. */
+function removeItems(inventory, name, count) {
+  let remaining = count;
+  for (const stack of inventory.filter((stack) => stack.name === name)) {
+    const taken = Math.min(stack.count, remaining);
+    stack.count -= taken;
+    remaining -= taken;
+  }
+}
 const FULL_STACKS = [
   ['minecraft:cobblestone', 20],
   ['minecraft:dirt', 10],
@@ -26,6 +65,8 @@ export class DemoDriver {
     this.inventory = [{ slot: 0, name: 'minecraft:bread', count: 8 }];
     this.home = null;
     this.chest = { name: 'minecraft:chest', x: 3, y: 64, z: 3, items: null };
+    // Set once a held crafting table is placed for a table recipe.
+    this.craftingTable = null;
     this.threats = [];
     this.stopCount = 0;
     if (scenario === 'hungry') Object.assign(this.player, { health: 10, hunger: 4 });
@@ -59,7 +100,10 @@ export class DemoDriver {
       home: this.home,
       threats,
       survival: 'Simulation only',
-      blocks: [{ name: 'minecraft:oak_log', x: 5, y: 64, z: 5 }],
+      blocks: [
+        { name: 'minecraft:oak_log', x: 5, y: 64, z: 5 },
+        ...(this.craftingTable ? [{ name: 'minecraft:crafting_table', ...this.craftingTable }] : []),
+      ],
       containers: [this.chest],
     });
   }
@@ -98,23 +142,9 @@ export class DemoDriver {
       await delay(200, undefined, { signal });
       // Like the server bot: partial stacks of the target fill first, then empty main slots; what was collected stays.
       this.inventory = this.inventory.filter((stack) => stack.count > 0);
-      let remaining = action.count;
-      for (const stack of this.inventory.filter((stack) => stack.name === action.block)) {
-        const added = Math.min(remaining, Math.max(0, STACK_SIZE - stack.count));
-        stack.count += added;
-        remaining -= added;
-      }
-      while (remaining > 0) {
-        const used = new Set(this.inventory.map((stack) => stack.slot));
-        const slot = Array.from({ length: MAIN_SLOTS }, (_, index) => index).find((index) => !used.has(index));
-        if (slot === undefined)
-          throw new Error(
-            `Inventory full; collected ${action.count - remaining} of ${action.count} ${action.block.replace('minecraft:', '')}.`,
-          );
-        const added = Math.min(remaining, STACK_SIZE);
-        this.inventory.push({ slot, name: action.block, count: added });
-        remaining -= added;
-      }
+      const added = addItems(this.inventory, action.block, action.count);
+      if (added < action.count)
+        throw new Error(`Inventory full; collected ${added} of ${action.count} ${short(action.block)}.`);
       return { message: `Simulated collecting ${action.count} ${action.block}.` };
     }
     if (action.type === 'deposit') {
@@ -142,6 +172,8 @@ export class DemoDriver {
       const { name, x, y, z } = this.chest;
       return { message: `Simulated depositing ${amount} ${action.item}.`, container: { name, x, y, z, before } };
     }
+    if (action.type === 'withdraw') return this.withdraw(action, signal);
+    if (action.type === 'craft') return this.craft(action, signal, onProgress);
     const target = action.type === 'home' ? this.home : { x: action.x, y: action.y, z: action.z };
     if (!target) throw new Error('No home saved.');
     const start = { ...this.player.position };
@@ -152,6 +184,82 @@ export class DemoDriver {
       onProgress(`Moving: ${step * 20}%`);
     }
     return { message: 'Reached demo destination.' };
+  }
+  // The demo has one chest: it is a candidate while unopened or while its last-seen contents include the item.
+  async withdraw(action, signal) {
+    const name = short(action.item);
+    const known = this.chest.items;
+    const at = this.player.position;
+    const inRange = Math.hypot(this.chest.x - at.x, this.chest.y - at.y, this.chest.z - at.z) <= 16;
+    if (!inRange || (known && !known.some((item) => item.name === action.item && item.count > 0)))
+      throw new Error(
+        `No chest or barrel within 16 blocks is known to hold ${name}, and none nearby is unopened. Move near storage that holds it first.`,
+      );
+    await delay(200, undefined, { signal });
+    const items = this.chest.items || [];
+    const before = structuredClone(items);
+    this.chest.firstSeen ??= structuredClone(items);
+    const stored = items.find((item) => item.name === action.item)?.count || 0;
+    const requested = action.count ?? stored;
+    this.inventory = this.inventory.filter((stack) => stack.count > 0);
+    const withdrawn = addItems(this.inventory, action.item, Math.min(requested, stored));
+    const left = stored - withdrawn;
+    this.chest.items = items
+      .map((item) => (item.name === action.item ? { ...item, count: left } : item))
+      .filter((item) => item.count > 0);
+    this.chest.observedAt = Date.now();
+    const { x, y, z } = this.chest;
+    const container = { name: this.chest.name, x, y, z, before };
+    const where = `demo chest at ${x} ${y} ${z}`;
+    const fail = (message) => {
+      throw Object.assign(new Error(message), { container });
+    };
+    if (withdrawn < Math.min(requested, stored)) fail(`Inventory full; withdrew ${withdrawn} of ${requested} ${name}.`);
+    if (stored === 0)
+      fail(
+        action.count === undefined
+          ? `The ${where} holds no ${name}.`
+          : `The ${where} holds no ${name}; withdrew 0 of ${requested} ${name}.`,
+      );
+    if (stored < requested)
+      fail(`The ${where} held only ${stored} ${name}; withdrew ${withdrawn} of ${requested} ${name}.`);
+    return { message: `Simulated withdrawing ${withdrawn} ${name} from the ${where}.`, container };
+  }
+  async craft(action, signal, onProgress) {
+    const recipe = RECIPES[action.item];
+    const name = short(action.item);
+    if (!recipe) throw new Error(`${name} is not a supported crafting output.`);
+    const crafts = craftsFor(recipe, action.count);
+    this.inventory = this.inventory.filter((stack) => stack.count > 0);
+    const plan = planCraft(recipe, crafts, this.inventory);
+    if (!plan.ok) throw new Error(`Missing ingredients for ${action.count} ${name}: ${describeMissing(plan.missing)}.`);
+    let placed = '';
+    if (recipe.table) {
+      const { x, y, z } = this.player.position;
+      const table = this.craftingTable;
+      if (!table || Math.hypot(table.x - x, table.y - y, table.z - z) > 16) {
+        if (!this.inventory.some((stack) => stack.name === 'minecraft:crafting_table'))
+          throw new Error(`Crafting ${name} needs a crafting table; none is within 16 blocks and none is held.`);
+        removeItems(this.inventory, 'minecraft:crafting_table', 1);
+        this.inventory = this.inventory.filter((stack) => stack.count > 0);
+        this.craftingTable = { x: Math.floor(x) + 1, y: Math.floor(y), z: Math.floor(z) };
+        placed = `Placed a crafting table at ${this.craftingTable.x} ${this.craftingTable.y} ${this.craftingTable.z}. `;
+        onProgress(placed.trim());
+      }
+    }
+    let made = 0;
+    for (let done = 0; done < crafts; done++) {
+      // Cancellation, takeover, expiry, and stop land between crafts; completed crafts stay.
+      await delay(50, undefined, { signal });
+      const once = planCraft(recipe, 1, this.inventory);
+      const after = structuredClone(this.inventory);
+      for (const { name: item, count } of once.consume) removeItems(after, item, count);
+      if (roomFor(after, recipe.output) < recipe.yield)
+        throw new Error(`${placed}Inventory full; crafted ${made} of ${action.count} ${name}.`);
+      this.inventory = after.filter((stack) => stack.count > 0);
+      made += addItems(this.inventory, recipe.output, recipe.yield);
+    }
+    return { message: `${placed}Simulated crafting ${made} ${name}.` };
   }
   stop() {
     this.stopCount++;

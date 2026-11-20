@@ -150,3 +150,49 @@ test('CLI exposes final-state criteria and returns exit 2 at a step limit', { ti
   assert.match(invalid.stderr, /requires returnHome/);
   assert.equal(harness.observe().mode, 'manual');
 });
+
+test('CLI validates withdraw and craft commands and passes their criteria to the planner', {
+  timeout: 60_000,
+}, async (t) => {
+  const directory = await testDirectory(t, 'craft-cli-');
+  const discoveryPath = join(directory, 'bridge.json');
+  const bridge = await startBridge(new Harness(new DemoDriver()), { discoveryPath });
+  t.after(() => bridge.close());
+  const run = (...args) =>
+    new Promise((resolve) =>
+      execFile(
+        process.execPath,
+        [join(projectRoot, 'src/cli.js'), '--bridge', discoveryPath, ...args],
+        { timeout: 30_000 },
+        (error, stdout, stderr) => resolve({ error, stdout, stderr }),
+      ),
+    );
+  const [help, notCraftable, tooMany, badCriterion, dryRun] = await Promise.all([
+    run('craft', '--help'),
+    run('craft', 'diamond_pickaxe', '1'),
+    run('craft', 'stick', '65'),
+    run('agent', 'Craft', '--model', 'mock', '--verify-craft', 'oak_log:1'),
+    run(
+      'agent',
+      'Get stone and craft a pickaxe',
+      '--model',
+      'mock',
+      '--dry-run',
+      '--verify-withdraw',
+      'cobblestone:3',
+      '--verify-craft',
+      'stone_pickaxe:1',
+    ),
+  ]);
+  assert.match(help.stdout, /Craftable: oak_planks,[\s\S]*stone_shovel\./);
+  assert.equal(notCraftable.error?.code, 1);
+  assert.match(notCraftable.stderr, /Not craftable/);
+  assert.equal(tooMany.error?.code, 1);
+  assert.match(tooMany.stderr, /from 1 to 64/);
+  assert.equal(badCriterion.error?.code, 1);
+  assert.match(badCriterion.stderr, /craftable item and count/);
+  assert.equal(dryRun.error, null, dryRun.stderr);
+  const { criteria } = JSON.parse(dryRun.stdout);
+  assert.deepEqual(criteria.withdraw, { item: 'minecraft:cobblestone', count: 3, initialCount: 0 });
+  assert.deepEqual(criteria.craft, { item: 'minecraft:stone_pickaxe', count: 1, initialCount: 0 });
+});

@@ -42,7 +42,7 @@ using `mc-agent run`.
 | 25 | `set-goto-height FILE Y` | Replace Y in every goto destination (−64 through 320, decimals allowed). Other actions remain unchanged. |
 
 Action types are `goto`, `home`, `set_home`, `collect`, `eat`,
-`inspect_storage`, `deposit`, and `wait`. Every transformed result is validated
+`inspect_storage`, `deposit`, `withdraw`, `craft`, and `wait`. Every transformed result is validated
 again against the action protocol and the 1–100 action limit. Splitting,
 merging, repetition, and checkpoint insertion can change backend behavior,
 including per-action collection return or timeout behavior; equal requested

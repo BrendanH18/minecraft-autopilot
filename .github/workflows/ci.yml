@@ -88,9 +88,12 @@ jobs:
           node scripts/gradle.js clean
           npm run build:mod
           npm run verify:mod
-      # Keep the build for a week rather than GitHub's 90-day default; every PR and
-      # push to main uploads one, and in this private repo they count against storage.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # Pull requests still build and verify the bundle but do not upload it, so a
+      # full artifact quota cannot fail a PR. Other runs keep it for a week rather
+      # than GitHub's 90-day default, since uploads count against this private
+      # repo's storage.
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: minecraft-agent-installation
           path: dist/

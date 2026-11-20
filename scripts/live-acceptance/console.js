@@ -46,6 +46,8 @@ export const REPLIES = {
   list: /^There are \d+ of a max of \d+ players online/,
   gamemode: /^(?:Set .+ game mode to|Set own game mode to)/,
   'save-all': /^Saved the game/,
+  // Only the test form (`execute if block ...` without `run`), whose reply is the test outcome.
+  execute: /^Test (?:passed|failed)/,
 };
 
 export class CommandError extends Error {}

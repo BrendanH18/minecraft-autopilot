@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { normalizeAction, positionSchema } from './protocol.js';
 import { freeSlotsView, MAIN_SLOTS } from './cli-views.js';
+import { CRAFTABLE_ITEMS, MAX_CRAFT_COUNT, RECIPES } from './recipes.js';
 
 export const COLLECTIBLE_BLOCKS = Object.freeze([
   'oak_log',
@@ -44,6 +45,14 @@ const criteriaSchema = z
       .object({ item: z.string(), count: z.number().int().min(1).max(2304) })
       .strict()
       .optional(),
+    withdraw: z
+      .object({ item: z.string(), count: z.number().int().min(1).max(2304) })
+      .strict()
+      .optional(),
+    craft: z
+      .object({ item: z.string(), count: z.number().int().min(1).max(MAX_CRAFT_COUNT) })
+      .strict()
+      .optional(),
     returnHome: z.boolean().optional(),
     homeRadius: z.number().finite().min(0).max(64).optional(),
     minHealth: z.number().finite().min(1).max(20).optional(),
@@ -79,6 +88,23 @@ export function parseDepositCriterion(value) {
   return { item, count };
 }
 
+export function parseWithdrawCriterion(value) {
+  const match = /^(?:minecraft:)?([a-z0-9_]+):([0-9]+)$/.exec(value);
+  if (!match) throw new Error('Use an item and count, for example oak_log:8.');
+  const { item, count } = normalizeAction({ type: 'withdraw', item: match[1], count: Number(match[2]) });
+  return { item, count };
+}
+
+export function parseCraftCriterion(value) {
+  const match = /^(?:minecraft:)?([a-z0-9_]+):([0-9]+)$/.exec(value);
+  if (!match || !RECIPES[`minecraft:${match[1]}`])
+    throw new Error(
+      `Use a craftable item and count, for example stone_pickaxe:1. Craftable: ${CRAFTABLE_ITEMS.join(', ')}.`,
+    );
+  const { item, count } = normalizeAction({ type: 'craft', item: match[1], count: Number(match[2]) });
+  return { item, count };
+}
+
 export function parseInventoryCriterion(value) {
   return parseDepositCriterion(value);
 }
@@ -101,6 +127,10 @@ export function parseDestinationCriterion(value) {
 
 /**
  * Checks explicit criteria only; free-form goal text is never parsed as a contract.
+ * Collect, withdraw, and craft each require a held gain: the final held count minus the count held when the task began,
+ * whatever produced it. Items a later craft consumes (planks into sticks) no longer count. When deposit names the same item
+ * as collect or craft, items stored during the task count toward that gain too. One item may be the target of only one of
+ * collect, withdraw, and craft, and withdraw cannot share its item with deposit, because each gain would then be ambiguous.
  * With scopedStorage, deposit criteria count only containers recorded with trackDeposit, each against its contents just
  * before the task's first deposit into it, so unrelated storage opened earlier in the session is neither counted nor reopened.
  */
@@ -110,6 +140,8 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
   if (
     !parsed.collect &&
     !parsed.deposit &&
+    !parsed.withdraw &&
+    !parsed.craft &&
     !parsed.returnHome &&
     parsed.minHealth === undefined &&
     parsed.minHunger === undefined &&
@@ -140,13 +172,34 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
   if (parsed.maxHealthLoss !== undefined && !Number.isFinite(initialHealth))
     throw new Error('The starting health is unavailable, so --verify-max-health-loss cannot be checked.');
   const collect = parsed.collect ? parseCollectionCriterion(`${parsed.collect.block}:${parsed.collect.count}`) : null;
-  const count = (state) =>
+  const heldCount = (state, name) =>
     inventory
       .parse(state.inventory)
-      .filter((item) => item.name === collect.block)
+      .filter((item) => item.name === name)
       .reduce((total, item) => total + item.count, 0);
+  const count = (state) => heldCount(state, collect.block);
   const initialCount = collect ? count(initialState) : null;
   const deposit = parsed.deposit ? parseDepositCriterion(`${parsed.deposit.item}:${parsed.deposit.count}`) : null;
+  const withdraw = parsed.withdraw ? parseWithdrawCriterion(`${parsed.withdraw.item}:${parsed.withdraw.count}`) : null;
+  const craft = parsed.craft ? parseCraftCriterion(`${parsed.craft.item}:${parsed.craft.count}`) : null;
+  const gains = [
+    collect && ['collect', collect.block],
+    withdraw && ['withdraw', withdraw.item],
+    craft && ['craft', craft.item],
+  ].filter(Boolean);
+  for (const [index, [name, item]] of gains.entries()) {
+    const other = gains.slice(index + 1).find(([, otherItem]) => otherItem === item);
+    if (other)
+      throw new Error(
+        `The ${name} and ${other[0]} criteria both count held ${item}, so neither gain could be verified. Choose one.`,
+      );
+  }
+  if (withdraw && deposit?.item === withdraw.item)
+    throw new Error(
+      `The withdraw and deposit criteria both name ${withdraw.item}; moving it out of and into storage cannot be verified together.`,
+    );
+  const withdrawInitial = withdraw ? heldCount(initialState, withdraw.item) : null;
+  const craftInitial = craft ? heldCount(initialState, craft.item) : null;
   let initialStored;
   const initialSources = new Set();
   const discoveredSources = new Map();
@@ -195,6 +248,8 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
     description: {
       collect: collect ? { ...collect, initialCount } : null,
       deposit,
+      ...(withdraw && { withdraw: { ...withdraw, initialCount: withdrawInitial } }),
+      ...(craft && { craft: { ...craft, initialCount: craftInitial } }),
       home: home || null,
       ...(home && { homeRadius: parsed.homeRadius ?? 2 }),
       ...(parsed.minHealth !== undefined && { minHealth: parsed.minHealth }),
@@ -296,6 +351,32 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
             currentCount !== null &&
             storedAdditional !== null &&
             currentCount - initialCount + storedAdditional >= collect.count,
+        };
+      }
+      if (withdraw) {
+        const currentCount = samePlayer ? heldCount(state, withdraw.item) : null;
+        checks.withdraw = {
+          item: withdraw.item,
+          initialCount: withdrawInitial,
+          currentCount,
+          requiredAdditional: withdraw.count,
+          met: currentCount !== null && currentCount - withdrawInitial >= withdraw.count,
+        };
+      }
+      if (craft) {
+        const currentCount = samePlayer ? heldCount(state, craft.item) : null;
+        // Like collect: a crafted item the task then stored still counts once.
+        const storedAdditional = deposit?.item === craft.item ? stored : 0;
+        checks.craft = {
+          item: craft.item,
+          initialCount: craftInitial,
+          currentCount,
+          requiredAdditional: craft.count,
+          ...(deposit?.item === craft.item && { storedAdditional }),
+          met:
+            currentCount !== null &&
+            storedAdditional !== null &&
+            currentCount - craftInitial + storedAdditional >= craft.count,
         };
       }
       if (home) {

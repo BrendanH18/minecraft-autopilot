@@ -7,6 +7,8 @@ import {
   parseInventoryCriterion,
   parseDestinationCriterion,
   parseMaxInventoryCriterion,
+  parseWithdrawCriterion,
+  parseCraftCriterion,
 } from '../src/objective.js';
 
 function state() {
@@ -462,5 +464,108 @@ test('a replacement chest at a tracked coordinate gets its own baseline from its
   assert.throws(
     () => objective.trackDeposit({ x: 1, y: 64, z: 0 }, current),
     'a report without its prior contents is rejected',
+  );
+});
+
+test('withdraw and craft criteria parse like deposit, and craft accepts only allowlisted outputs', () => {
+  assert.deepEqual(parseWithdrawCriterion('minecraft:cobblestone:100'), { item: 'minecraft:cobblestone', count: 100 });
+  assert.throws(() => parseWithdrawCriterion('oak_log'), /item and count/);
+  assert.throws(() => parseWithdrawCriterion('oak_log:0'));
+  assert.throws(() => parseWithdrawCriterion('oak_log:2305'));
+  assert.deepEqual(parseCraftCriterion('stone_pickaxe:1'), { item: 'minecraft:stone_pickaxe', count: 1 });
+  assert.deepEqual(parseCraftCriterion('minecraft:oak_planks:8'), { item: 'minecraft:oak_planks', count: 8 });
+  for (const value of ['diamond_pickaxe:1', 'oak_log:4', 'stick', 'Stick:4'])
+    assert.throws(() => parseCraftCriterion(value), /craftable item and count.*stone_pickaxe/);
+  assert.throws(() => parseCraftCriterion('stick:65'));
+  assert.throws(() => createObjective({ craft: { item: 'iron_pickaxe', count: 1 } }, state()), /craftable/);
+});
+
+test('withdraw and craft criteria require a held gain over the starting inventory', () => {
+  const initial = state();
+  initial.inventory.push({ name: 'minecraft:stick', count: 3 });
+  const objective = createObjective(
+    { withdraw: { item: 'cobblestone', count: 3 }, craft: { item: 'stick', count: 4 } },
+    initial,
+  );
+  assert.deepEqual(objective.description.withdraw, { item: 'minecraft:cobblestone', count: 3, initialCount: 0 });
+  assert.deepEqual(objective.description.craft, { item: 'minecraft:stick', count: 4, initialCount: 3 });
+  const current = state();
+  current.inventory.push(
+    { name: 'minecraft:cobblestone', count: 2 },
+    { name: 'minecraft:cobblestone', count: 1 },
+    { name: 'minecraft:stick', count: 6 },
+  );
+  const result = objective.check(current);
+  assert.equal(result.checks.withdraw.met, true);
+  assert.deepEqual(result.checks.craft, {
+    item: 'minecraft:stick',
+    initialCount: 3,
+    currentCount: 6,
+    requiredAdditional: 4,
+    met: false,
+  });
+  assert.equal(result.met, false, 'six held sticks are only three more than at the start');
+  current.inventory.push({ name: 'minecraft:stick', count: 1 });
+  assert.equal(objective.check(current).met, true);
+  current.player.uuid = 'other';
+  assert.equal(objective.check(current).met, false);
+});
+
+test('crafted items a later craft consumes no longer count toward a craft criterion', () => {
+  const objective = createObjective({ craft: { item: 'oak_planks', count: 8 } }, state());
+  const current = state();
+  // Two crafts made eight planks, then two sticks recipes consumed four of them.
+  current.inventory = [
+    { name: 'minecraft:oak_log', count: 8 },
+    { name: 'minecraft:oak_planks', count: 4 },
+    { name: 'minecraft:stick', count: 8 },
+  ];
+  assert.equal(objective.check(current).checks.craft.currentCount, 4);
+  assert.equal(objective.check(current).met, false);
+});
+
+test('a crafted item that is then stored still counts once toward a craft criterion', () => {
+  const chest = (count) => ({ x: 1, y: 64, z: 0, items: [{ name: 'minecraft:chest', count }] });
+  const initial = { ...state(), inventory: [{ name: 'minecraft:chest', count: 1 }], containers: [chest(0)] };
+  const objective = createObjective(
+    { craft: { item: 'chest', count: 2 }, deposit: { item: 'chest', count: 3 } },
+    initial,
+  );
+  const current = { ...state(), inventory: [], containers: [chest(2)] };
+  assert.equal(objective.check(current).checks.craft.met, false, 'storing the one held at the start is not crafting');
+  current.containers = [chest(3)];
+  assert.equal(objective.check(current).checks.craft.storedAdditional, 3);
+  assert.equal(objective.check(current).met, true);
+});
+
+test('one item cannot be the target of two gain criteria, or of both withdraw and deposit', () => {
+  const withContainers = { ...state(), containers: [] };
+  assert.throws(
+    () =>
+      createObjective(
+        { collect: { block: 'cobblestone', count: 3 }, withdraw: { item: 'cobblestone', count: 3 } },
+        withContainers,
+      ),
+    /collect and withdraw criteria both count held minecraft:cobblestone/,
+  );
+  assert.throws(
+    () =>
+      createObjective({ withdraw: { item: 'stick', count: 1 }, craft: { item: 'stick', count: 4 } }, withContainers),
+    /withdraw and craft criteria/,
+  );
+  assert.throws(
+    () =>
+      createObjective(
+        { withdraw: { item: 'oak_log', count: 1 }, deposit: { item: 'minecraft:oak_log', count: 1 } },
+        withContainers,
+      ),
+    /withdraw and deposit criteria both name minecraft:oak_log/,
+  );
+  // Different items combine freely: withdraw stone to craft a pickaxe.
+  assert.ok(
+    createObjective(
+      { withdraw: { item: 'cobblestone', count: 3 }, craft: { item: 'stone_pickaxe', count: 1 } },
+      withContainers,
+    ),
   );
 });

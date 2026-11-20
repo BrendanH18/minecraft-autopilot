@@ -1,6 +1,8 @@
+import { actionSchema } from './protocol.js';
+import { RECIPES, craftsFor } from './recipes.js';
 import { parseRoutine, loadRoutine } from './routine.js';
 import { ledgerNumber } from './ledger-tools.js';
-const types = ['goto', 'home', 'set_home', 'collect', 'eat', 'inspect_storage', 'deposit', 'wait'];
+const types = actionSchema.options.map((schema) => schema.shape.type.value);
 const sum = (a) => a.reduce((n, v) => n + v, 0);
 const histogram = (a) => Object.fromEntries([...new Set(a)].map((v) => [v, a.filter((x) => x === v).length]));
 const metricSpecs = [
@@ -128,11 +130,14 @@ export function routineMetricsReport(input, command, args = []) {
         if (!name) continue;
         if (!balances.has(name)) balances.set(name, 0);
         const old = balances.get(name);
-        if (a.type === 'deposit' && a.count === undefined) {
+        if ((a.type === 'deposit' || a.type === 'withdraw') && a.count === undefined) {
           balances.set(name, null);
           peaks.set(name, null);
         } else if (old !== null) {
-          const v = old + (a.type === 'collect' ? a.count : -a.count);
+          // Collection, withdrawal, and crafting add the named item; a deposit removes it.
+          // A craft makes whole recipes, so it can add more than its requested minimum.
+          const added = a.type === 'craft' ? craftsFor(RECIPES[a.item], a.count) * RECIPES[a.item].yield : a.count;
+          const v = old + (a.type === 'deposit' ? -a.count : added);
           balances.set(name, v);
           if (peaks.get(name) !== null) peaks.set(name, Math.max(peaks.get(name) ?? 0, v));
         }

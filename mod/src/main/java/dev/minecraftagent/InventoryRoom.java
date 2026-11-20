@@ -27,6 +27,20 @@ final class InventoryRoom {
         return false;
     }
 
+    /**
+     * How many of {@code item} (stacking to {@code maxCount}) the main slots can still take: an empty slot takes a full
+     * stack, a matching stack its remaining space.
+     */
+    static int capacity(List<Slot> slots, String item, int maxCount) {
+        int room = 0;
+        for (int index = 0; index < Math.min(MAIN_SLOTS, slots.size()); index++) {
+            Slot slot = slots.get(index);
+            if (slot.empty()) room += maxCount;
+            else if (slot.item().equals(item)) room += Math.max(0, slot.maxCount() - slot.count());
+        }
+        return room;
+    }
+
     /** The shared failure sentence; items collected so far never reads below zero (e.g. after eating or dropping some). */
     static String fullMessage(int collected, int requested, String block) {
         return "Inventory full; collected " + Math.max(0, collected) + " of " + requested + " " + block + ".";

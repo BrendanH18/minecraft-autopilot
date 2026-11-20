@@ -4,6 +4,7 @@ import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createObjective } from './objective.js';
 import { MAX_INSPECT_CONTAINERS, normalizeAction } from './protocol.js';
+import { CRAFTABLE_ITEMS, MAX_CRAFT_COUNT } from './recipes.js';
 
 const decisionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('done'), reason: z.string().max(1000) }).strict(),
@@ -15,6 +16,12 @@ const decisionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('inspect_storage') }).strict(),
   z
     .object({ type: z.literal('deposit'), item: z.string(), count: z.number().int().min(1).max(64).optional() })
+    .strict(),
+  z
+    .object({ type: z.literal('withdraw'), item: z.string(), count: z.number().int().min(1).max(64).optional() })
+    .strict(),
+  z
+    .object({ type: z.literal('craft'), item: z.string(), count: z.number().int().min(1).max(MAX_CRAFT_COUNT) })
     .strict(),
   z.object({ type: z.literal('wait'), seconds: z.number().min(1).max(60) }).strict(),
 ]);
@@ -29,6 +36,8 @@ const actionFields = {
   eat: [],
   inspect_storage: [],
   deposit: ['item', 'count'],
+  withdraw: ['item', 'count'],
+  craft: ['item', 'count'],
   wait: ['seconds'],
 };
 export const plannerActions = Object.keys(actionFields).filter((type) => type !== 'done');
@@ -63,7 +72,10 @@ const footprint = (state) =>
 function parseDecision(content) {
   const output = JSON.parse(content);
   // Small models swap collect's block and deposit's item (seen live with qwen3.5:4b); both name a Minecraft item.
-  const [alias, field] = { collect: ['item', 'block'], deposit: ['block', 'item'] }[output?.type] || [];
+  const [alias, field] =
+    { collect: ['item', 'block'], deposit: ['block', 'item'], withdraw: ['block', 'item'], craft: ['block', 'item'] }[
+      output?.type
+    ] || [];
   if (alias && output[field] === undefined) output[field] = output[alias];
   // Fields belonging to other actions are ignored; missing or invalid fields for this action are rejected.
   const fields = Object.hasOwn(actionFields, output?.type) ? actionFields[output.type] : [];
@@ -75,10 +87,12 @@ function parseDecision(content) {
 }
 
 const systemPrompt = `You control a Minecraft Java player through a local harness. Choose one action per turn and output ONLY the required JSON.
-Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, inspect_storage, deposit(item,count), wait(seconds), done(reason).
+Available actions: goto(x,y,z), home, set_home, collect(block,count), eat, inspect_storage, deposit(item,count), withdraw(item,count), craft(item,count), wait(seconds), done(reason).
 collect adds count items to the existing inventory. Supported blocks: oak_log, birch_log, spruce_log, jungle_log, acacia_log, dark_oak_log, cherry_log, mangrove_log, dirt, cobblestone, sand.
 deposit walks to the nearest chest or barrel within 16 blocks and stores the item there; omit count to store all of it. inspect_storage refreshes previously known storage contents without depositing; use it only when state.containers is an array. containers lists nearby storage and the contents last seen inside (items is null until opened).
-Use observations and the initial inventory to verify the requested quantity. When collection and deposit criteria name the same item, collection counts the net increase across inventory and storage. Storage is reopened automatically before final deposit verification; stay within 16 blocks of the storage you deposited into before answering done. Never repeat a full collection quota after partial progress.
+withdraw takes the item from the nearest chest or barrel within 16 blocks last seen holding it, else an unopened one; omit count to take all of it there.
+craft makes at least count of: ${CRAFTABLE_ITEMS.join(', ')}. chest, furnace, and tools need a crafting table within 16 blocks; a held one is placed automatically. Later crafts consume crafted planks and sticks.
+Use observations and the initial inventory to verify the requested quantity. Collect, withdraw, and craft criteria count the final held increase, so consumed items no longer count; with a deposit criterion for the same item, stored items count too. Storage is reopened automatically before final deposit verification; stay within 16 blocks of the storage you deposited into before answering done. Never repeat a full collection quota after partial progress.
 Save a home only if the user requested it or the goal needs it. set_home is refused when a home was saved before the task; only the player can move it.
 Nearby blocks and threats are partial observations of loaded chunks. Do not invent locations or capabilities.
 Prioritize eating and returning to saved shelter when health is low. A saved home is a waypoint, not a guarantee of safety.
@@ -442,6 +456,24 @@ export async function runAgent(
         unattributedDeposit = true;
       }
     };
+    // Collect, withdraw, and craft criteria count held gain from any source, so only the named action may supply that item.
+    // Withdrawing a deposit criterion's item is refused too: moving stock between containers is not a new deposit.
+    const sources = new Map();
+    const description = objective?.description;
+    if (description?.collect) sources.set(description.collect.block, 'collect');
+    if (description?.withdraw) sources.set(description.withdraw.item, 'withdraw');
+    if (description?.craft) sources.set(description.craft.item, 'craft');
+    const conflict = (decision) => {
+      if (!['collect', 'withdraw', 'craft'].includes(decision.type)) return null;
+      const action = normalizeAction(decision);
+      const item = action.block ?? action.item;
+      const source = sources.get(item);
+      if (source && source !== decision.type)
+        return `The ${source} criterion counts held ${item}, so ${decision.type} of it is refused; use ${source}.`;
+      if (decision.type === 'withdraw' && description?.deposit?.item === item)
+        return `The deposit criterion counts stored ${item}, so withdrawing it is refused.`;
+      return null;
+    };
     const reject = async (step, action, reason, extra) => {
       history.push({ action, rejected: reason, ...extra });
       await note('rejection', { step, action, reason });
@@ -641,6 +673,12 @@ export async function runAgent(
             `${decision.type} is not allowed for this task. Choose one of: ${[...allowed, 'done'].join(', ')}.`,
           );
           log(`Refused disallowed action ${decision.type}.`);
+          continue;
+        }
+        const conflicting = conflict(decision);
+        if (conflicting) {
+          await reject(step + 1, decision, conflicting);
+          log(`Refused ${decision.type}: ${conflicting}`);
           continue;
         }
         // Small models can repeat a no-op (such as goto to where they stand) until the step limit; waiting is a legitimate repeat.

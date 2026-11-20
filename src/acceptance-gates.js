@@ -166,6 +166,56 @@ export const ACCEPTANCE_GATES = deep([
     ],
   },
   {
+    id: 'fabric-withdraw-craft',
+    status: 'open',
+    backend: 'fabric',
+    keyboard: true,
+    owner: false,
+    title: 'Fabric withdraw and craft with takeover',
+    release:
+      'Validate Fabric withdraw (exact and omitted counts, no candidate, short container, full inventory) and craft (inventory-grid and table recipes, missing ingredients, placing a held table, full inventory), with F8/menu/stop/expiry during each. Run a real local model with `--verify-withdraw` and `--verify-craft`.',
+    prerequisites: [
+      PACKAGED,
+      FABRIC_PROFILE,
+      'A chest within 16 blocks holding logs and cobblestone, and a local model.',
+    ],
+    steps: [
+      'Withdraw with an exact count, then with the count omitted.',
+      'Withdraw with no candidate container, from a container holding too few, and into a full inventory; verify each failure.',
+      'Craft planks and sticks in the inventory grid.',
+      'Craft a stone pickaxe with no table nearby while holding one; verify it is placed and used.',
+      'Craft with missing ingredients and with a full inventory; verify each failure.',
+      'Press F8, open the menu, run `mc-agent stop`, and let the lease expire during a withdrawal and during a craft.',
+      'Run a real local model with `--verify-withdraw` and `--verify-craft`.',
+    ],
+    evidence: [
+      'Container contents and player inventory from independent server `data get` reads before and after each step.',
+      'The placed table confirmed with `execute if block`.',
+      'Reads several seconds apart after each takeover showing no further transfers or crafts.',
+    ],
+  },
+  {
+    id: 'bot-withdraw-craft',
+    status: 'open',
+    backend: 'mineflayer',
+    keyboard: false,
+    owner: false,
+    title: 'Bot withdraw and craft on a local server',
+    release:
+      'Validate bot withdraw and craft against a local server with the same cases, including a real local model with `--verify-withdraw` and `--verify-craft`.',
+    prerequisites: [BOT, 'A chest within 16 blocks holding logs and cobblestone, and a local model.'],
+    steps: [
+      'Run `npm run acceptance:bot -- --accept-eula --scenario withdraw --scenario craft-bootstrap`.',
+      'Withdraw with the count omitted, reading the chest and inventory on the server before and after.',
+      'Repeat the Fabric withdraw and craft failure cases with the bot.',
+      'Run a real local model with `--verify-withdraw` and `--verify-craft`.',
+    ],
+    evidence: [
+      'The runner results file and `server.out`, reviewed by a person.',
+      'Container contents and player inventory from independent server `data get` reads.',
+    ],
+  },
+  {
     id: 'collect-and-store-verification',
     status: 'open',
     backend: 'mineflayer',

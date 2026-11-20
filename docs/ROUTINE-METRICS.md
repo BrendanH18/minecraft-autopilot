@@ -25,7 +25,7 @@ Routine files accept an action array or `{ "actions": [...] }`. Type costs are n
 | `wait-share <file>` | Explicit waits as a fraction of steps, not runtime. |
 | `collection-concentration <file>` | Sum of squared shares of per-item requested collection quotas. |
 | `deposit-uncertainty <file>` | Steps with deposit-all and their share of deposit requests. |
-| `collection-pressure <file>` | Maximum prefix collect minus explicit deposit balance; deposit-all makes subsequent balance unknown. |
+| `collection-pressure <file>` | Maximum prefix balance of collected, withdrawn, and crafted items minus explicit deposits; a deposit-all or withdraw-all makes subsequent balance unknown. |
 | `wait-spacing <file>` | Number of intervening steps between waits. |
 | `inspection-spacing <file>` | Number of intervening steps between storage inspections. |
 | `return-spacing <file>` | Number of intervening steps between home returns. |

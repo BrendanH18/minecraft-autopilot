@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { dataDirectory, writePrivateJson } from './config.js';
 import { Vec3 } from 'vec3';
 import { OperationGate } from './operation-gate.js';
+import { RECIPES, craftsFor, describeMissing, planCraft } from './recipes.js';
 
 const { pathfinder, Movements, goals } = pathfinderPackage;
 const COLLECT_BLOCKS = new Set([
@@ -39,6 +40,19 @@ const SAFE_FOOD = new Set([
   'beetroot',
 ]);
 const CONTAINERS = new Set(['chest', 'trapped_chest', 'barrel']);
+const AIR = new Set(['air', 'cave_air', 'void_air']);
+const USABLE_SUPPORT = new Set([...CONTAINERS, 'crafting_table', 'furnace', 'blast_furnace', 'smoker']);
+// Neighbours of the player's feet block tried for a crafting table, sides before corners.
+const BESIDE = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+  [1, -1],
+];
 const CLOCKWISE = { north: 'east', east: 'south', south: 'west', west: 'north' };
 const OFFSETS = { north: [0, 0, -1], east: [1, 0, 0], south: [0, 0, 1], west: [-1, 0, 0] };
 // Contents of an open container window, one entry per item name.
@@ -54,6 +68,16 @@ const withContainer = (error, container) =>
   container && error instanceof Error && !error.container
     ? Object.assign(new Error(error.message, { cause: error }), { container })
     : error;
+// Room for an item in the 36 main slots of an open window. bot.inventory only catches up when the window closes.
+function windowRoom(window, type, stackSize) {
+  let room = 0;
+  for (let slot = window.inventoryStart; slot < window.inventoryEnd; slot++) {
+    const item = window.slots[slot];
+    if (!item) room += stackSize;
+    else if (item.type === type) room += Math.max(0, stackSize - item.count);
+  }
+  return room;
+}
 const HOSTILES = new Set([
   'zombie',
   'husk',
@@ -266,7 +290,8 @@ export class MineflayerDriver {
     const bot = this.bot;
     if (!this.connected || !bot.entity)
       return { backend: 'mineflayer', connected: false, paused: false, error: this.lastError, player: null };
-    const blockIds = [...COLLECT_BLOCKS]
+    // Crafting tables are reported too, so a planner can see where table recipes will be crafted.
+    const blockIds = [...COLLECT_BLOCKS, 'crafting_table']
       .map((name) => bot.registry.blocksByName[name]?.id)
       .filter((id) => id !== undefined);
     const positions = bot.findBlocks({ matching: blockIds, maxDistance: 16, count: 24 });
@@ -554,7 +579,8 @@ export class MineflayerDriver {
         );
       }
       // timers/promises rejects with a generic AbortError; report why control ended (e.g. death) instead.
-      throw scopedSignal.aborted ? scopedSignal.reason : error;
+      // A cancelled transfer keeps the container it reported, because items may already have moved.
+      throw scopedSignal.aborted ? withContainer(scopedSignal.reason, error?.container) : error;
     } finally {
       clearInterval(guard);
       if (!eatingTask) this.stop();
@@ -677,6 +703,10 @@ export class MineflayerDriver {
         return;
       case 'deposit':
         return this.deposit(action, signal);
+      case 'withdraw':
+        return this.withdraw(action, signal);
+      case 'craft':
+        return this.craft(action, signal, onProgress);
       case 'inspect_storage':
         return this.inspectStorage(signal, action.containers);
       case 'wait':
@@ -795,7 +825,19 @@ export class MineflayerDriver {
           ? `Storage inspection requires the requested containers to be within 16 blocks; the ${block.name} at ${position.x} ${position.y} ${position.z} is farther. Return near it before finishing.`
           : 'Storage inspection requires all previously opened containers to be within 16 blocks. Return near storage before finishing.',
       );
-    // Open from wherever the chest is in reach; a walk to an adjacent block can fail beside furniture and walls.
+    if (!(await this.walkIntoReach(position, signal)))
+      throw new Error(`Could not reach the ${block.name} at ${position.x} ${position.y} ${position.z}.`);
+
+    signal.throwIfAborted();
+    const current = this.bot.blockAt(position);
+    if (!current || !CONTAINERS.has(current.name))
+      throw new Error('The container disappeared before it could be opened.');
+    return current;
+  }
+
+  // Walks (never digs) until the block is within reach, 4 blocks from the eyes; returns whether it is.
+  async walkIntoReach(position, signal) {
+    // Use the block from wherever it is in reach; a walk to an adjacent block can fail beside furniture and walls.
     const inReach = () => this.bot.entity.position.offset(0, 1.62, 0).distanceTo(position.offset(0.5, 0.5, 0.5)) <= 4;
     // The pathfinder can give up planning ("Took to long to decide path") after walking most of the way; judge by reach.
     for (let attempt = 0; attempt < 2 && !inReach(); attempt++) {
@@ -806,13 +848,7 @@ export class MineflayerDriver {
         if (signal.aborted) throw error;
       });
     }
-    if (!inReach()) throw new Error(`Could not reach the ${block.name} at ${position.x} ${position.y} ${position.z}.`);
-
-    signal.throwIfAborted();
-    const current = this.bot.blockAt(position);
-    if (!current || !CONTAINERS.has(current.name))
-      throw new Error('The container disappeared before it could be opened.');
-    return current;
+    return inReach();
   }
 
   // A requested position names a known record by its key or any current member, so either half of a double chest selects it once.
@@ -920,6 +956,373 @@ export class MineflayerDriver {
       throw withContainer(new Error(`The ${where} is full; deposited ${deposited} of ${amount} ${name}.`), container);
     if (depositError) throw withContainer(depositError, container);
     return { message: `Deposited ${deposited} ${name} into the ${where}.`, container };
+  }
+
+  // The nearest container within 16 blocks last seen holding the item, else the nearest one whose contents are unknown.
+  withdrawSource(item) {
+    const here = this.bot.entity.position;
+    const known = this.normalizeContainers();
+    const holding = Object.values(known)
+      .map((record) => ({ record, position: new Vec3(record.x, record.y, record.z) }))
+      .filter(
+        ({ record, position }) =>
+          record.items?.some((stack) => stack.name === item && stack.count > 0) &&
+          here.distanceTo(position) <= 16 &&
+          CONTAINERS.has(this.bot.blockAt(position)?.name),
+      )
+      .sort((a, b) => here.distanceTo(a.position) - here.distanceTo(b.position));
+    if (holding.length) return holding[0];
+    // A record whose inventory merged or split has no current contents either, so it counts as unopened.
+    return this.nearbyContainers().find(({ position }) => !known[position.toString()]?.items);
+  }
+
+  async withdraw(action, signal) {
+    const name = action.item.replace('minecraft:', '');
+    const type = this.bot.registry.itemsByName[name]?.id;
+    if (type === undefined) throw new Error(`Unknown item ${name}.`);
+    const source = this.withdrawSource(action.item);
+    if (!source)
+      throw new Error(
+        `No chest or barrel within 16 blocks is known to hold ${name}, and none nearby is unopened. Move near storage that holds it first.`,
+      );
+    const { position } = source;
+    const block = await this.reachContainer(position, signal);
+    const where = `${block.name} at ${position.x} ${position.y} ${position.z}`;
+    const stackSize = this.bot.registry.items[type].stackSize;
+    let withdrawError;
+    let withdrawn = 0;
+    let available = 0;
+    let requested = action.count;
+    // Set once the window opens: where items came from and that container's live contents just before this withdrawal.
+    let container;
+    // Count from the container, never the click API: a failed click can leave items on the cursor until the window closes.
+    const stored = (window) =>
+      window
+        .containerItems()
+        .filter((item) => item.type === type)
+        .reduce((sum, item) => sum + item.count, 0);
+    await this.abortable(async () => {
+      const window = await this.openContainer(block);
+      available = stored(window);
+      requested ??= available;
+      container = {
+        name: `minecraft:${block.name}`,
+        x: position.x,
+        y: position.y,
+        z: position.z,
+        before: windowContents(window),
+      };
+      try {
+        this.recordContainer(position, block.name, window);
+        const goal = Math.min(requested, available);
+        // One stack per click sequence, sized to the room left, so handoff stops between stacks and no click
+        // leaves items on the cursor that closing the window would drop on the ground.
+        for (let moved = 0; moved < goal; moved = available - stored(window)) {
+          signal.throwIfAborted();
+          const room = windowRoom(window, type, stackSize);
+          if (room === 0) throw new Error('inventory full');
+          // At most the next source slot, so a takeover between calls cannot let one call sweep further stacks.
+          const next = window.slots.slice(0, window.inventoryStart).find((item) => item?.type === type);
+          const batch = Math.min(stackSize, goal - moved, room, next?.count ?? stackSize);
+          await this.bot.transfer({
+            window,
+            itemType: type,
+            metadata: null,
+            count: batch,
+            sourceStart: 0,
+            sourceEnd: window.inventoryStart,
+            destStart: window.inventoryStart,
+            destEnd: window.inventoryEnd,
+          });
+          if (available - stored(window) === moved) throw new Error(`The ${where} released no ${name}.`);
+        }
+      } catch (error) {
+        withdrawError = error;
+      } finally {
+        withdrawn = available - stored(window);
+        this.recordContainer(position, block.name, window);
+        window.close();
+      }
+    }, signal).catch((error) => {
+      throw withContainer(error, container);
+    });
+    const fail = (message) => withContainer(new Error(message), container);
+    if (['inventory full', 'destination full'].includes(withdrawError?.message))
+      throw fail(`Inventory full; withdrew ${withdrawn} of ${requested} ${name}.`);
+    if (withdrawError) throw withContainer(withdrawError, container);
+    if (available === 0)
+      throw fail(
+        action.count === undefined
+          ? `The ${where} holds no ${name}.`
+          : `The ${where} holds no ${name}; withdrew 0 of ${requested} ${name}.`,
+      );
+    if (withdrawn < requested)
+      throw fail(`The ${where} held only ${available} ${name}; withdrew ${withdrawn} of ${requested} ${name}.`);
+    return { message: `Withdrew ${withdrawn} ${name} from the ${where}.`, container };
+  }
+
+  heldStacks() {
+    return this.bot.inventory
+      .items()
+      .map((item) => ({ slot: item.slot, name: `minecraft:${item.name}`, count: item.count }));
+  }
+
+  nearestCraftingTable() {
+    const id = this.bot.registry.blocksByName.crafting_table?.id;
+    if (id === undefined) return null;
+    const here = this.bot.entity.position;
+    const positions = this.bot.findBlocks({ matching: id, maxDistance: 16, count: 8 });
+    positions.sort((a, b) => a.distanceTo(here) - b.distanceTo(here));
+    return positions.find((position) => position.distanceTo(here) <= 16) ?? null;
+  }
+
+  // Places a held crafting table on an empty block beside the player's feet, standing on solid ground.
+  async placeCraftingTable(signal) {
+    const item = this.bot.inventory.items().find((stack) => stack.name === 'crafting_table');
+    const at = this.bot.entity.position;
+    const feet = at.floored();
+    // The player is 0.6 wide; a block overlapping that box cannot be placed.
+    const clear = (cell) =>
+      at.x + 0.3 <= cell.x || at.x - 0.3 >= cell.x + 1 || at.z + 0.3 <= cell.z || at.z - 0.3 >= cell.z + 1;
+    const cell = BESIDE.map(([dx, dz]) => feet.offset(dx, 0, dz)).find(
+      (cell) =>
+        AIR.has(this.bot.blockAt(cell)?.name) &&
+        this.bot.blockAt(cell.offset(0, -1, 0))?.boundingBox === 'block' &&
+        // Clicking a block with a screen opens it instead of placing the table on it.
+        !USABLE_SUPPORT.has(this.bot.blockAt(cell.offset(0, -1, 0))?.name) &&
+        clear(cell),
+    );
+    if (!cell)
+      throw new Error('There is no free block with solid ground next to the player to place the crafting table on.');
+    await this.abortable(() => this.bot.equip(item, 'hand'), signal);
+    await this.abortable(() => this.bot.placeBlock(this.bot.blockAt(cell.offset(0, -1, 0)), new Vec3(0, 1, 0)), signal);
+    if (this.bot.blockAt(cell)?.name !== 'crafting_table')
+      throw new Error(`The crafting table was not placed at ${cell.x} ${cell.y} ${cell.z}.`);
+    return cell;
+  }
+
+  // A vanilla recipe shape for one craft, with each ingredient cell filled from the items the allowlist plan consumes.
+  // minecraft-data lists one shape per material, so a mix such as oak and birch planks needs its own copy.
+  craftingRecipe(recipe, consume, withTable) {
+    const registry = this.bot.registry;
+    const name = (id) => `minecraft:${registry.items[id]?.name}`;
+    const group = (id) => recipe.ingredients.find((ingredient) => ingredient.items.includes(name(id)));
+    const cells = (template) => [...(template.inShape?.flat() ?? []), ...(template.ingredients ?? [])];
+    const outputId = registry.itemsByName[recipe.output.replace('minecraft:', '')].id;
+    const template = this.bot
+      .recipesAll(outputId, null, withTable ? true : null)
+      .find(
+        (candidate) =>
+          candidate.result.count === recipe.yield && cells(candidate).every((cell) => cell.id === -1 || group(cell.id)),
+      );
+    if (!template) throw new Error(`This Minecraft version has no ${recipe.output} recipe matching the allowlist.`);
+    const pool = new Map(consume.map((entry) => [entry.name, entry.count]));
+    const fill = (cell) => {
+      if (cell.id === -1) return cell;
+      const item = group(cell.id).items.find((candidate) => pool.get(candidate) > 0);
+      pool.set(item, pool.get(item) - 1);
+      return { ...cell, id: registry.itemsByName[item.replace('minecraft:', '')].id, metadata: null };
+    };
+    return {
+      ...template,
+      inShape: template.inShape?.map((row) => row.map(fill)) ?? null,
+      ingredients: template.ingredients?.map(fill) ?? null,
+    };
+  }
+
+  // One craft at a crafting table, opened within the container timeout. Closing the table returns grid and cursor items.
+  async craftAtTable(block, shaped, signal) {
+    let timer;
+    let onOpen;
+    const window = await new Promise((resolve, reject) => {
+      // Our own listener, removed on every exit: mineflayer's openBlock would accept a later action's window instead.
+      onOpen = resolve;
+      this.bot.once('windowOpen', onOpen);
+      timer = setTimeout(() => {
+        this.closeLateTable();
+        reject(new Error('The crafting table did not open.'));
+      }, this.containerTimeoutMs);
+      Promise.resolve()
+        .then(() => this.bot.activateBlock(block))
+        .catch(reject);
+    }).finally(() => {
+      clearTimeout(timer);
+      this.bot.removeListener('windowOpen', onOpen);
+    });
+    try {
+      if (!window.type?.startsWith('minecraft:crafting')) throw new Error('The crafting table did not open.');
+      await this.craftInGrid(window, 3, shaped, signal);
+    } finally {
+      this.bot.closeWindow(window);
+    }
+  }
+
+  // A table that opens after its craft gave up is closed, unless another action has started and may own the window.
+  closeLateTable() {
+    const late = (window) => {
+      if (!this.activeAction && !this.operations.busy && window.type?.startsWith('minecraft:crafting'))
+        this.bot.closeWindow(window);
+    };
+    this.bot.once('windowOpen', late);
+    setTimeout(() => this.bot.removeListener('windowOpen', late), 3 * this.containerTimeoutMs).unref?.();
+  }
+
+  // One craft in the player's own 2x2 grid. Nothing closes that grid, so items left in it are moved back by hand.
+  async craftInInventory(shaped, signal) {
+    const window = this.bot.inventory;
+    let crafted = false;
+    try {
+      await this.craftInGrid(window, 2, shaped, signal);
+      crafted = true;
+    } finally {
+      // Shift-click each leftover ingredient back. Each click waits for the server, so it is bounded, skipped once
+      // disconnected, and never replaces the error that ended the craft.
+      for (let slot = 1; slot <= 4 && !crafted && this.connected; slot++)
+        if (window.slots[slot]) await this.bounded(this.bot.clickWindow(slot, 0, 1));
+    }
+  }
+
+  // Waits for a native reply for at most the container timeout, ignoring its failure.
+  bounded(promise) {
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(resolve, this.containerTimeoutMs);
+    });
+    return Promise.race([promise, timeout])
+      .catch(() => {})
+      .finally(() => clearTimeout(timer));
+  }
+
+  // Places one ingredient per click, checking cancellation before every click, then takes the result only once the
+  // server has put it in slot 0. mineflayer's own crafting predicts the result instead, which loses items when the
+  // server's reply lags, and keeps clicking after a takeover.
+  async craftInGrid(window, width, shaped, signal) {
+    const cells = [];
+    (shaped.inShape ?? []).forEach((row, y) => {
+      row.forEach((cell, x) => {
+        if (cell.id !== -1) cells.push({ id: cell.id, slot: 1 + x + width * y });
+      });
+    });
+    (shaped.ingredients ?? []).forEach((cell, index) => {
+      cells.push({ id: cell.id, slot: 1 + index });
+    });
+    const putBack = async () => {
+      if (window.selectedItem)
+        await this.bot.putSelectedItemRange(window.inventoryStart, window.inventoryEnd, window, null);
+    };
+    try {
+      for (const { id, slot } of cells) {
+        if (signal.aborted) break;
+        if (window.selectedItem?.type !== id) {
+          await putBack();
+          if (signal.aborted) break;
+          const source = window.findInventoryItem(id, null);
+          if (!source) throw new Error('An ingredient went missing while crafting.');
+          await this.bot.clickWindow(source.slot, 0, 0);
+          if (signal.aborted) break;
+        }
+        await this.bot.clickWindow(slot, 1, 0);
+      }
+      // A cancelled fill goes straight to the bounded cleanup below.
+      signal.throwIfAborted();
+      // On the normal path the rest of the source stack must really go back before the result is taken.
+      await putBack();
+    } finally {
+      // Whatever else ended the fill, try to return the cursor without masking that error.
+      if (window.selectedItem && this.connected) await this.bounded(putBack());
+    }
+    signal.throwIfAborted();
+    // Every cell holds one item, so taking the result crafts exactly once.
+    for (let waited = 0; window.slots[0]?.type !== shaped.result.id; waited += 50) {
+      signal.throwIfAborted();
+      if (waited >= this.containerTimeoutMs) throw new Error('The crafting grid produced no result.');
+      await delay(50);
+    }
+    signal.throwIfAborted();
+    // A left-click on the result with something else on the cursor is ignored, and putAway would then wait forever.
+    if (window.selectedItem) throw new Error('Could not return the remaining ingredients from the cursor.');
+    await this.bot.putAway(0);
+    // Each cell's single item was used up; mirror that locally as mineflayer's own crafting does.
+    for (let slot = 1; slot <= width * width; slot++) window.updateSlot(slot, null);
+  }
+
+  // Room for one craft's output in the main slots once that craft's ingredients are used up.
+  craftRoom(recipe, consume) {
+    const stacks = this.heldStacks().sort((a, b) => a.slot - b.slot);
+    for (const { name, count } of consume) {
+      let remaining = count;
+      for (const stack of stacks.filter((stack) => stack.name === name)) {
+        const taken = Math.min(stack.count, remaining);
+        stack.count -= taken;
+        remaining -= taken;
+      }
+    }
+    const used = stacks.filter((stack) => stack.count > 0);
+    const stackSize = this.bot.registry.itemsByName[recipe.output.replace('minecraft:', '')]?.stackSize ?? 64;
+    return (
+      (36 - used.length) * stackSize +
+      used
+        .filter((stack) => stack.name === recipe.output)
+        .reduce((sum, stack) => sum + Math.max(0, stackSize - stack.count), 0)
+    );
+  }
+
+  async craft(action, signal, onProgress = () => {}) {
+    const recipe = RECIPES[action.item];
+    const name = action.item.replace('minecraft:', '');
+    if (!recipe) throw new Error(`${name} is not a supported crafting output.`);
+    const crafts = craftsFor(recipe, action.count);
+    const plan = planCraft(recipe, crafts, this.heldStacks());
+    if (!plan.ok) throw new Error(`Missing ingredients for ${action.count} ${name}: ${describeMissing(plan.missing)}.`);
+    let table = null;
+    let placed = '';
+    if (recipe.table) {
+      let position = this.nearestCraftingTable();
+      if (!position) {
+        if (!this.bot.inventory.items().some((item) => item.name === 'crafting_table'))
+          throw new Error(`Crafting ${name} needs a crafting table; none is within 16 blocks and none is held.`);
+        position = await this.placeCraftingTable(signal);
+        placed = `Placed a crafting table at ${position.x} ${position.y} ${position.z}. `;
+        onProgress(placed.trim());
+      }
+      if (!(await this.walkIntoReach(position, signal)))
+        throw new Error(`${placed}Could not reach the crafting table at ${position.x} ${position.y} ${position.z}.`);
+      signal.throwIfAborted();
+      table = this.bot.blockAt(position);
+      if (table?.name !== 'crafting_table')
+        throw new Error(`${placed}The crafting table at ${position.x} ${position.y} ${position.z} is gone.`);
+    }
+    const count = () =>
+      this.heldStacks()
+        .filter((stack) => stack.name === action.item)
+        .reduce((sum, stack) => sum + stack.count, 0);
+    const initial = count();
+    const made = () => Math.max(0, count() - initial);
+    for (let done = 0; done < crafts; done++) {
+      // Cancellation, takeover, expiry, and stop are checked between crafts; completed crafts stay in the inventory.
+      signal.throwIfAborted();
+      const once = planCraft(recipe, 1, this.heldStacks());
+      if (!once.ok)
+        throw new Error(
+          `${placed}Ran out of ingredients; crafted ${made()} of ${action.count} ${name}: ${describeMissing(once.missing)}.`,
+        );
+      // A result with nowhere to go would be dropped on the ground.
+      if (this.craftRoom(recipe, once.consume) < recipe.yield)
+        throw new Error(`${placed}Inventory full; crafted ${made()} of ${action.count} ${name}.`);
+      const shaped = this.craftingRecipe(recipe, once.consume, !!table);
+      await this.abortable(
+        () => (table ? this.craftAtTable(table, shaped, signal) : this.craftInInventory(shaped, signal)),
+        signal,
+      ).catch((error) => {
+        if (signal.aborted) throw error;
+        throw new Error(`${placed}Crafting ${name} failed after ${made()} of ${action.count}: ${error.message}`);
+      });
+      onProgress(`Crafted ${made()} of ${action.count} ${name}.`);
+    }
+    // Count from the inventory, not the craft calls; the last result can land a moment after its click is confirmed.
+    for (let waited = 0; made() < action.count && waited < 1000; waited += 100) await delay(100, undefined, { signal });
+    if (made() < action.count) throw new Error(`${placed}Crafted only ${made()} of ${action.count} ${name}.`);
+    return `${placed}Crafted ${made()} ${name}.`;
   }
 
   close() {

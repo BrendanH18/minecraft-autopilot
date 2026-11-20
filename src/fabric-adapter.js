@@ -126,7 +126,7 @@ export class FabricAdapter {
           previous = JSON.stringify(job);
         }
         if (terminalStatuses.has(job.status)) {
-          // A failed deposit may already have moved items; keep the container it reported.
+          // A failed deposit or withdrawal may already have moved items; keep the container it reported.
           if (job.status !== 'completed')
             throw Object.assign(
               new Error(job.message || `Action ${job.status}`),

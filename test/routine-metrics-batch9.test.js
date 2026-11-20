@@ -101,6 +101,17 @@ test('routine metrics invalid, unknown deposit, revisit and reversal', () => {
     ).result,
     { 'minecraft:dirt': null },
   );
+  // A craft adds whole recipes: one requested stick makes four; a withdrawal adds its count.
+  assert.deepEqual(
+    routineMetricsReport(
+      [
+        { type: 'withdraw', item: 'oak_planks', count: 2 },
+        { type: 'craft', item: 'stick', count: 1 },
+      ],
+      'collection-pressure',
+    ).result,
+    { 'minecraft:oak_planks': 2, 'minecraft:stick': 4 },
+  );
   const positions = [0, 2, 0].map((y) => ({ type: 'goto', x: 0, y, z: 0 }));
   assert.equal(routineMetricsReport(positions, 'vertical-reversals').result, 1);
   assert.deepEqual(routineMetricsReport(positions, 'goto-revisit').result, [{ step: 3, previousStep: 1 }]);

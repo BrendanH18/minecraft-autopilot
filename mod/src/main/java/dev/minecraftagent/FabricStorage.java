@@ -17,27 +17,48 @@ import java.util.UUID;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
+import net.minecraft.block.NoteBlock;
+import net.minecraft.block.RespawnAnchorBlock;
+import net.minecraft.block.ShapeContext;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
+import net.minecraft.screen.CraftingScreenHandler;
 import net.minecraft.screen.GenericContainerScreenHandler;
+import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
-/** Bounded vanilla chest/barrel actions; all access is on the Minecraft client thread. */
+/**
+ * Bounded vanilla chest/barrel actions and crafting-table use; all access is on the Minecraft client thread. Deposit,
+ * withdraw, and inspection open chests and barrels; craft opens a crafting table, or crafts in the player's own grid
+ * without opening anything.
+ */
 final class FabricStorage {
     record Result(boolean success, String message) {}
+
+    private enum Mode {
+        DEPOSIT,
+        WITHDRAW,
+        INSPECT,
+        CRAFT
+    }
 
     private enum Phase {
         APPROACH,
         OPENING,
+        /** Crafting in the opened table's grid, or in the player's own grid with no screen. */
+        CRAFTING,
         RETURN
     }
 
@@ -47,10 +68,13 @@ final class FabricStorage {
     private ArrayDeque<BlockPos> targets;
     private BlockPos target;
     private Vec3d start;
+    private Mode mode;
     private Phase phase;
     private long phaseStarted;
     private long openingGeneration;
-    private GenericContainerScreenHandler owned;
+    /** The chest/barrel or crafting-table handler bound to the agent's own opening. */
+    private ScreenHandler owned;
+
     private final StorageOpening opening = new StorageOpening();
     private boolean agentOpening;
     private Object openingWorld;
@@ -58,10 +82,20 @@ final class FabricStorage {
     private int amount;
     private StorageTransfer transfer;
     private int sent;
+    /** A withdrawal's requested count (0 takes every matching item), and its target M once the container is read. */
+    private int withdrawRequested;
+
+    private int withdrawTotal;
+    private FabricCrafting crafting;
+    /** Where this craft placed the held crafting table, or null. */
+    private BlockPos placedTable;
     /** A containers list was given: only those inventories are reopened and only they must be in range. */
     private boolean scoped;
-    /** Set when a deposit's container first opens: where items went and that container's contents just before the transfer. */
-    private JsonObject depositContainer;
+    /**
+     * Set when a deposit's or withdrawal's container first opens: where items moved and that container's contents just
+     * before the transfer.
+     */
+    private JsonObject transferContainer;
 
     FabricStorage(MinecraftClient client) {
         this.client = client;
@@ -76,25 +110,90 @@ final class FabricStorage {
         return phase == Phase.APPROACH || phase == Phase.RETURN;
     }
 
-    /** requested, for an inspection only, limits it to those known inventories; null reopens every known container. */
-    void begin(String identity, Item item, int amount, List<BlockPos> requested) {
-        depositContainer = null;
-        scoped = item == null && requested != null;
+    private void reset(String identity, Mode mode, Item item, int amount) {
+        transferContainer = null;
+        crafting = null;
+        placedTable = null;
+        scoped = false;
+        this.mode = mode;
         this.identity = identity;
         this.item = item;
         this.amount = amount;
         transfer = null;
         sent = 0;
         start = client.player.getPos();
-        if (item != null) targets = new ArrayDeque<>(nearby());
-        else
-            targets = new ArrayDeque<>(
-                    scoped
-                            ? requestedTargets(identity, requested)
-                            : normalize(identity).keySet());
-        if (item != null && targets.isEmpty())
+    }
+
+    /** Stores {@code amount} held items in the nearest chest, trapped chest, or barrel within 16 blocks. */
+    void beginDeposit(String identity, Item item, int amount) {
+        reset(identity, Mode.DEPOSIT, item, amount);
+        List<BlockPos> nearby = nearby();
+        if (nearby.isEmpty())
             throw new IllegalStateException("No chest or barrel within 16 blocks. Move near storage first.");
-        if (item != null) targets = new ArrayDeque<>(List.of(targets.getFirst()));
+        targets = new ArrayDeque<>(List.of(nearby.getFirst()));
+        nextTarget();
+    }
+
+    /** requested limits the inspection to those known inventories; null reopens every known container. */
+    void beginInspect(String identity, List<BlockPos> requested) {
+        reset(identity, Mode.INSPECT, null, 0);
+        scoped = requested != null;
+        targets = new ArrayDeque<>(
+                scoped
+                        ? requestedTargets(identity, requested)
+                        : normalize(identity).keySet());
+        nextTarget();
+    }
+
+    /**
+     * Takes {@code amount} of the item (0 for every matching item) from one container within 16 blocks: the nearest whose
+     * last-observed contents include it, else the nearest with no known contents. Fails before moving without one.
+     */
+    void beginWithdraw(String identity, Item item, int amount) {
+        reset(identity, Mode.WITHDRAW, item, amount);
+        withdrawRequested = amount;
+        withdrawTotal = amount;
+        Map<BlockPos, JsonObject> known = normalize(identity);
+        Map<BlockPos, Integer> observed = new LinkedHashMap<>();
+        String name = Registries.ITEM.getId(item).toString();
+        for (var entry : known.entrySet()) {
+            JsonElement items = entry.getValue().get("items");
+            if (items == null || items.isJsonNull()) continue;
+            int count = 0;
+            for (JsonElement stack : items.getAsJsonArray())
+                if (stack.getAsJsonObject().get("name").getAsString().equals(name))
+                    count += stack.getAsJsonObject().get("count").getAsInt();
+            observed.put(entry.getKey(), count);
+        }
+        BlockPos chosen = WithdrawTargets.choose(nearby(), observed);
+        if (chosen == null)
+            throw new IllegalStateException("No chest, trapped chest, or barrel within 16 blocks was last seen holding "
+                    + name + ", and none is unopened. Move near storage that holds it first.");
+        // A full inventory is reported after reading the container, so the count and its contents are live.
+        targets = new ArrayDeque<>(List.of(chosen));
+        nextTarget();
+    }
+
+    /**
+     * Crafts at least {@code count} of an allowlisted output. Ingredients are checked before anything moves. A 2x2
+     * recipe uses the player's own grid; a table recipe uses the nearest crafting table within 16 blocks, placing a held
+     * one next to the player when none is in range.
+     */
+    void beginCraft(String identity, CraftingRecipes.Recipe recipe, int count) {
+        reset(identity, Mode.CRAFT, null, count);
+        FabricCrafting.requireIngredients(client, recipe, count);
+        crafting = new FabricCrafting(client, recipe, count);
+        if (!recipe.table()) {
+            crafting.use(client.player.playerScreenHandler, 2, System.nanoTime());
+            phase = Phase.CRAFTING;
+            return;
+        }
+        BlockPos table = nearestCraftingTable();
+        if (table == null) {
+            table = placeCraftingTable();
+            placedTable = table;
+        }
+        targets = new ArrayDeque<>(List.of(table));
         nextTarget();
     }
 
@@ -120,9 +219,11 @@ final class FabricStorage {
 
     /** Bind at packet delivery, before F8/stop/expiry can run on the next tick. */
     void screenOpened() {
-        if (client.player == null
-                || !opening.pending()
-                || !(client.player.currentScreenHandler instanceof GenericContainerScreenHandler handler)) return;
+        if (client.player == null || !opening.pending()) return;
+        ScreenHandler handler = client.player.currentScreenHandler;
+        boolean container = handler instanceof GenericContainerScreenHandler;
+        boolean table = handler instanceof CraftingScreenHandler;
+        if (!container && !table) return;
         if (!opening.mayOwnReply()) {
             owned = handler;
             closeOwned();
@@ -130,14 +231,18 @@ final class FabricStorage {
         }
         if (owned == null
                 && phase == Phase.OPENING
-                && handler.getRows() == (members(target).size() == 2 ? 6 : 3)) owned = handler;
+                && (mode == Mode.CRAFT
+                        ? table
+                        : container
+                                && ((GenericContainerScreenHandler) handler).getRows()
+                                        == (members(target).size() == 2 ? 6 : 3))) owned = handler;
     }
 
-    /** Only the handler bound to the agent's outstanding interaction is exempt. */
+    /** Only the handler bound to the agent's outstanding interaction (and, for a craft, still in use) is exempt. */
     boolean ownsScreen() {
-        return phase == Phase.OPENING
+        return (phase == Phase.OPENING || phase == Phase.CRAFTING)
                 && owned != null
-                && client.currentScreen instanceof GenericContainerScreen screen
+                && client.currentScreen instanceof HandledScreen<?> screen
                 && screen.getScreenHandler() == owned
                 && client.player.currentScreenHandler == owned;
     }
@@ -148,32 +253,49 @@ final class FabricStorage {
 
     Result tick(long now) {
         if (!active()) return null;
+        Result result = step(now);
+        if (result == null || placedTable == null) return result;
+        return new Result(
+                result.success(),
+                "Placed the held crafting table at " + describe(placedTable) + ". " + result.message());
+    }
+
+    private Result step(long now) {
         try {
+            if (phase == Phase.CRAFTING) return crafting.tick(now);
             if (phase == Phase.RETURN) {
                 if (client.player.getPos().distanceTo(start) <= 1.75)
                     return new Result(
                             true,
                             scoped
                                     ? "Refreshed the requested storage from the server."
-                                    : "Refreshed previously opened storage from the server and returned to inspection start.");
+                                    : "Refreshed previously opened storage from the server and returned to inspection"
+                                            + " start.");
                 if (now - phaseStarted > 3_000_000_000L && !pathing())
                     throw new IllegalStateException("Storage refreshed, but could not return to inspection start.");
                 return null;
             }
             if (target == null) return new Result(true, "No previously opened storage to refresh.");
-            if (!isContainer(target))
-                throw new IllegalStateException("The container disappeared before it could be inspected.");
+            if (mode == Mode.CRAFT ? !isCraftingTable(target) : !isContainer(target))
+                throw new IllegalStateException(
+                        mode == Mode.CRAFT
+                                ? "The crafting table disappeared before it could be used."
+                                : "The container disappeared before it could be inspected.");
             if (client.player.getPos().distanceTo(Vec3d.ofCenter(target)) > 16)
                 throw new IllegalStateException(
-                        scoped
-                                ? "Storage inspection requires the requested containers to be within 16 blocks; the "
-                                        + Registries.BLOCK
-                                                .getId(client.world
-                                                        .getBlockState(target)
-                                                        .getBlock())
-                                                .getPath()
-                                        + " at " + describe(target) + " is farther. Return near it before finishing."
-                                : "Storage requires containers within 16 blocks. Return near storage first.");
+                        mode == Mode.CRAFT
+                                ? "Crafting requires the crafting table within 16 blocks."
+                                : scoped
+                                        ? "Storage inspection requires the requested containers to be within 16"
+                                                + " blocks; the "
+                                                + Registries.BLOCK
+                                                        .getId(client.world
+                                                                .getBlockState(target)
+                                                                .getBlock())
+                                                        .getPath()
+                                                + " at " + describe(target)
+                                                + " is farther. Return near it before finishing."
+                                        : "Storage requires containers within 16 blocks. Return near storage first.");
             if (phase == Phase.APPROACH) {
                 if (opening.pending()) return null;
                 BlockHitResult hit = visibleHit();
@@ -184,18 +306,28 @@ final class FabricStorage {
                             .cancelEverything();
                     open(hit);
                 } else if (now - phaseStarted > 3_000_000_000L && !pathing())
-                    throw new IllegalStateException("Could not reach the container.");
+                    throw new IllegalStateException(
+                            mode == Mode.CRAFT
+                                    ? "Could not reach the crafting table."
+                                    : "Could not reach the container.");
                 return null;
             }
             if (now - phaseStarted > 5_000_000_000L)
                 throw new IllegalStateException(
-                        "The container did not open with fresh server contents; its lid may be blocked.");
+                        mode == Mode.CRAFT
+                                ? "The crafting table did not open."
+                                : "The container did not open with fresh server contents; its lid may be blocked.");
             if (owned == null || !StoragePackets.ready(owned.syncId, openingGeneration, owned.slots.size()))
                 return null;
+            if (mode == Mode.CRAFT) {
+                phase = Phase.CRAFTING;
+                crafting.use(owned, 3, now);
+                return null;
+            }
             List<ItemStack> stacks = StoragePackets.contents();
-            int size = owned.getRows() * 9;
+            int size = ((GenericContainerScreenHandler) owned).getRows() * 9;
             record(stacks, size);
-            if (item == null) {
+            if (mode == Mode.INSPECT) {
                 closeOwned();
                 nextTarget();
                 return null;
@@ -206,46 +338,94 @@ final class FabricStorage {
                 // The screen opened, so report this container even if the transfer later fails: items may move before
                 // then.
                 BlockPos key = canonical(target);
-                depositContainer = new JsonObject();
-                depositContainer.addProperty(
-                        "name",
-                        Registries.BLOCK
-                                .getId(client.world.getBlockState(key).getBlock())
-                                .toString());
-                depositContainer.addProperty("x", key.getX());
-                depositContainer.addProperty("y", key.getY());
-                depositContainer.addProperty("z", key.getZ());
-                depositContainer.add("before", contents(stacks.subList(0, size)));
+                transferContainer = new JsonObject();
+                transferContainer.addProperty("name", blockName(key));
+                transferContainer.addProperty("x", key.getX());
+                transferContainer.addProperty("y", key.getY());
+                transferContainer.addProperty("z", key.getZ());
+                transferContainer.add("before", contents(stacks.subList(0, size)));
+                if (mode == Mode.WITHDRAW) return startWithdrawal(stacks, size, stored, held, now);
                 transfer = new StorageTransfer(amount, stored, held);
-            } else if (!transfer.confirm(stored, held, sent))
+            } else if (mode == Mode.WITHDRAW) return continueWithdrawal(stacks, size, stored, held, now);
+            else if (!transfer.confirm(stored, held, sent))
                 throw new IllegalStateException(
                         "Server did not confirm the requested transfer. Check inventory and storage before retrying.");
             if (transfer.remaining() == 0)
                 return new Result(
                         true,
                         "Deposited " + transfer.confirmed() + " " + Registries.ITEM.getId(item) + " into storage.");
-            transferStack(stacks, size);
-            // Accepted predicted clicks need not produce slot echoes. Reopen for an authoritative inventory packet.
-            closeOwned();
-            phase = Phase.APPROACH;
-            phaseStarted = now;
+            if (!transferStack(stacks, size, false))
+                throw new IllegalStateException("The container is full for the matching inventory items.");
+            reopen(now);
             return null;
         } catch (RuntimeException exception) {
-            return new Result(
-                    false,
-                    exception.getMessage()
-                            + (transfer == null
-                                    ? ""
-                                    : " Confirmed deposited: " + transfer.confirmed() + " of " + amount + "."));
+            String progress = "";
+            if (mode == Mode.CRAFT && crafting != null)
+                progress = " Crafted " + crafting.crafted() + " of " + crafting.requested() + ".";
+            else if (transfer != null)
+                progress = mode == Mode.WITHDRAW
+                        ? " Confirmed withdrawn: " + transfer.confirmed() + " of " + withdrawTotal + "."
+                        : " Confirmed deposited: " + transfer.confirmed() + " of " + amount + ".";
+            return new Result(false, exception.getMessage() + progress);
         }
     }
 
-    private void transferStack(List<ItemStack> stacks, int size) {
+    /** Accepted predicted clicks need not produce slot echoes. Reopen for an authoritative inventory packet. */
+    private void reopen(long now) {
+        closeOwned();
+        phase = Phase.APPROACH;
+        phaseStarted = now;
+    }
+
+    /** The first read of the withdrawal's container fixes how many items it can take. */
+    private Result startWithdrawal(List<ItemStack> stacks, int size, int stored, int held, long now) {
+        String name = Registries.ITEM.getId(item).toString();
+        String where = "The " + blockName(canonical(target)) + " at " + describe(canonical(target));
+        withdrawTotal = withdrawRequested > 0 ? withdrawRequested : stored;
+        if (withdrawTotal == 0) return new Result(false, where + " holds no " + name + ".");
+        if (stored == 0)
+            return new Result(false, where + " holds no " + name + "; withdrew 0 of " + withdrawTotal + ".");
+        // A deposit's destination is the container; a withdrawal's is the player, so the roles swap.
+        transfer = new StorageTransfer(Math.min(withdrawTotal, stored), held, stored);
+        return withdrawStack(stacks, size, now);
+    }
+
+    private Result continueWithdrawal(List<ItemStack> stacks, int size, int stored, int held, long now) {
+        if (!transfer.confirm(held, stored, sent))
+            throw new IllegalStateException(
+                    "Server did not confirm the requested transfer. Check inventory and storage before retrying.");
+        return withdrawStack(stacks, size, now);
+    }
+
+    private Result withdrawStack(List<ItemStack> stacks, int size, long now) {
+        String name = Registries.ITEM.getId(item).toString();
+        BlockPos key = canonical(target);
+        if (transfer.remaining() == 0) {
+            if (transfer.confirmed() < withdrawTotal)
+                return new Result(
+                        false,
+                        "The " + blockName(key) + " at " + describe(key) + " held only " + transfer.confirmed() + " "
+                                + name + "; withdrew " + transfer.confirmed() + " of " + withdrawTotal + ".");
+            return new Result(
+                    true,
+                    "Withdrew " + transfer.confirmed() + " " + name + " from the " + blockName(key) + " at "
+                            + describe(key) + ".");
+        }
+        if (!transferStack(stacks, size, true))
+            return new Result(false, WithdrawTargets.fullMessage(transfer.confirmed(), withdrawTotal, name));
+        reopen(now);
+        return null;
+    }
+
+    /** Moves one batch; false when no destination slot has room. Withdrawals move container to player. */
+    private boolean transferStack(List<ItemStack> stacks, int size, boolean withdraw) {
         if (!owned.getCursorStack().isEmpty())
             throw new IllegalStateException("Storage cursor is occupied; take control to clear it.");
         StorageTransfer.Slots slots = StorageTransfer.select(
-                size,
-                stacks.size(),
+                withdraw ? 0 : size,
+                withdraw ? size : stacks.size(),
+                withdraw ? size : 0,
+                withdraw ? stacks.size() : size,
                 index -> stacks.get(index).isOf(item),
                 index -> stacks.get(index).isEmpty(),
                 (source, destination) -> {
@@ -256,7 +436,7 @@ final class FabricStorage {
                                     owned.getSlot(destination).getMaxItemCount(from))
                             - to.getCount();
                 });
-        if (slots == null) throw new IllegalStateException("The container is full for the matching inventory items.");
+        if (slots == null) return false;
         int source = slots.source(), destination = slots.destination();
         ItemStack sourceStack = stacks.get(source);
         sent = StorageTransfer.quantity(transfer.remaining(), sourceStack.getCount(), slots.capacity());
@@ -270,6 +450,7 @@ final class FabricStorage {
         if (!owned.getCursorStack().isEmpty())
             throw new IllegalStateException(
                     "Transfer left items on the cursor; closing storage to return them to inventory.");
+        return true;
     }
 
     private void click(int slot, int button) {
@@ -354,8 +535,7 @@ final class FabricStorage {
     private void closeOwned() {
         if (owned != null && client.player != null && client.player.currentScreenHandler == owned) {
             var screen = client.currentScreen;
-            boolean ownScreen =
-                    screen instanceof GenericContainerScreen container && container.getScreenHandler() == owned;
+            boolean ownScreen = screen instanceof HandledScreen<?> handled && handled.getScreenHandler() == owned;
             client.player.closeHandledScreen();
             if (screen != null && !ownScreen) client.setScreen(screen);
         }
@@ -364,15 +544,111 @@ final class FabricStorage {
 
     void cancel() {
         opening.cancel();
+        // Leftover ingredients go back to the inventory; closing a table also makes the server return them.
+        if (crafting != null && crafting.started()) crafting.returnGrid();
+        crafting = null;
         closeOwned();
         phase = null;
         targets = null;
         target = null;
     }
 
-    /** The current deposit's container once its screen opened, kept after it finishes or is cancelled; otherwise null. */
-    JsonObject depositContainer() {
-        return depositContainer == null ? null : depositContainer.deepCopy();
+    /**
+     * The current deposit's or withdrawal's container once its screen opened, kept after it finishes or is cancelled;
+     * otherwise null.
+     */
+    JsonObject transferContainer() {
+        return transferContainer == null ? null : transferContainer.deepCopy();
+    }
+
+    private BlockPos nearestCraftingTable() {
+        BlockPos nearest = null;
+        for (BlockPos pos : BlockPos.iterate(
+                client.player.getBlockPos().add(-16, -16, -16),
+                client.player.getBlockPos().add(16, 16, 16)))
+            if (pos.isWithinDistance(client.player.getPos(), 16)
+                    && isCraftingTable(pos)
+                    && (nearest == null
+                            || pos.getSquaredDistance(client.player.getPos())
+                                    < nearest.getSquaredDistance(client.player.getPos()))) nearest = pos.toImmutable();
+        return nearest;
+    }
+
+    private boolean isCraftingTable(BlockPos pos) {
+        return pos != null
+                && client.world.isChunkLoaded(pos)
+                && client.world.getBlockState(pos).isOf(Blocks.CRAFTING_TABLE);
+    }
+
+    /** Places a held crafting table on a free block next to the player, without digging; fails before moving otherwise. */
+    private BlockPos placeCraftingTable() {
+        PlayerInventory inventory = client.player.getInventory();
+        int slot = -1;
+        for (int index = 0; index < InventoryRoom.MAIN_SLOTS && slot < 0; index++)
+            if (inventory.getStack(index).isOf(Items.CRAFTING_TABLE)) slot = index;
+        if (slot < 0)
+            throw new IllegalStateException(
+                    "No crafting table within 16 blocks, and none is held to place. Move near one or craft one first.");
+        BlockPos spot = freeSpot();
+        if (spot == null)
+            throw new IllegalStateException("No crafting table within 16 blocks, and no free block next to the player"
+                    + " has solid, non-interactive ground to place the held one on.");
+        int previous = inventory.selectedSlot;
+        if (slot < 9) inventory.selectedSlot = slot;
+        else
+            // Like eating, swap the table into the selected hotbar slot; the swapped item stays in the inventory.
+            client.interactionManager.clickSlot(
+                    client.player.playerScreenHandler.syncId, slot, previous, SlotActionType.SWAP, client.player);
+        BlockPos below = spot.down();
+        BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below).add(0, 0.5, 0), Direction.UP, below, false);
+        agentOpening = true;
+        try {
+            client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hit);
+        } finally {
+            agentOpening = false;
+            inventory.selectedSlot = previous;
+        }
+        if (!isCraftingTable(spot))
+            throw new IllegalStateException("Could not place the held crafting table at " + describe(spot) + ".");
+        return spot;
+    }
+
+    /**
+     * The nearest replaceable, fluid-free block beside the player (at foot level, then one up) that no entity occupies,
+     * above a full solid top face whose block has no screen, block entity, or other use that a click could trigger.
+     */
+    private BlockPos freeSpot() {
+        BlockPos feet = client.player.getBlockPos();
+        BlockPos best = null;
+        for (int dy = 0; dy <= 1 && best == null; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0) continue;
+                    BlockPos spot = feet.add(dx, dy, dz);
+                    BlockPos below = spot.down();
+                    BlockState state = client.world.getBlockState(spot);
+                    BlockState ground = client.world.getBlockState(below);
+                    if (!client.world.isChunkLoaded(spot)
+                            || !state.isReplaceable()
+                            || !state.getFluidState().isEmpty()
+                            || !client.world.canPlace(
+                                    Blocks.CRAFTING_TABLE.getDefaultState(), spot, ShapeContext.absent())
+                            || !ground.isSideSolidFullSquare(client.world, below, Direction.UP)
+                            || ground.hasBlockEntity()
+                            || ground.createScreenHandlerFactory(client.world, below) != null
+                            || ground.getBlock() instanceof NoteBlock
+                            || ground.getBlock() instanceof RespawnAnchorBlock) continue;
+                    if (best == null
+                            || spot.getSquaredDistance(client.player.getPos())
+                                    < best.getSquaredDistance(client.player.getPos())) best = spot;
+                }
+        return best;
+    }
+
+    private String blockName(BlockPos pos) {
+        return Registries.BLOCK
+                .getId(client.world.getBlockState(pos).getBlock())
+                .toString();
     }
 
     /** Fails before anything moves when a requested position names no inventory this session has opened. */

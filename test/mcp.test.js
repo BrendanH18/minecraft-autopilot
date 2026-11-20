@@ -30,6 +30,10 @@ test('MCP client discovers tools, requires takeover, executes actions, and relea
   await client.connect(transport);
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 11);
+  const actionTool = tools.tools.find((tool) => tool.name === 'minecraft_action');
+  assert.match(actionTool.description, /withdraw takes an item .* craft makes at least count/);
+  const actionTypes = actionTool.inputSchema.properties.action.anyOf ?? actionTool.inputSchema.properties.action.oneOf;
+  assert.ok(JSON.stringify(actionTypes).includes('"craft"'), 'the action schema offers craft');
   const refused = await client.callTool({ name: 'minecraft_action', arguments: { action: { type: 'eat' } } });
   assert.equal(refused.isError, true);
   const takeover = await client.callTool({ name: 'minecraft_take_control', arguments: {} });

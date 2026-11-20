@@ -10,6 +10,7 @@ const microtasks = async () => {
   await Promise.resolve();
 };
 import minecraftData from 'minecraft-data';
+import recipeLoader from 'prismarine-recipe';
 import { Vec3 } from 'vec3';
 import { Harness } from '../src/harness.js';
 import { DemoDriver } from '../src/demo-driver.js';
@@ -25,6 +26,7 @@ import {
 } from '../src/lifecycle-scenarios.js';
 
 const registry = minecraftData('1.21.1');
+const { Recipe } = recipeLoader(registry);
 const ids = {
   sand: registry.blocksByName.sand.id,
   chest: registry.blocksByName.chest.id,
@@ -42,7 +44,7 @@ async function until(condition, what, timeoutMs = 5000) {
 // Each rig drives one real Harness; `observables` are what HALTS compare before and after the transition settles.
 const RIGS = {
   demo: {
-    activities: new Set(['idle', 'goto', 'collect', 'eat', 'deposit', 'wait']),
+    activities: new Set(['idle', 'goto', 'collect', 'eat', 'deposit', 'withdraw', 'craft', 'wait']),
     transitions: new Set(['stop', 'cancel', 'expiry', 'death', 'takeover-while-stopping', 'inventory-full']),
     create(t) {
       let clock = 0;
@@ -77,6 +79,15 @@ const RIGS = {
             start({ type: 'deposit', item: 'oak_log' });
             await microtasks();
           }
+          if (activity === 'withdraw') {
+            driver.chest.items = [{ name: 'minecraft:oak_log', count: 192 }];
+            start({ type: 'withdraw', item: 'oak_log' });
+            await microtasks();
+          }
+          if (activity === 'craft') {
+            start({ type: 'craft', item: 'oak_planks', count: 64 });
+            await microtasks();
+          }
           if (activity === 'wait') {
             start({ type: 'wait', seconds: 10 });
             await microtasks();
@@ -98,6 +109,8 @@ const RIGS = {
           mining: count('minecraft:oak_log'),
           consumption: `${count('minecraft:bread')}/${driver.player.hunger}`,
           deposit: JSON.stringify(driver.chest.items),
+          withdraw: JSON.stringify(driver.chest.items),
+          crafting: `${count('minecraft:oak_planks')}/${count('minecraft:oak_log')}`,
         }),
         pendingNative: () => false,
         async settle() {
@@ -107,7 +120,7 @@ const RIGS = {
     },
   },
   mineflayer: {
-    activities: new Set(['idle', 'goto', 'collect', 'collect-recovery', 'eat', 'deposit', 'wait']),
+    activities: new Set(['idle', 'goto', 'collect', 'collect-recovery', 'eat', 'deposit', 'withdraw', 'craft', 'wait']),
     transitions: new Set([
       'stop',
       'cancel',
@@ -123,10 +136,11 @@ const RIGS = {
       const activity = scenario.interrupts;
       const bot = new EventEmitter();
       const held = { bread: 4, oak_log: 130, sand: 0 };
-      const stored = { oak_log: 0 };
+      const stored = { oak_log: activity === 'withdraw' ? 200 : 0 };
       const sand = new Vec3(3, 64, 0);
       const chest = new Vec3(2, 64, 2);
-      const log = { steps: 0, trips: [], digs: 0, consumed: 0, batches: 0, equips: 0 };
+      const log = { steps: 0, trips: [], digs: 0, consumed: 0, batches: 0, equips: 0, crafts: 0 };
+      let result = null;
       const replies = []; // Native replies (equip, a container opening) the server has not sent yet.
       const later = (value) => new Promise((resolve) => replies.push(() => resolve(value)));
       let movements,
@@ -178,6 +192,16 @@ const RIGS = {
       };
       const window = () => ({
         containerItems: () => (stored.oak_log ? [{ name: 'oak_log', count: stored.oak_log, type: ids.log }] : []),
+        // The 36 main slots of a chest window follow its 27 container slots.
+        inventoryStart: 27,
+        inventoryEnd: 63,
+        get slots() {
+          const slots = Array(63).fill(null);
+          bot.inventory.items().forEach((item, index) => {
+            slots[27 + index] = item;
+          });
+          return slots;
+        },
         // Clicks move the stack at once; the server confirms a little later.
         deposit: async (_type, _metadata, count) => {
           held.oak_log -= count;
@@ -198,6 +222,23 @@ const RIGS = {
         health: 20,
         food: activity === 'eat' ? 18 : 20,
         inventory: {
+          // The player's own window: result slot 0, 2x2 grid 1-4, main slots from 9.
+          inventoryStart: 9,
+          inventoryEnd: 45,
+          selectedItem: null,
+          grid: new Map(),
+          get slots() {
+            const slots = Array(45).fill(null);
+            for (const [slot, name] of this.grid) slots[slot] = { name };
+            if (this.grid.size) slots[0] = { type: result.id, count: result.count };
+            return slots;
+          },
+          updateSlot(slot) {
+            this.grid.delete(slot);
+          },
+          findInventoryItem(id) {
+            return held[registry.items[id].name] > 0 ? { type: id, slot: 9 } : null;
+          },
           items() {
             const stacks = Object.entries(held)
               .filter(([, count]) => count > 0)
@@ -266,6 +307,47 @@ const RIGS = {
           held.bread--;
           bot.food = 20;
         },
+        // A withdrawal click sequence: the stack moves at once and the server confirms a little later.
+        transfer: async ({ count }) => {
+          stored.oak_log -= count;
+          held.oak_log += count;
+          log.batches++;
+          reached.emit('batch');
+          await delay(20);
+        },
+        recipesAll: (id, metadata, table) => {
+          // The allowlisted recipe yields the most (minecraft-data also lists single-item variants).
+          result = Recipe.find(id, metadata)
+            .map((recipe) => recipe.result)
+            .reduce((best, next) => (next.count > best.count ? next : best));
+          return Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table);
+        },
+        // Clicks fill the 2x2 grid one ingredient at a time; a shift-click moves a grid item back.
+        clickWindow: async (slot, _button, mode) => {
+          const grid = bot.inventory.grid;
+          if (mode === 1) {
+            held[grid.get(slot)]++;
+            grid.delete(slot);
+          } else if (slot >= bot.inventory.inventoryStart) {
+            bot.inventory.selectedItem = { type: ids.log };
+          } else {
+            const name = registry.items[bot.inventory.selectedItem.type].name;
+            held[name]--;
+            grid.set(slot, name);
+          }
+        },
+        putSelectedItemRange: async () => {
+          bot.inventory.selectedItem = null;
+        },
+        // Taking the result finishes one craft; a stopped craft keeps waiting until the server answers.
+        putAway: () => {
+          bot.inventory.grid.clear();
+          const output = registry.items[result.id].name;
+          held[output] = (held[output] || 0) + result.count;
+          log.crafts++;
+          reached.emit('craft');
+          return scenario.transition === 'takeover-while-stopping' ? later() : delay(20);
+        },
         openContainer: () => {
           reached.emit('open');
           return scenario.transition === 'takeover-while-stopping' ? later(window()) : Promise.resolve(window());
@@ -296,6 +378,8 @@ const RIGS = {
             'collect-recovery': 'return',
             eat: 'equip',
             deposit: scenario.transition === 'takeover-while-stopping' ? 'open' : 'batch',
+            withdraw: scenario.transition === 'takeover-while-stopping' ? 'open' : 'batch',
+            craft: 'craft',
           }[name];
           const point = at && milestone(at);
           if (name === 'goto') harness.start(owner, { type: 'goto', x: 50, y: 64, z: 0 });
@@ -303,6 +387,8 @@ const RIGS = {
             harness.start(owner, { type: 'collect', block: 'sand', count: 2 });
           if (name === 'eat') harness.start(owner, { type: 'eat' });
           if (name === 'deposit') harness.start(owner, { type: 'deposit', item: 'oak_log' });
+          if (name === 'withdraw') harness.start(owner, { type: 'withdraw', item: 'oak_log' });
+          if (name === 'craft') harness.start(owner, { type: 'craft', item: 'oak_planks', count: 64 });
           if (name === 'wait') {
             harness.start(owner, { type: 'wait', seconds: 10 });
             await nextTurn();
@@ -334,6 +420,8 @@ const RIGS = {
           mining: `${log.digs}/${held.sand}/${log.trips.filter((trip) => trip.canDig).length}`,
           consumption: `${log.consumed}/${held.bread}`,
           deposit: `${log.batches}/${stored.oak_log}`,
+          withdraw: `${log.batches}/${stored.oak_log}`,
+          crafting: `${log.crafts}/${held.oak_planks || 0}/${held.oak_log}`,
         }),
         pendingNative: () => replies.length > 0,
         async settle() {
