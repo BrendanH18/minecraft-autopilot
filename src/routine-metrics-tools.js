@@ -1,4 +1,5 @@
 import { actionSchema } from './protocol.js';
+import { RECIPES, craftsFor } from './recipes.js';
 import { parseRoutine, loadRoutine } from './routine.js';
 import { ledgerNumber } from './ledger-tools.js';
 const types = actionSchema.options.map((schema) => schema.shape.type.value);
@@ -134,7 +135,9 @@ export function routineMetricsReport(input, command, args = []) {
           peaks.set(name, null);
         } else if (old !== null) {
           // Collection, withdrawal, and crafting add the named item; a deposit removes it.
-          const v = old + (a.type === 'deposit' ? -a.count : a.count);
+          // A craft makes whole recipes, so it can add more than its requested minimum.
+          const added = a.type === 'craft' ? craftsFor(RECIPES[a.item], a.count) * RECIPES[a.item].yield : a.count;
+          const v = old + (a.type === 'deposit' ? -a.count : added);
           balances.set(name, v);
           if (peaks.get(name) !== null) peaks.set(name, Math.max(peaks.get(name) ?? 0, v));
         }

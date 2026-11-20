@@ -1223,6 +1223,8 @@ export class MineflayerDriver {
         }
         await this.bot.clickWindow(slot, 1, 0);
       }
+      // A cancelled fill goes straight to the bounded cleanup below.
+      signal.throwIfAborted();
       // On the normal path the rest of the source stack must really go back before the result is taken.
       await putBack();
     } finally {

@@ -306,7 +306,7 @@ function botFixture(
       // minecraft-data also lists bamboo sticks (1 per craft); the allowlisted plank recipe yields the most.
       output = Recipe.find(id, metadata)
         .map((recipe) => recipe.result)
-        .reduce((best, result) => (result.count > best.count ? result : best));
+        .reduce((best, result) => (result.count > (best?.count ?? 0) ? result : best), null);
       return Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table);
     },
     // A crafting table window: result slot 0, grid 1-9, the player's main slots from 10.
@@ -320,7 +320,7 @@ function botFixture(
       };
       // A slow server opens the table only after the bot stopped waiting.
       if (tableOpens) setImmediate(open);
-      else setTimeout(open, 200);
+      else setTimeout(open, 100);
     },
     clickWindow: async (slot, button, mode) => {
       const window = bot.currentWindow ?? bot.inventory;
