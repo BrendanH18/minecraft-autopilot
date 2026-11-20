@@ -68,7 +68,10 @@ test('demo withdraw fails with partial progress when the chest holds too little 
 test('demo withdraw refuses a chest beyond 16 blocks, and crafted tools take one slot each', async () => {
   const driver = new DemoDriver({ scenario: 'stocked' });
   driver.player.position = { x: 40, y: 64, z: 0 };
-  await assert.rejects(run(driver, { type: 'withdraw', item: 'oak_log', count: 2 }), /No chest or barrel within 16 blocks/);
+  await assert.rejects(
+    run(driver, { type: 'withdraw', item: 'oak_log', count: 2 }),
+    /No chest or barrel within 16 blocks/,
+  );
   assert.equal(held(driver.inventory, 'minecraft:oak_log'), 0);
   // Bread, sticks, and cobblestone plus 32 dirt stacks leave one free slot: room for one pickaxe, not two.
   driver.inventory.push(
@@ -604,7 +607,10 @@ test('takeover while filling a table grid stops before the next click and return
       if (window.grid.size === 2) controller.abort(new Error('Player took control.'));
     },
   });
-  await assert.rejects(run(driver, { type: 'craft', item: 'chest', count: 1 }, controller.signal), /Player took control/);
+  await assert.rejects(
+    run(driver, { type: 'craft', item: 'chest', count: 1 }, controller.signal),
+    /Player took control/,
+  );
   await driver.operations.waitForIdle(new AbortController().signal);
   assert.equal(log.clicks.filter((slot) => slot < 10).length, 2, 'no ingredient placed after the takeover');
   assert.equal(log.tables[0].closed, true);
