@@ -310,16 +310,17 @@ function botFixture(
       return Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table);
     },
     // A crafting table window: result slot 0, grid 1-9, the player's main slots from 10.
-    openBlock: async (block) => {
+    activateBlock: (block) => {
       assert.equal(world.get(`${block.position.x},${block.position.y},${block.position.z}`), 'crafting_table');
       const window = craftingWindow({ type: 'minecraft:crafting', start: 10, block });
       log.tables.push(window);
-      const opened = () => {
+      const open = () => {
         bot.currentWindow = window;
-        return window;
+        bot.emit('windowOpen', window);
       };
       // A slow server opens the table only after the bot stopped waiting.
-      return tableOpens ? opened() : new Promise((resolve) => setTimeout(() => resolve(opened()), 200));
+      if (tableOpens) setImmediate(open);
+      else setTimeout(open, 200);
     },
     clickWindow: async (slot, button, mode) => {
       const window = bot.currentWindow ?? bot.inventory;
@@ -670,4 +671,19 @@ test('takeover while filling the 2x2 grid moves the placed ingredients back to t
   assert.equal(bot.inventory.grid.size, 0);
   assert.equal(count('oak_planks'), 4);
   assert.equal(log.crafts.length, 0);
+});
+
+test('a late table window is left alone once another action has started', async (t) => {
+  const { driver, log } = botFixture(t, {
+    blocks: { '1,64,0': 'crafting_table' },
+    items: [['oak_planks', 8]],
+    tableOpens: false,
+  });
+  driver.containerTimeoutMs = 50;
+  await assert.rejects(run(driver, { type: 'craft', item: 'chest', count: 1 }), /did not open/);
+  // A new action owns whatever window opens next.
+  driver.activeAction = true;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(log.tables[0].closed, false);
+  driver.activeAction = false;
 });

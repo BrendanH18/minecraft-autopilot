@@ -215,7 +215,12 @@ export class DemoDriver {
       throw Object.assign(new Error(message), { container });
     };
     if (withdrawn < Math.min(requested, stored)) fail(`Inventory full; withdrew ${withdrawn} of ${requested} ${name}.`);
-    if (stored === 0) fail(`The ${where} holds no ${name}; withdrew 0 of ${requested} ${name}.`);
+    if (stored === 0)
+      fail(
+        action.count === undefined
+          ? `The ${where} holds no ${name}.`
+          : `The ${where} holds no ${name}; withdrew 0 of ${requested} ${name}.`,
+      );
     if (stored < requested)
       fail(`The ${where} held only ${stored} ${name}; withdrew ${withdrawn} of ${requested} ${name}.`);
     return { message: `Simulated withdrawing ${withdrawn} ${name} from the ${where}.`, container };

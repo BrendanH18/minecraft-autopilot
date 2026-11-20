@@ -169,9 +169,7 @@ final class FabricStorage {
         if (chosen == null)
             throw new IllegalStateException("No chest, trapped chest, or barrel within 16 blocks was last seen holding "
                     + name + ", and none is unopened. Move near storage that holds it first.");
-        int expected = amount > 0 ? amount : observed.getOrDefault(chosen, 0);
-        if (expected > 0 && !InventoryRoom.hasRoom(FabricCrafting.mainSlots(client.player.getInventory()), name))
-            throw new IllegalStateException(WithdrawTargets.fullMessage(0, expected, name));
+        // A full inventory is reported after reading the container, so the count and its contents are live.
         targets = new ArrayDeque<>(List.of(chosen));
         nextTarget();
     }

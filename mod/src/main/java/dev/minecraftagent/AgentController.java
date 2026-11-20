@@ -791,7 +791,9 @@ public final class AgentController {
                 if (!client.world.isChunkLoaded(pos)) continue;
                 Block block = client.world.getBlockState(pos).getBlock();
                 String name = Registries.BLOCK.getId(block).getPath();
-                if (!COLLECT_DROPS.containsKey(name) || found.getOrDefault(name, 0) >= 3) continue;
+                // Crafting tables are reported too, so a planner can see where table recipes will be crafted.
+                if (!(COLLECT_DROPS.containsKey(name) || name.equals("crafting_table"))
+                        || found.getOrDefault(name, 0) >= 3) continue;
                 JsonObject entry = position(pos);
                 entry.addProperty("name", "minecraft:" + name);
                 blocks.add(entry);

@@ -112,10 +112,11 @@ export class Harness {
         });
       })
       .then((result) => {
+        // A transfer that finishes just after cancel, stop, or expiry still moved items.
+        if (!job.container) reportContainer(job, result?.container);
         if (controller.signal.aborted || job.status !== 'running') return;
         job.status = 'completed';
         job.message = result?.message || 'Completed.';
-        reportContainer(job, result?.container);
       })
       .catch((error) => {
         // A driver may abort on death, disconnect, or a world change before the periodic tick notices; let the

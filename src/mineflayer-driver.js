@@ -1131,30 +1131,34 @@ export class MineflayerDriver {
   // One craft at a crafting table, opened within the container timeout. Closing the table returns grid and cursor items.
   async craftAtTable(block, shaped, signal) {
     let timer;
-    let expired = false;
-    const opening = this.bot.openBlock(block);
-    // A table that opens after the timeout is closed at once, so no screen stays open behind the failed craft.
-    opening.then(
-      (late) => {
-        if (expired) this.bot.closeWindow(late);
-      },
-      () => {},
-    );
-    const window = await Promise.race([
-      opening,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          expired = true;
-          reject(new Error('The crafting table did not open.'));
-        }, this.containerTimeoutMs);
-      }),
-    ]).finally(() => clearTimeout(timer));
+    let onOpen;
+    const window = await new Promise((resolve, reject) => {
+      // Our own listener, removed on timeout: mineflayer's openBlock would accept a later action's window instead.
+      onOpen = resolve;
+      this.bot.once('windowOpen', onOpen);
+      timer = setTimeout(() => {
+        this.bot.removeListener('windowOpen', onOpen);
+        this.closeLateTable();
+        reject(new Error('The crafting table did not open.'));
+      }, this.containerTimeoutMs);
+      this.bot.activateBlock(block);
+    }).finally(() => clearTimeout(timer));
     try {
       if (!window.type?.startsWith('minecraft:crafting')) throw new Error('The crafting table did not open.');
       await this.craftInGrid(window, 3, shaped, signal);
     } finally {
       this.bot.closeWindow(window);
     }
+  }
+
+  // A table that opens after its craft gave up is closed, unless another action has started and may own the window.
+  closeLateTable() {
+    const late = (window) => {
+      if (!this.activeAction && !this.operations.busy && window.type?.startsWith('minecraft:crafting'))
+        this.bot.closeWindow(window);
+    };
+    this.bot.once('windowOpen', late);
+    setTimeout(() => this.bot.removeListener('windowOpen', late), 3 * this.containerTimeoutMs).unref?.();
   }
 
   // One craft in the player's own 2x2 grid. Nothing closes that grid, so items left in it are moved back by hand.
@@ -1165,10 +1169,16 @@ export class MineflayerDriver {
       await this.craftInGrid(window, 2, shaped, signal);
       crafted = true;
     } finally {
-      // A shift-click moves each leftover ingredient back without waiting on a reply that may never come.
-      if (!crafted)
-        for (let slot = 1; slot <= 4; slot++) if (window.slots[slot]) await this.bot.clickWindow(slot, 0, 1);
+      // Shift-click each leftover ingredient back. Each click waits for the server, so it is bounded, skipped once
+      // disconnected, and never replaces the error that ended the craft.
+      for (let slot = 1; slot <= 4 && !crafted && this.connected; slot++)
+        if (window.slots[slot]) await this.bounded(this.bot.clickWindow(slot, 0, 1));
     }
+  }
+
+  // Waits for a native reply for at most the container timeout, ignoring its failure.
+  bounded(promise) {
+    return Promise.race([promise, delay(this.containerTimeoutMs)]).catch(() => {});
   }
 
   // Places one ingredient per click, checking cancellation before every click, then takes the result only once the
@@ -1188,19 +1198,23 @@ export class MineflayerDriver {
       if (window.selectedItem)
         await this.bot.putSelectedItemRange(window.inventoryStart, window.inventoryEnd, window, null);
     };
-    for (const { id, slot } of cells) {
-      if (signal.aborted) break;
-      if (window.selectedItem?.type !== id) {
-        await putBack();
+    try {
+      for (const { id, slot } of cells) {
         if (signal.aborted) break;
-        const source = window.findInventoryItem(id, null);
-        if (!source) throw new Error('An ingredient went missing while crafting.');
-        await this.bot.clickWindow(source.slot, 0, 0);
-        if (signal.aborted) break;
+        if (window.selectedItem?.type !== id) {
+          await putBack();
+          if (signal.aborted) break;
+          const source = window.findInventoryItem(id, null);
+          if (!source) throw new Error('An ingredient went missing while crafting.');
+          await this.bot.clickWindow(source.slot, 0, 0);
+          if (signal.aborted) break;
+        }
+        await this.bot.clickWindow(slot, 1, 0);
       }
-      await this.bot.clickWindow(slot, 1, 0);
+    } finally {
+      // Whatever ended the loop, the rest of the source stack goes back from the cursor.
+      if (this.connected) await this.bounded(putBack());
     }
-    await putBack();
     signal.throwIfAborted();
     // Every cell holds one item, so taking the result crafts exactly once.
     for (let waited = 0; window.slots[0]?.type !== shaped.result.id; waited += 50) {
