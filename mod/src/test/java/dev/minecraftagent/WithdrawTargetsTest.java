@@ -35,8 +35,12 @@ class WithdrawTargetsTest {
         assertNull(WithdrawTargets.choose(List.of("a", "b"), Map.of("a", 0, "b", 0)));
         assertNull(WithdrawTargets.choose(List.<String>of(), Map.of()));
         assertNull(
-                WithdrawTargets.choose(List.of("a"), Map.of("far-away", 5)),
+                WithdrawTargets.choose(List.<String>of(), Map.of("far-away", 5)),
                 "a known container out of range is not a candidate");
+        assertEquals(
+                "a",
+                WithdrawTargets.choose(List.of("a"), Map.of("far-away", 5)),
+                "a nearby container never opened this session is the fallback, not the far one holding the item");
     }
 
     @Test

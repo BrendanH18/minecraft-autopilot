@@ -71,9 +71,9 @@ class StorageTransferTest {
 
     @Test
     void withdrawalSelectsContainerSourcesAndPlayerDestinations() {
-        // A 3-slot container (0-2) and 3 player slots (3-5): container slot 1 holds the item, player slot 4 is a
-        // partial
-        // stack and slot 5 is empty. The partial stack is filled before the empty slot.
+        // A 3-slot container (0-2) and 3 player slots (3-5): container slot 1 holds the item, player slot 3 holds
+        // another item, slot 4 is a partial stack, and slot 5 is empty. The partial stack is filled before the empty
+        // slot.
         StorageTransfer.Slots selected = StorageTransfer.select(
                 0,
                 3,
@@ -81,7 +81,7 @@ class StorageTransferTest {
                 6,
                 index -> index == 1,
                 index -> index == 5,
-                (source, destination) -> destination == 4 ? 10 : 64);
+                (source, destination) -> destination == 3 ? 0 : destination == 4 ? 10 : 64);
         assertEquals(new StorageTransfer.Slots(1, 4, 10), selected);
         assertNull(
                 StorageTransfer.select(0, 3, 3, 6, index -> index == 1, index -> false, (source, destination) -> 0),
