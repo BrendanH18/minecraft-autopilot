@@ -32,6 +32,6 @@ npm run build:mod
 npm run verify:mod
 ```
 
-Report exact blockers for checks you cannot run. Distinguish fixtures, simulation, mocked inference, and live gameplay. Record live versions/results in the development guide and leave unverified release checks open.
+`scripts/boat-check.sh` runs this list in a Boat sandbox; see [Boat checks](docs/DEVELOPMENT.md#boat-checks). Report exact blockers for checks you cannot run. Distinguish fixtures, simulation, mocked inference, and live gameplay. Record live versions/results in the development guide and leave unverified release checks open.
 
 Use the PR template to describe the problem, resulting behavior, and validation. Generated jars, caches, worlds, runtime state, tokens, and task results remain ignored. Source contributions use the [MIT license](LICENSE); third-party jars retain their own licenses.

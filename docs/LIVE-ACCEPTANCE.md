@@ -26,6 +26,9 @@ node scripts/live-bot-acceptance.js --accept-eula --scenario stale-removal-model
 
 Options: `--scenario ID` (repeatable) or `--all`; `--port N`; `--out FILE` (defaults to `results.json` in the run directory); `--account NAME` (offline username, default `LiveBot`); `--java PATH`; `--model NAME` and `--ollama URL` for model scenarios; `--keep-server`. Use distinct ports and, if supplying `--out`, distinct output files for concurrent runs.
 
+Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks),
+which also copies the results back:
+`scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --all`.
 A full offline `--all` run took about 15 minutes in Boat. The three pit
 scenarios each wait out the bot's 180-second mining deadline. See the
 [observed results](DEVELOPMENT.md#validation).
