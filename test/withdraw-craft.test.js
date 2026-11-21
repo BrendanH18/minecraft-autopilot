@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import minecraftData from 'minecraft-data';
 import recipeLoader from 'prismarine-recipe';
 import { Vec3 } from 'vec3';
@@ -364,6 +365,7 @@ function botFixture(
     },
     _syncWindow: async (window) => {
       assert.equal(window, bot.currentWindow ?? bot.inventory);
+      await nextTurn();
       const { name, count } = window.pendingResult;
       assert.equal(give(name, count), 0, 'result had room');
       delete window.pendingResult;
