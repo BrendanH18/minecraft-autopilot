@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Live bot acceptance scenarios cover omitted withdrawal counts, missing or short storage, and full inventory for withdrawals and crafts. The crafting scenarios also check insufficient ingredients for a requested quota.
+
 - [Batch 16](docs/IMPROVEMENTS.md#batch-16-100-creative-project-planners) adds 100 offline planners for textile floors, note-block scores, library collections, and pixel murals.
 
 - Experimental `withdraw` and `craft` actions. `withdraw ITEM [COUNT]` takes an

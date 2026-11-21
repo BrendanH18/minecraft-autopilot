@@ -269,10 +269,23 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
     8,
   );
   assert.match(text, /bridge: craft stone_pickaxe 1 \(no table within 16 blocks/);
+  const missing = plan.scenarios.find((scenario) => scenario.id === 'craft-missing-ingredients');
+  assert.ok(missing.prepare.includes(`give ${BOT} minecraft:oak_log 2`));
+  assert.deepEqual(missing.actions, ['bridge: craft oak_planks 12']);
+  const full = plan.scenarios.find((scenario) => scenario.id === 'craft-full-inventory');
+  assert.ok(full.prepare.includes(`give ${BOT} minecraft:oak_log 2`));
+  assert.ok(full.prepare.includes(`give ${BOT} minecraft:cobblestone ${35 * 64}`));
+  assert.deepEqual(full.actions, ['bridge: craft oak_planks 4']);
   assert.match(
     text,
     /\[withdraw\][\s\S]*setblock \d+ -60 0 minecraft:chest\[facing=west\]\{Items:\[\{Slot:0b,id:"minecraft:oak_log",count:20\}/,
   );
+  const omitted = plan.scenarios.find((scenario) => scenario.id === 'withdraw-omitted');
+  assert.match(omitted.actions[0], /^bridge: withdraw oak_log \(no count,/);
+  assert.ok(omitted.fixture.some((command) => command.includes('{Slot:2b,id:"minecraft:oak_log",count:64}')));
+  const fullWithdraw = plan.scenarios.find((scenario) => scenario.id === 'withdraw-full-inventory');
+  assert.ok(fullWithdraw.prepare.includes(`give ${BOT} minecraft:oak_log 60`));
+  assert.ok(fullWithdraw.prepare.includes(`give ${BOT} minecraft:cobblestone ${35 * 64}`));
 });
 
 test('options require an explicit selection and validate ids, ports, and names', () => {
@@ -834,6 +847,26 @@ test('craft-bootstrap passes only when the server shows the crafted items and th
   assert.equal(failed.status, 'fail');
   assert.match(failed.reason, /exactly one crafting table now stands beside the start/);
   assert.doesNotMatch(failed.reason, /server inventory holds the crafted results/);
+});
+
+test('craft refusal fails acceptance if ingredients disappear despite the expected error', async () => {
+  const scenario = byId('craft-missing-ingredients');
+  const lane = laneOrigin(scenario.lane);
+  const start = { x: lane.x + 0.5, y: -60, z: 0.5 };
+  for (const consume of [false, true]) {
+    const world = fakeWorld({ start });
+    const behaviors = {
+      craft: async () => {
+        if (consume) world.inventory[0].count--;
+        const message = 'Missing ingredients for 12 oak_planks: 1 oak_log.';
+        world.job = { status: 'failed', message };
+        throw new Error(message);
+      },
+    };
+    const record = await runScenario(scenario, env(world, fakeDeps(world, { behaviors })));
+    assert.equal(record.status, consume ? 'fail' : 'pass', record.reason);
+    if (consume) assert.match(record.reason, /server inventory still holds the ingredients/);
+  }
 });
 
 test('model-only scenarios are skipped without --model and never faked', async () => {

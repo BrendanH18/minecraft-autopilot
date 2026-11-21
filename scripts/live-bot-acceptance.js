@@ -12,8 +12,8 @@ import { createInterface } from 'node:readline';
 import { writePrivateJson } from '../src/config.js';
 import { FabricAdapter } from '../src/fabric-adapter.js';
 import { runAgent } from '../src/agent.js';
-import { toPosition, distance, itemCount } from './live-acceptance/nbt-parse.js';
-import { scenarios, scenarioIds, scenarioPlan, LOG } from './live-acceptance/scenarios.js';
+import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from './live-acceptance/nbt-parse.js';
+import { scenarios, scenarioIds, scenarioPlan } from './live-acceptance/scenarios.js';
 import {
   DEFAULT_JAR,
   RUNTIME,
@@ -283,23 +283,21 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
   return ctx;
 }
 
-/** Waits until the bridge and server agree that the bot stands at the start with the given oak-log count. */
+/** Waits until the bot is at the start and the bridge reflects the fixture's inventory. */
 async function settle(ctx, start, timeoutMs = 15_000) {
   const deadline = ctx.now() + timeoutMs;
   let last;
   while (true) {
     const state = await ctx.bridge.observe();
     const server = await ctx.server.position();
-    const held = itemCount(await ctx.server.inventory(), LOG);
-    const bridgeHeld = (state.inventory || [])
-      .filter((item) => item.name === LOG)
-      .reduce((total, item) => total + item.count, 0);
+    const held = itemTotals(await ctx.server.inventory());
+    const bridgeHeld = bridgeItemTotals(state.inventory);
     last = { bridge: state.player?.position ?? null, server, held, bridgeHeld };
     if (
       state.player?.position &&
       distance(state.player.position, start) <= 1 &&
       distance(server, start) <= 1 &&
-      held === bridgeHeld &&
+      sameTotals(held, bridgeHeld) &&
       !state.job
     )
       return last;

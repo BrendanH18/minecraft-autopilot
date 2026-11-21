@@ -1,4 +1,4 @@
-import { distance, itemCount, itemTotals } from './nbt-parse.js';
+import { bridgeItemTotals, distance, itemCount, itemTotals, sameTotals } from './nbt-parse.js';
 
 // Superflat 1.21.1: bedrock -64, dirt -63..-62, grass -61; players stand at y = -60.
 export const STAND = -60;
@@ -16,9 +16,9 @@ export const RELEASE = {
   store:
     'RELEASE.md: "Run collect-and-store with both criteria. Remove stored items during inference and block inspection; stale contents must not produce success. Verify final inspection preserves return-home criteria or reports failure."',
   withdraw:
-    'protocol.md: "Withdraw takes an item from one chest, trapped chest, or barrel within 16 blocks ..." (no RELEASE.md box yet; bot evidence for the preview)',
+    'RELEASE.md: "Validate bot withdraw and craft against a local server with the same cases ..." (withdrawal cases)',
   craft:
-    'protocol.md: "Craft makes at least `count` (1..64) of one allowlisted output ..." including placing a held crafting table (no RELEASE.md box yet; bot evidence for the preview)',
+    'RELEASE.md: "Validate bot withdraw and craft against a local server with the same cases ..." (crafting cases)',
 };
 
 const at = (o, dx, y, dz) => `${o.x + dx} ${y} ${o.z + dz}`;
@@ -112,26 +112,33 @@ function platformPlan({ bot, lane }) {
   };
 }
 
-/** A chest two blocks east of the start, seeded with 20 oak logs and 5 cobblestone; the player holds nothing. */
-function withdrawPlan({ bot, lane }) {
+function withdrawPlan({ bot, lane }, { offset = 2, extraLogs = 0, fullInventory = false } = {}) {
   const o = laneOrigin(lane);
-  const chest = point(o, 2, STAND, 0);
+  const chest = point(o, offset, STAND, 0);
   const start = center(point(o, 0, STAND, 0));
+  const stocks = [
+    '{Slot:0b,id:"minecraft:oak_log",count:20}',
+    '{Slot:1b,id:"minecraft:cobblestone",count:5}',
+    ...(extraLogs ? [`{Slot:2b,id:"minecraft:oak_log",count:${extraLogs}}`] : []),
+  ];
+  const held = fullInventory ? { [LOG]: 60, 'minecraft:cobblestone': 35 * 64 } : {};
+  const clearArea = `fill ${at(o, -3, STAND, -3)} ${at(o, Math.max(4, offset), STAND + 3, 3)} air`;
   return {
     origin: o,
     points: { start, chest },
+    held,
+    stock: { [LOG]: 20 + extraLogs, 'minecraft:cobblestone': 5 },
     fixture: [
       forceload(o, 'add'),
-      `fill ${at(o, -3, STAND, -3)} ${at(o, 4, STAND + 3, 3)} air`,
-      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[{Slot:0b,id:"minecraft:oak_log",count:20},{Slot:1b,id:"minecraft:cobblestone",count:5}]}`,
+      clearArea,
+      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[${stocks.join(',')}]}`,
     ],
-    prepare: [...resetPlayer(bot), teleport(bot, start)],
-    cleanup: [
+    prepare: [
       ...resetPlayer(bot),
-      `fill ${at(o, -3, STAND, -3)} ${at(o, 4, STAND + 3, 3)} air`,
-      killDrops(o),
-      forceload(o, 'remove'),
+      teleport(bot, start),
+      ...Object.entries(held).map(([item, count]) => `give ${bot} ${item} ${count}`),
     ],
+    cleanup: [...resetPlayer(bot), clearArea, killDrops(o), forceload(o, 'remove')],
   };
 }
 
@@ -139,7 +146,7 @@ function withdrawPlan({ bot, lane }) {
  * Open ground with no crafting table; the player holds 3 oak logs and 3 cobblestone. The craft action places the
  * crafting table it made on one of the eight blocks beside the start, all of which are read before and after.
  */
-function craftPlan({ bot, lane }) {
+function craftPlan({ bot, lane }, supplies = ['minecraft:oak_log 3', 'minecraft:cobblestone 3']) {
   const o = laneOrigin(lane);
   const start = center(point(o, 0, STAND, 0));
   const beside = [
@@ -157,12 +164,7 @@ function craftPlan({ bot, lane }) {
     points: { start, beside },
     reads: beside.map((cell) => tableAt(cell)),
     fixture: [forceload(o, 'add'), `fill ${at(o, -4, STAND, -4)} ${at(o, 4, STAND + 3, 4)} air`],
-    prepare: [
-      ...resetPlayer(bot),
-      teleport(bot, start),
-      `give ${bot} minecraft:oak_log 3`,
-      `give ${bot} minecraft:cobblestone 3`,
-    ],
+    prepare: [...resetPlayer(bot), teleport(bot, start), ...supplies.map((stack) => `give ${bot} ${stack}`)],
     cleanup: [
       ...resetPlayer(bot),
       `fill ${at(o, -4, STAND, -4)} ${at(o, 4, STAND + 3, 4)} air`,
@@ -545,11 +547,6 @@ async function runStore(ctx, plan, variant) {
   }
 }
 
-const totalsOf = (items) => Object.fromEntries((items || []).map(({ name, count }) => [name, count]));
-const sameTotals = (a, b) => {
-  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
-  return [...keys].every((key) => (a?.[key] || 0) === (b?.[key] || 0));
-};
 const settledAction = async (ctx, action) => {
   try {
     const job = await ctx.bridge.execute(action);
@@ -559,36 +556,68 @@ const settledAction = async (ctx, action) => {
   }
 };
 
-async function runWithdraw(ctx, plan) {
+async function runWithdraw(ctx, plan, { count, moved = count, failure, noCandidate = false }) {
   const { chest, start } = plan.points;
-  const before = await ctx.step('independent baseline (chest Items, Inventory, Pos)', () => snapshot(ctx, chest));
+  const read = async () => ({
+    chest: itemTotals(await ctx.server.items(chest)),
+    inventory: itemTotals(await ctx.server.inventory()),
+    position: await ctx.server.position(),
+  });
+  const before = await ctx.step('independent baseline (chest Items, Inventory, Pos)', read);
   ctx.note('baseline', before);
-  const outcome = await ctx.step('bridge: withdraw oak_log 8', () =>
-    settledAction(ctx, { type: 'withdraw', item: 'oak_log', count: 8 }),
+  const outcome = await ctx.step(`bridge: withdraw oak_log${count === undefined ? '' : ` ${count}`}`, () =>
+    settledAction(ctx, { type: 'withdraw', item: 'oak_log', ...(count === undefined ? {} : { count }) }),
   );
   ctx.note('outcome', outcome);
   const state = await ctx.bridge.observe();
-  const after = await ctx.step('independent final state', () => snapshot(ctx, chest));
+  const after = await ctx.step('independent final state', read);
   ctx.note('final', { server: after, bridgeJob: state.job, bridgeContainers: state.containers ?? null });
-  const taken = (before.chest[LOG] || 0) - (after.chest[LOG] || 0);
-  ctx.check('job completed', outcome.settled === 'completed' && state.job?.status === 'completed', {
+  ctx.check(
+    'server baseline matches the seeded chest and starting inventory',
+    sameTotals(before.chest, plan.stock) && sameTotals(before.inventory, plan.held),
+    { before, expectedChest: plan.stock, expectedInventory: plan.held },
+  );
+  const status = failure ? 'failed' : 'completed';
+  ctx.check(`job ${status}`, outcome.settled === (failure ? 'rejected' : 'completed') && state.job?.status === status, {
     outcome,
     job: state.job,
   });
-  ctx.check('job reports 8 oak logs withdrawn', /Withdrew 8 oak_log\b/.test(outcome.message || ''), {
-    message: outcome.message,
-  });
-  ctx.check('server chest holds exactly 8 fewer oak logs', taken === 8, { before: before.chest, after: after.chest });
+  const message = outcome.message || '';
   ctx.check(
-    'other chest contents untouched',
-    (after.chest['minecraft:cobblestone'] || 0) === (before.chest['minecraft:cobblestone'] || 0),
-    { before: before.chest, after: after.chest },
+    failure ? 'job reports the expected withdrawal failure' : `job reports ${moved} oak logs withdrawn`,
+    failure ? failure.test(message) : message.startsWith(`Withdrew ${moved} oak_log from `),
+    { message },
   );
-  ctx.check('server inventory holds 8 more oak logs', after.held - before.held === 8, {
-    before: before.held,
-    after: after.held,
+  const taken = (before.chest[LOG] || 0) - (after.chest[LOG] || 0);
+  ctx.check(`server chest holds exactly ${moved} fewer oak logs`, taken === moved, {
+    before: before.chest,
+    after: after.chest,
   });
+  ctx.check('other chest contents untouched', sameTotals({ ...before.chest, [LOG]: 0 }, { ...after.chest, [LOG]: 0 }), {
+    before: before.chest,
+    after: after.chest,
+  });
+  const expectedInventory = { ...before.inventory, [LOG]: (before.inventory[LOG] || 0) + moved };
+  ctx.check(
+    `server inventory holds ${moved} more oak logs with other items unchanged`,
+    sameTotals(after.inventory, expectedInventory),
+    { expected: expectedInventory, after: after.inventory },
+  );
   const reported = outcome.container;
+  const bridgeInventory = bridgeItemTotals(state.inventory);
+  ctx.check('bridge inventory agrees with the server', sameTotals(bridgeInventory, after.inventory), {
+    bridge: bridgeInventory,
+    server: after.inventory,
+  });
+  ctx.check('the bot stayed within 2 blocks of the start', distance(after.position, start) <= 2, {
+    distance: distance(after.position, start),
+  });
+  if (noCandidate) {
+    ctx.check('job reports no container', !reported, { container: reported });
+    const drift = distance(before.position, after.position);
+    ctx.check('server position stayed fixed when no container was in range', drift <= 0.2, { distance: drift });
+    return;
+  }
   ctx.check(
     'job names the seeded chest',
     reported?.name === 'minecraft:chest' && reported.x === chest.x && reported.y === chest.y && reported.z === chest.z,
@@ -596,30 +625,16 @@ async function runWithdraw(ctx, plan) {
   );
   ctx.check(
     'job container.before matches the server baseline',
-    !!reported && sameTotals(totalsOf(reported.before), before.chest),
-    {
-      reported: reported?.before ?? null,
-      server: before.chest,
-    },
+    Array.isArray(reported?.before) && sameTotals(bridgeItemTotals(reported.before), before.chest),
+    { reported: reported?.before ?? null, server: before.chest },
   );
-  ctx.check('bridge inventory agrees with the server', heldOnBridge(state) === after.held, {
-    bridge: heldOnBridge(state),
-    server: after.held,
-  });
   const observed = (state.containers || []).find(
     (entry) => entry.x === chest.x && entry.y === chest.y && entry.z === chest.z,
   );
   ctx.check(
     'bridge container observation agrees with the server chest',
-    !!observed?.items && sameTotals(totalsOf(observed.items), after.chest),
+    Array.isArray(observed?.items) && sameTotals(bridgeItemTotals(observed.items), after.chest),
     { bridge: observed?.items ?? null, server: after.chest },
-  );
-  ctx.check(
-    'the bot stayed beside the chest (server Pos within 2 blocks of the start)',
-    distance(after.position, start) <= 2,
-    {
-      distance: distance(after.position, start),
-    },
   );
 }
 
@@ -686,8 +701,7 @@ async function runCraft(ctx, plan) {
       message: jobs.wooden_pickaxe?.message,
     },
   );
-  const bridgeInventory = {};
-  for (const item of state.inventory || []) bridgeInventory[item.name] = (bridgeInventory[item.name] || 0) + item.count;
+  const bridgeInventory = bridgeItemTotals(state.inventory);
   ctx.check('bridge inventory agrees with the server', sameTotals(bridgeInventory, after.inventory), {
     bridge: bridgeInventory,
     server: after.inventory,
@@ -695,6 +709,64 @@ async function runCraft(ctx, plan) {
   ctx.check('the bot stayed at the start (server Pos within 1.5 blocks)', distance(after.position, start) <= 1.5, {
     distance: distance(after.position, start),
   });
+}
+
+function craftRefusalScenario({ id, lane, title, count, cobblestone, message }) {
+  return {
+    id,
+    lane,
+    title,
+    release: [RELEASE.craft],
+    plan(input) {
+      const supplies = ['minecraft:oak_log 2'];
+      if (cobblestone) supplies.push(`minecraft:cobblestone ${cobblestone}`);
+      return { ...craftPlan(input, supplies), reads: [] };
+    },
+    async run(ctx, plan) {
+      const before = await ctx.step('independent baseline (Inventory)', async () => {
+        const stacks = await ctx.server.inventory();
+        return { inventory: itemTotals(stacks), stacks: stacks.length };
+      });
+      ctx.note('baseline', before);
+      ctx.check(
+        'server inventory matches the fixture',
+        sameTotals(before.inventory, { [LOG]: 2, 'minecraft:cobblestone': cobblestone }) &&
+          before.stacks === (cobblestone ? 36 : 1),
+        before,
+      );
+      const outcome = await ctx.step(`bridge: craft oak_planks ${count}`, () =>
+        settledAction(ctx, { type: 'craft', item: 'oak_planks', count }),
+      );
+      const state = await ctx.bridge.observe();
+      ctx.check(
+        'craft failed for the expected reason',
+        outcome.settled === 'rejected' && state.job?.status === 'failed' && outcome.message.startsWith(message),
+        { outcome, job: state.job },
+      );
+      const after = await ctx.step('independent final state (Inventory, Pos)', async () => ({
+        inventory: itemTotals(await ctx.server.inventory()),
+        position: await ctx.server.position(),
+      }));
+      ctx.note('final', after);
+      ctx.check(
+        'server inventory still holds the ingredients and no planks',
+        sameTotals(before.inventory, after.inventory),
+        { before: before.inventory, after: after.inventory },
+      );
+      ctx.check(
+        'bridge inventory agrees with the server',
+        sameTotals(bridgeItemTotals(state.inventory), after.inventory),
+        {
+          bridge: state.inventory,
+          server: after.inventory,
+        },
+      );
+      const moved = distance(after.position, plan.points.start);
+      ctx.check('bot stays within 1.5 blocks of the start', moved <= 1.5, { distance: moved });
+    },
+    actions: [`bridge: craft oak_planks ${count}`],
+    expect: [`job failed with "${message}"`, 'server inventory retains all ingredients and holds no planks'],
+  };
 }
 
 /** Shared by the two return-home inspection scenarios. variant: preserve | blocked. */
@@ -931,13 +1003,65 @@ export const scenarios = [
     title: 'Withdraw from a seeded chest; server reads confirm the move and the reported baseline',
     release: [RELEASE.withdraw],
     plan: withdrawPlan,
-    run: (ctx, plan) => runWithdraw(ctx, plan),
+    run: (ctx, plan) => runWithdraw(ctx, plan, { count: 8 }),
     actions: ['bridge: withdraw oak_log 8 (chest seeded with 20 oak logs and 5 cobblestone, in reach of the start)'],
     expect: [
       'job completed with "Withdrew 8 oak_log"; it names the seeded chest',
       'server chest −8 oak logs, cobblestone untouched; server inventory +8 oak logs',
       'job container.before equals the seeded contents read by the server before the action',
       'bridge inventory and container observation agree with the server',
+    ],
+  },
+  {
+    id: 'withdraw-omitted',
+    lane: 11,
+    title: 'Omitting the withdrawal count transfers every matching stack',
+    release: [RELEASE.withdraw],
+    plan: (args) => withdrawPlan(args, { extraLogs: 64 }),
+    run: (ctx, plan) => runWithdraw(ctx, plan, { moved: 84 }),
+    actions: ['bridge: withdraw oak_log (no count, chest seeded with 84 oak logs across two stacks)'],
+    expect: [
+      'job completed and reports 84 oak logs withdrawn',
+      'server chest has no logs and retains its cobblestone; server inventory holds all 84 logs',
+    ],
+  },
+  {
+    id: 'withdraw-no-candidate',
+    lane: 12,
+    title: 'Withdrawing with no container in range fails without moving',
+    release: [RELEASE.withdraw],
+    plan: (args) => withdrawPlan(args, { offset: 18 }),
+    run: (ctx, plan) =>
+      runWithdraw(ctx, plan, { count: 8, moved: 0, failure: /No chest or barrel within 16 blocks/, noCandidate: true }),
+    actions: ['bridge: withdraw oak_log 8 (the seeded chest is 18 blocks east)'],
+    expect: ['job failed and reports no candidate', 'server chest contents, bot inventory, and position are unchanged'],
+  },
+  {
+    id: 'withdraw-short-stock',
+    lane: 13,
+    title: 'Withdrawing more than the chest holds reports the partial transfer',
+    release: [RELEASE.withdraw],
+    plan: withdrawPlan,
+    run: (ctx, plan) =>
+      runWithdraw(ctx, plan, { count: 24, moved: 20, failure: /held only 20 oak_log; withdrew 20 of 24 oak_log/ }),
+    actions: ['bridge: withdraw oak_log 24 (the chest holds 20 logs)'],
+    expect: [
+      'job failed and reports 20 of 24 logs withdrawn',
+      'server chest has no logs and retains its cobblestone; server inventory holds 20 oak logs',
+    ],
+  },
+  {
+    id: 'withdraw-full-inventory',
+    lane: 14,
+    title: 'Withdrawal stops when the only compatible stack fills',
+    release: [RELEASE.withdraw],
+    plan: (args) => withdrawPlan(args, { fullInventory: true }),
+    run: (ctx, plan) =>
+      runWithdraw(ctx, plan, { count: 8, moved: 4, failure: /Inventory full; withdrew 4 of 8 oak_log/ }),
+    actions: ['bridge: withdraw oak_log 8 (the only inventory room is four logs in one stack)'],
+    expect: [
+      'job failed with full inventory and reports 4 of 8 logs withdrawn',
+      'server chest holds 16 logs; inventory holds 64 logs and all 35 stacks of cobblestone',
     ],
   },
   {
@@ -958,6 +1082,22 @@ export const scenarios = [
       'bridge inventory agrees with the server',
     ],
   },
+  craftRefusalScenario({
+    id: 'craft-missing-ingredients',
+    lane: 15,
+    title: 'Crafting refuses a quota without enough ingredients',
+    count: 12,
+    cobblestone: 0,
+    message: 'Missing ingredients for 12 oak_planks',
+  }),
+  craftRefusalScenario({
+    id: 'craft-full-inventory',
+    lane: 16,
+    title: 'Crafting refuses output that cannot fit after consuming the ingredient',
+    count: 4,
+    cobblestone: 35 * 64,
+    message: 'Inventory full; crafted 0 of 4 oak_planks.',
+  }),
 ];
 
 export const scenarioIds = scenarios.map((scenario) => scenario.id);

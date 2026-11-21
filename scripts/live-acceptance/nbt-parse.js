@@ -123,6 +123,13 @@ export function itemTotals(items) {
   return totals;
 }
 
+export const bridgeItemTotals = (items) => itemTotals((items || []).map(({ name, count }) => ({ id: name, count })));
+
+export function sameTotals(a, b) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  return [...keys].every((key) => (a?.[key] || 0) === (b?.[key] || 0));
+}
+
 /** `[1.5d, -60.0d, 2.5d]` → { x, y, z }. */
 export function toPosition(value) {
   if (!Array.isArray(value) || value.length !== 3 || !value.every(Number.isFinite))
