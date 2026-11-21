@@ -285,8 +285,10 @@ ensure_sandbox() {
     else
         echo "boat-check: no ready $snapshot snapshot, so this sandbox starts cold; --save makes one" >&2
     fi
-    name=$(printf '%s' "$(basename "$root")" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-60)
-    name="mca-check-$name-$key"
+    # The account is shared by every project, so the name says which one this is
+    # (Boat allows 120 characters).
+    name=$(printf '%s' "$(basename "$root")" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-50)
+    name="minecraft-autopilot-check-$name-$key"
     new_log=$local_dir/new-$key.log
     # --no-env: none of the account's stored logins, tokens or keys go into the sandbox.
     if ! fail_fast boat new --json --no-env --type "$type" --ttl "$idle" --name "$name" ${from[@]+"${from[@]}"} >"$new_log"; then

@@ -40,10 +40,15 @@ directory in it. See [Boat checks](docs/DEVELOPMENT.md#boat-checks).
 - Exceptions (run on this Mac): the Minecraft client (`npm run dev:mod`, `runClient`, the normal launcher), packaged Fabric acceptance, Microsoft-authenticated handoff and Ollama local-model runs. Boat has no GPU, and Microsoft account credentials never go into a sandbox. For packaged acceptance, build the bundle in a sandbox and copy it back: `scripts/boat-check.sh --fetch dist -- npm run build:mod` puts it in `.runtime/boat-check/<check>/dist`.
 - The ask-first rule below covers this Mac only. In a sandbox, `npm ci`, `--allow-downloads` and other installs need no approval.
 
-Generic Boat commands, for genuine one-offs outside the checks:
+Generic Boat commands, for genuine one-offs outside the checks. Every sandbox
+you create by hand (`boat new`, `boat run --keep`) passes
+`--name minecraft-autopilot-<purpose>`; never leave one with Boat's default
+"Box <date>" name, which can't be traced to a project (owner decision,
+2026-11-21). The check script names its sandboxes
+`minecraft-autopilot-check-<worktree>-<key>`.
 
 - One-shot job: `boat run --push . -- <command>` (new sandbox, run, cost, delete; exits with the command's exit code)
-- Create: `id=$(boat new --json --no-env --fail-fast | jq -r 'select(.event=="ready") | .id')`
+- Create: `id=$(boat new --json --no-env --fail-fast --name minecraft-autopilot-<purpose> | jq -r 'select(.event=="ready") | .id')`
 - Run: `boat exec "$id" --cwd my-app "npm test"` (30 s timeout; `--timeout 0` = no limit)
 - Server: `boat exec "$id" --detach "npm run dev"`, then `boat exec "$id" --status <pid>`
 - Copy files: `boat push "$id" ./my-app` (git-tracked files, to /home/user/my-app), `boat scp -r "$id":<path> .`

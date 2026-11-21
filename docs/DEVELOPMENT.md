@@ -56,7 +56,9 @@ scripts/boat-check.sh --done          # delete it when the work ends
 Each worktree gets one long-lived sandbox, so a series of checks spends one of
 the account's daily sandbox starts instead of one per check. The first check
 creates it from the saved snapshot `minecraft-autopilot-warm`, or from a bare
-machine when there is none, and records its id in `.runtime/boat-check/`.
+machine when there is none, names it
+`minecraft-autopilot-check-<worktree>-<key>` (the account is shared by every
+project), and records its id in `.runtime/boat-check/`.
 Every check then pushes the working tree (tracked and untracked, non-ignored
 files) into a new directory under `/home/user/checks/` and runs there with no
 time limit. The three newest check directories are kept. `--fetch PATH`
