@@ -58,10 +58,19 @@ function pitPlan({ bot, lane }) {
 }
 
 /** A pre-seeded chest beside the start and an 18-log patch five blocks west. */
-function storePlan({ bot, lane }) {
+export function storePlan({ bot, lane }, { storage = 'chest', depositLogs = 4 } = {}) {
   const o = laneOrigin(lane);
   const chest = point(o, 2, STAND, 0);
   const start = center(point(o, 0, STAND, 0));
+  const otherHalf = point(o, 2, STAND, -1);
+  const container =
+    storage === 'barrel' ? 'barrel[facing=up]' : `chest[facing=west${storage === 'double' ? ',type=left' : ''}]`;
+  let items = '{Slot:0b,id:"minecraft:cobblestone",count:5},{Slot:1b,id:"minecraft:oak_log",count:3}';
+  if (storage === 'full') {
+    items = Array.from({ length: 27 }, (_, slot) => `{Slot:${slot}b,id:"minecraft:cobblestone",count:64}`).join(',');
+  } else if (storage === 'double') {
+    items = '';
+  }
   return {
     origin: o,
     points: { start, chest },
@@ -72,10 +81,22 @@ function storePlan({ bot, lane }) {
     fixture: [
       forceload(o, 'add'),
       `fill ${at(o, -8, STAND, -3)} ${at(o, 4, STAND + 3, 3)} air`,
-      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[{Slot:0b,id:"minecraft:cobblestone",count:5},{Slot:1b,id:"minecraft:oak_log",count:3}]}`,
+      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:${container}{Items:[${items}]}`,
+      ...(storage === 'double'
+        ? [`setblock ${otherHalf.x} ${otherHalf.y} ${otherHalf.z} minecraft:chest[facing=west,type=right]`]
+        : []),
       `fill ${at(o, -6, STAND, -1)} ${at(o, -4, STAND + 1, 1)} oak_log`,
     ],
-    prepare: [...resetPlayer(bot), teleport(bot, start), `give ${bot} minecraft:oak_log 4`],
+    prepare: [...resetPlayer(bot), teleport(bot, start), `give ${bot} minecraft:oak_log ${depositLogs}`],
+    ...(storage === 'double'
+      ? {
+          reads: [
+            `data get block ${otherHalf.x} ${otherHalf.y} ${otherHalf.z} Items`,
+            `execute if block ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west,type=left]`,
+            `execute if block ${otherHalf.x} ${otherHalf.y} ${otherHalf.z} minecraft:chest[facing=west,type=right]`,
+          ],
+        }
+      : {}),
     cleanup: [
       ...resetPlayer(bot),
       `fill ${at(o, -8, STAND, -3)} ${at(o, 4, STAND + 3, 3)} air`,

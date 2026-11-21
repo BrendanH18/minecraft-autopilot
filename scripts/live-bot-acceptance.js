@@ -18,6 +18,8 @@ import {
   DEFAULT_JAR,
   RUNTIME,
   MINECRAFT_VERSION,
+  SEED,
+  WORLD_SETUP,
   HELP,
   preflight,
   portIsFree,
@@ -32,22 +34,7 @@ import {
   environment,
 } from './live-acceptance/processes.js';
 
-export const SEED = 'minecraft-agent-live-acceptance';
-export const WORLD_SETUP = [
-  'difficulty peaceful',
-  'gamerule doDaylightCycle false',
-  'gamerule doWeatherCycle false',
-  'gamerule doMobSpawning false',
-  'gamerule doInsomnia false',
-  'gamerule doPatrolSpawning false',
-  'gamerule doTraderSpawning false',
-  'gamerule randomTickSpeed 0',
-  'gamerule doFireTick false',
-  'gamerule mobGriefing false',
-  'gamerule spawnRadius 0',
-  'time set 1000',
-  'weather clear',
-];
+export { SEED, WORLD_SETUP };
 const REVIEW_NOTE =
   'Machine-checked observations only. These results become acceptance evidence for RELEASE.md only after a person reviews them, including server.out.';
 const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all) [--accept-eula] [--server-jar <path>] [--dry-run]

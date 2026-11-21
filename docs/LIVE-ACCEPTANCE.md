@@ -99,3 +99,51 @@ For each scenario, confirm in the results and `server.out` that the fixture buil
 - The harness's overall `collect` deadline is the job limit + 75 s: the driver's 60 s return budget, which starts after the 180 s mining deadline, plus a 15 s margin. A `recovery-timeout` failure with "Action timed out." means the return overran that margin and should be reviewed as a finding.
 - Cancellation races: if the return trip finishes before the cancel lands, the cancel scenarios fail with "interrupt issued while recovery was running".
 - Server output is matched one command at a time; a reply that arrives after its command timed out could be attributed to the next command. Timeouts are recorded in `steps`.
+
+## Fabric fixtures
+
+The fixture helper starts a fresh vanilla 1.21.1 server for a packaged Fabric
+session and prepares one scenario. It uses the same cached jar and Java
+requirements as the bot runner. The server binds to loopback in offline mode,
+and setup clears the named player's inventory in this disposable world.
+
+```sh
+npm run acceptance:fabric-fixtures -- --dry-run
+npm run acceptance:fabric-fixtures -- --dry-run --scenario deposit-double-chest --player YourName
+npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player YourName --accept-eula
+```
+
+1. Use `--dry-run` to print all fixture commands and independent reads, or
+   select one with `--scenario`. Dry runs require neither a server jar nor
+   EULA acceptance.
+2. For a live run, enter the exact Minecraft profile name with `--player`.
+   Join `127.0.0.1:25567` from the packaged Fabric profile when prompted.
+   Override the port with `--port` if needed. The helper waits up to five
+   minutes for that player, teleports and equips them, and prints the
+   server's baseline reads.
+3. Once it prints `Fixture ready`, use `mc-agent observe` in a separate
+   terminal to confirm the CLI is attached to your Fabric profile. Follow the
+   [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist), including any
+   additional player setup it calls for. Enter the printed server reads in
+   the fixture terminal at the checklist's observation points. After an
+   interruption, repeat the reads at the checklist's interval. Use a fresh
+   run for each alternative or retry. Use a different `--port` for each run
+   in the same client session, or restart the Minecraft client before
+   reusing an address. Fabric remembers storage observations by server
+   address while the client is open.
+4. Enter `stop` or press Ctrl+C to stop the server. The world and
+   `server.out` are retained under `.runtime/live-fabric-fixtures/run-*/server/`.
+   Copy the relevant baseline and follow-up reads into the candidate's
+   acceptance session.
+
+| Fixtures | Setup and reads |
+| --- | --- |
+| `pit` | Bot runner's oak-log shaft and mining fatigue, with player inventory and position reads before collection and after recovery. |
+| `deposit-chest`, `deposit-barrel`, `deposit-full-chest`, `deposit-double-chest` | Three stacks of logs and nearby storage. The single chest setup also prints the contents-removal and blocked-lid commands for fresh inspection. The double chest prints item reads for both halves. |
+| `deposit-return` | The bot runner's elevated home and chest out of reach. Optionally remove the step once the player is back at home to test the blocked return. |
+| `withdraw`, `withdraw-omitted`, `withdraw-no-candidate`, `withdraw-short-stock`, `withdraw-full-inventory` | The bot runner's stocks, distances, and player inventories, with independent chest and player reads. |
+| `craft-bootstrap`, `craft-missing-ingredients`, `craft-full-inventory` | Start with the bot runner's supplies. Bootstrap also reads the possible crafting-table placement blocks before and after crafting. |
+
+Fixture startup verifies server setup and baseline reads. The packaged client
+actions, F8, model and MCP sessions, and authenticated handoff still require
+the observations in [the release checklist](RELEASE.md).

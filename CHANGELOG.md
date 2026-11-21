@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- A local fixture helper prepares repeatable pit, storage and crafting setups for packaged Fabric acceptance and prints independent server reads for before and after each action.
+
 - Release acceptance status detects evidence from mixed candidate commits or archives. Packaged Fabric and authenticated handoff sessions verify the installed jar hashes against the candidate archive with `acceptance start --mods-dir`.
 
 - Live bot acceptance scenarios cover omitted withdrawal counts, missing or short storage, and full inventory for withdrawals and crafts. The crafting scenarios also check insufficient ingredients for a requested quota.

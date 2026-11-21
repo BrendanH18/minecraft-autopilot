@@ -38,6 +38,8 @@ The table first exposed `death-goto`, `dimension-goto`, and `disconnect-collect`
 
 Fabric needs a person at the keyboard. Use the packaged mod in a normal launcher profile on Minecraft 1.21.1, joined to a local server whose console you can use (or a single-player world with cheats). Keep a second terminal for `mc-agent job` and `mc-agent stop`. Judge the results with independent server reads (`data get entity <player> Pos`, `Inventory`, `foodLevel`, `Dimension`, and `data get block <x> <y> <z> Items`), not the agent's report. Record the commit, artifact checksum, and result for each item. A scenario is not passed until it has been observed.
 
+Use the [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) for repeatable pit, deposit, withdrawal and crafting setups.
+
 <!-- fabric-checklist:start -->
 
 1. **F8 while the agent waits for model inference** (`f8-idle`; f8 during idle)

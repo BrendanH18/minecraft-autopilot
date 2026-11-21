@@ -10,6 +10,22 @@ import { FabricAdapter } from '../../src/fabric-adapter.js';
 import { ServerConsole } from './console.js';
 
 export const MINECRAFT_VERSION = '1.21.1';
+export const SEED = 'minecraft-agent-live-acceptance';
+export const WORLD_SETUP = [
+  'difficulty peaceful',
+  'gamerule doDaylightCycle false',
+  'gamerule doWeatherCycle false',
+  'gamerule doMobSpawning false',
+  'gamerule doInsomnia false',
+  'gamerule doPatrolSpawning false',
+  'gamerule doTraderSpawning false',
+  'gamerule randomTickSpeed 0',
+  'gamerule doFireTick false',
+  'gamerule mobGriefing false',
+  'gamerule spawnRadius 0',
+  'time set 1000',
+  'weather clear',
+];
 export const DEFAULT_JAR = join(projectRoot, '.gradle-user/caches/fabric-loom/1.21.1/minecraft-server.jar');
 export const RUNTIME = join(projectRoot, '.runtime/live-acceptance');
 export const CLI = join(projectRoot, 'src/cli.js');
