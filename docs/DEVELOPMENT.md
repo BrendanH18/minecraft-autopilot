@@ -98,6 +98,16 @@ The [release checklist](RELEASE.md) still calls for final-candidate review,
 the remaining bot withdrawal and crafting cases, real-model runs, MCP on
 Fabric, packaged Fabric gameplay, and authenticated handoff.
 
+**Offline withdrawal and crafting follow-up (20 November 2026).** A clean
+`f0eecd8` run in Boat with the same Minecraft server jar, Mineflayer, Node,
+and Java versions passed all eight targeted scenarios. The omitted count
+moved all 84 logs across two stacks. The out-of-range chest stayed untouched
+after the bot confirmed it had loaded the chest's chunk. Short stock and
+limited inventory room reported 20 of 24 and 4 of 8 logs withdrawn,
+respectively, matching the server reads. Both refused crafts preserved all
+ingredients. Exact withdrawal and the two-pickaxe bootstrap passed again.
+The results await human review for the release checklist.
+
 **Live gameplay (October 2026)** used the Fabric development client and the bot against a local offline vanilla 1.21.1 server and a single-player world. Each item below was observed working:
 
 These are historical observations, not acceptance results for the latest release candidate. The [release checklist](RELEASE.md) requires fresh checks of the current packaged code.
