@@ -1,7 +1,13 @@
 package dev.minecraftagent;
 
-/** One vanilla interaction at a time; its acknowledgement follows any screen reply. */
+/** One vanilla block interaction at a time; its acknowledgement follows any screen reply. */
 final class StorageOpening {
+    enum Placement {
+        WAITING,
+        CONFIRMED,
+        REJECTED
+    }
+
     private boolean pending;
     private boolean cancelled;
     private int sequence = -1;
@@ -19,6 +25,12 @@ final class StorageOpening {
 
     boolean pending() {
         return pending;
+    }
+
+    /** The acknowledgement hook runs after vanilla reconciles the predicted block with the server's state. */
+    Placement placement(boolean tablePresent) {
+        if (pending) return Placement.WAITING;
+        return tablePresent ? Placement.CONFIRMED : Placement.REJECTED;
     }
 
     boolean sent() {

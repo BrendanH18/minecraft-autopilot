@@ -141,6 +141,10 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Fixed
 
+- Fabric defers automatic eating during storage and crafting, and waits for
+  server confirmation before using a newly placed crafting table. A regression
+  test keeps the Fabric and Node crafting allowlists in sync.
+
 - The server bot moves a craft's result directly into inventory and refreshes
   the crafting window before proceeding, preventing stale cursor state from
   interrupting a batch of planks.

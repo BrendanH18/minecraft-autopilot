@@ -47,6 +47,7 @@ java {
 }
 test {
     useJUnitPlatform()
+    inputs.file('../src/recipes.js')
     systemProperty 'java.io.tmpdir', file('../.runtime/tmp').absolutePath
     doFirst { file('../.runtime/tmp').mkdirs() }
 }

@@ -55,6 +55,7 @@ final class FabricStorage {
     }
 
     private enum Phase {
+        PLACING_TABLE,
         APPROACH,
         OPENING,
         /** Crafting in the opened table's grid, or in the player's own grid with no screen. */
@@ -190,8 +191,8 @@ final class FabricStorage {
         }
         BlockPos table = nearestCraftingTable();
         if (table == null) {
-            table = placeCraftingTable();
-            placedTable = table;
+            placeCraftingTable();
+            return;
         }
         targets = new ArrayDeque<>(List.of(table));
         nextTarget();
@@ -262,6 +263,25 @@ final class FabricStorage {
 
     private Result step(long now) {
         try {
+            if (phase == Phase.PLACING_TABLE) {
+                switch (opening.placement(isCraftingTable(target))) {
+                    case WAITING -> {
+                        if (now - phaseStarted > 5_000_000_000L)
+                            throw new IllegalStateException(
+                                    "Timed out waiting for the server to confirm the crafting table at "
+                                            + describe(target) + ".");
+                    }
+                    case REJECTED ->
+                        throw new IllegalStateException(
+                                "The server did not confirm a crafting table at " + describe(target) + ".");
+                    case CONFIRMED -> {
+                        placedTable = target;
+                        targets = new ArrayDeque<>(List.of(target));
+                        nextTarget();
+                    }
+                }
+                return null;
+            }
             if (phase == Phase.CRAFTING) return crafting.tick(now);
             if (phase == Phase.RETURN) {
                 if (client.player.getPos().distanceTo(start) <= 1.75)
@@ -462,6 +482,10 @@ final class FabricStorage {
         openingGeneration = StoragePackets.generation();
         phase = Phase.OPENING;
         phaseStarted = System.nanoTime();
+        interact(hit, "The container interaction was not sent to the server.");
+    }
+
+    private void interact(BlockHitResult hit, String notSentMessage) {
         opening.expect();
         openingWorld = client.world;
         agentOpening = true;
@@ -472,7 +496,7 @@ final class FabricStorage {
         }
         if (!opening.sent()) {
             opening.reset();
-            throw new IllegalStateException("The container interaction was not sent to the server.");
+            throw new IllegalStateException(notSentMessage);
         }
     }
 
@@ -495,19 +519,6 @@ final class FabricStorage {
                         .getCustomGoalProcess()
                         .setGoalAndPath(new GoalGetToBlock(target));
         }
-    }
-
-    void resume() {
-        if (phase == Phase.APPROACH && target != null)
-            BaritoneAPI.getProvider()
-                    .getPrimaryBaritone()
-                    .getCustomGoalProcess()
-                    .setGoalAndPath(new GoalGetToBlock(target));
-        else if (phase == Phase.RETURN)
-            BaritoneAPI.getProvider()
-                    .getPrimaryBaritone()
-                    .getCustomGoalProcess()
-                    .setGoalAndPath(new GoalNear(BlockPos.ofFloored(start), 1));
     }
 
     private boolean pathing() {
@@ -581,7 +592,7 @@ final class FabricStorage {
     }
 
     /** Places a held crafting table on a free block next to the player, without digging; fails before moving otherwise. */
-    private BlockPos placeCraftingTable() {
+    private void placeCraftingTable() {
         PlayerInventory inventory = client.player.getInventory();
         int slot = -1;
         for (int index = 0; index < InventoryRoom.MAIN_SLOTS && slot < 0; index++)
@@ -601,16 +612,14 @@ final class FabricStorage {
                     client.player.playerScreenHandler.syncId, slot, previous, SlotActionType.SWAP, client.player);
         BlockPos below = spot.down();
         BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below).add(0, 0.5, 0), Direction.UP, below, false);
-        agentOpening = true;
+        target = spot;
+        phase = Phase.PLACING_TABLE;
+        phaseStarted = System.nanoTime();
         try {
-            client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hit);
+            interact(hit, "The crafting-table placement was not sent to the server.");
         } finally {
-            agentOpening = false;
             inventory.selectedSlot = previous;
         }
-        if (!isCraftingTable(spot))
-            throw new IllegalStateException("Could not place the held crafting table at " + describe(spot) + ".");
-        return spot;
     }
 
     /**
