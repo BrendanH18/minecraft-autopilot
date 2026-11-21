@@ -83,13 +83,17 @@ else
 fi
 
 # The fresh-clone setup from docs/DEVELOPMENT.md, with downloads, whenever the files
-# that pin the mod's dependencies change (CI's mod cache key) or the server jar that
-# the bot acceptance runs is missing. A warm sandbox skips it.
+# that pin the mod's dependencies change (CI's mod cache key), or a pinned jar or the
+# server jar the bot acceptance runs is missing or fails verification. A warm sandbox
+# skips it.
 setup_key=$(cat mod/build.gradle mod/settings.gradle mod/gradle.properties \
     mod/gradle/wrapper/gradle-wrapper.properties scripts/setup-mod.js scripts/package-mod.js \
     | sha256sum | cut -c1-16)
 server_jar=.gradle-user/caches/fabric-loom/1.21.1/minecraft-server.jar
-if [ "$(cat "$cache/setup-key" 2>/dev/null || true)" != "$setup_key" ] || [ ! -f "$server_jar" ]; then
+# setup-mod.js verifies the pinned Baritone jar offline; package-mod.js checks the
+# Fabric API jar's hash whenever it runs.
+if [ "$(cat "$cache/setup-key" 2>/dev/null || true)" != "$setup_key" ] || [ ! -f "$server_jar" ] \
+    || ! compgen -G '.deps/fabric-api-*.jar' >/dev/null || ! node scripts/setup-mod.js >/dev/null 2>&1; then
     say "the mod's pinned dependencies changed or aren't cached; running the fresh-clone setup with downloads"
     npm run setup:mod -- --allow-downloads
     node scripts/gradle.js build --allow-downloads

@@ -79,6 +79,7 @@ if [ "$action" = status ]; then
     exit 0
 fi
 
+have_lock=0
 take_lock
 extended=0 remote_dir="" bundle="" new_log="" exec_log="" remote_running=1
 trap cleanup EXIT
@@ -86,7 +87,7 @@ trap 'exit 130' INT TERM
 
 if [ "$action" = finish ]; then
     [ -n "$id" ] || { echo "boat-check: this worktree has no sandbox (key $key)"; exit 0; }
-    if boat delete "$id" --yes --json >/dev/null 2>&1 || [ -z "$(sandbox_state "$id")" ]; then
+    if boat delete "$id" --yes --json >/dev/null 2>&1 || [ "$(sandbox_state "$id")" = gone ]; then
         rm -f "$state"
         echo "boat-check: deleted sandbox $id"
         exit 0
@@ -169,33 +170,64 @@ esac
 die() { local code=$1; shift; echo "boat-check: $*" >&2; exit "$code"; }
 
 # One check at a time per sandbox. mkdir is atomic and, unlike flock, exists on macOS.
+# The owner writes its pid right after mkdir, so a contender that finds no pid waits
+# a few seconds for it before it treats the lock as stale.
 take_lock() {
-    if ! mkdir "$lock" 2>/dev/null; then
-        local other
+    local other="" tries=0
+    while ! mkdir "$lock" 2>/dev/null; do
         other=$(cat "$lock/pid" 2>/dev/null || true)
+        if [ -z "$other" ] && [ "$tries" -lt 5 ]; then
+            tries=$((tries + 1)); sleep 1; continue
+        fi
         if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
             die 4 "another boat-check (pid $other) is using this worktree's sandbox. Wait for it, or give a second agent in this checkout its own sandbox with MCA_BOAT_KEY=<name>."
         fi
-        rm -rf "$lock"
-        mkdir "$lock" 2>/dev/null || die 4 "couldn't take $lock"
-    fi
+        # Stale: its owner is gone. Only one contender wins the rename.
+        mv "$lock" "$lock.stale.$$" 2>/dev/null && rm -rf "$lock.stale.$$"
+        mkdir "$lock" 2>/dev/null && break
+        die 4 "another boat-check took $lock first; try again"
+    done
     echo $$ > "$lock/pid"
+    have_lock=1
 }
 
+# Prints the sandbox's state, "gone" when Boat confirms it doesn't exist, or "unknown"
+# when the lookup failed, so a passing network error never replaces or forgets one.
 sandbox_state() {
-    boat info "$1" --json 2>/dev/null | jq -r '(.sandbox // .).state // empty' 2>/dev/null || true
+    local out st
+    if out=$(boat info "$1" --json 2>&1); then
+        st=$(printf '%s' "$out" | jq -r '(.sandbox // .).state // empty' 2>/dev/null || true)
+        case "$st" in
+            deleted) printf gone ;;
+            "") printf unknown ;;
+            *) printf '%s' "$st" ;;
+        esac
+    elif printf '%s' "$out" | jq -e 'select(.code == "not_found" or .status == 404)' >/dev/null 2>&1; then
+        printf gone
+    else
+        printf unknown
+    fi
 }
 
 # Prints why no sandbox can start now, or nothing when one can. Starts beyond the plan's
-# included ones cost money, so they need MCA_BOAT_PAID_STARTS=1.
+# included ones cost money, so they need MCA_BOAT_PAID_STARTS=1. Fails closed: when the
+# limits can't be read, it gives that as the reason.
 no_start_reason() {
-    boat limits --json 2>/dev/null | jq -r --arg paid "${MCA_BOAT_PAID_STARTS:-0}" '
-        ([.starts.minute.remaining, .starts.hour.remaining, .starts.day.remaining] | map(. // 1) | min) as $left
-        | if .starts.unlimited == true or $left > 0 then empty
+    local limits
+    if ! limits=$(boat limits --json 2>/dev/null) \
+        || ! printf '%s' "$limits" | jq -e '.starts | type == "object"' >/dev/null 2>&1; then
+        echo "Couldn't read boat limits, so it isn't known whether a start is free; try again."
+        return
+    fi
+    printf '%s' "$limits" | jq -r --arg paid "${MCA_BOAT_PAID_STARTS:-0}" '
+        if .starts.unlimited == true then empty else
+        ([.starts.minute.remaining, .starts.hour.remaining, .starts.day.remaining] | map(. // 0) | min) as $left
+        | if $left > 0 then empty
           elif .nextStartDollars != null and $paid == "1" then empty
           elif .nextStartDollars != null then
             "Every included start is used; the next one would cost $\(.nextStartDollars). Set MCA_BOAT_PAID_STARTS=1 to pay for it, or wait. \(.startWindowFull.short // "")"
-          else (.startWindowFull.short // "No Boat starts are left.") end' 2>/dev/null || true
+          else (.startWindowFull.short // "No Boat starts are left.") end end' 2>/dev/null \
+        || echo "Couldn't read boat limits, so it isn't known whether a start is free; try again."
 }
 
 # Runs a boat new or resume with --fail-fast, retrying briefly while no machine is
@@ -229,13 +261,16 @@ ensure_sandbox() {
                 [ -z "$reason" ] || die 3 "can't resume $id now. $reason"
                 if out=$(fail_fast boat resume "$id" --ttl "$idle" --json); then return; fi
                 echo "$out" >&2
-                reason=$(no_start_reason)
-                [ -z "$reason" ] || die 3 "can't resume $id now. $reason"
-                echo "boat-check: can't resume $id; replacing it" >&2
+                # Replace it only when its data is gone; otherwise keep it for the next try.
+                [[ $out == *snapshot_data_expired* ]] \
+                    || die 3 "couldn't resume $id; it stays recorded for the next check (or --done)"
+                echo "boat-check: $id's data has expired; replacing it" >&2
                 boat delete "$id" --yes --json >/dev/null 2>&1 || true ;;
-            "") echo "boat-check: sandbox $id is gone; creating a new one" >&2 ;;
-            *) echo "boat-check: sandbox $id is $st; replacing it" >&2
+            gone) echo "boat-check: sandbox $id is gone; creating a new one" >&2 ;;
+            unknown) die 1 "couldn't look up sandbox $id; try again (boat info $id)" ;;
+            error) echo "boat-check: sandbox $id is in an error state; replacing it" >&2
                boat delete "$id" --yes --json >/dev/null 2>&1 || true ;;
+            *) die 1 "sandbox $id is $st; try again when it settles (boat info $id)" ;;
         esac
         rm -f "$state"
         id=""
@@ -290,7 +325,7 @@ cleanup() {
         boat extend "$id" --ttl "$idle" >/dev/null 2>&1 \
             || echo "boat-check: couldn't reset $id's auto-stop: boat extend $id --ttl $idle" >&2
     fi
-    rm -rf "$lock"
+    if [ "${have_lock:-0}" = 1 ] && [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$lock"; fi
 }
 
 main "$@"; exit
