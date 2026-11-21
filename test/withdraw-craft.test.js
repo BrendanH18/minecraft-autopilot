@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import minecraftData from 'minecraft-data';
 import recipeLoader from 'prismarine-recipe';
 import { Vec3 } from 'vec3';
@@ -326,7 +327,20 @@ function botFixture(
     clickWindow: async (slot, button, mode) => {
       const window = bot.currentWindow ?? bot.inventory;
       assert.equal(window.closed, false, 'no click after the table closed');
+      assert.equal(window.pendingResult, undefined, 'confirm the previous craft before the next click');
       log.clicks.push(slot);
+      if (slot === 0) {
+        assert.deepEqual([button, mode], [0, 1], 'move the result directly without putting it on the cursor');
+        assert.equal(window.selectedItem, null);
+        log.crafts.push({
+          table: window.block ? window.block.position.toString() : null,
+          cells: [...window.grid.values()],
+        });
+        window.grid.clear();
+        window.pendingResult = { name: registry.items[output.id].name, count: output.count };
+        onCraft?.();
+        return;
+      }
       if (mode === 1) {
         // A shift-click on a grid cell moves its item back to the inventory.
         give(window.grid.get(slot), 1);
@@ -349,16 +363,12 @@ function botFixture(
       assert.deepEqual([start, end], [window.inventoryStart, window.inventoryEnd]);
       window.selectedItem = null;
     },
-    putAway: async (slot) => {
-      const window = bot.currentWindow ?? bot.inventory;
-      assert.equal(slot, 0);
-      log.crafts.push({
-        table: window.block ? window.block.position.toString() : null,
-        cells: [...window.grid.values()],
-      });
-      window.grid.clear();
-      assert.equal(give(registry.items[output.id].name, output.count), 0, 'result had room');
-      onCraft?.();
+    _syncWindow: async (window) => {
+      assert.equal(window, bot.currentWindow ?? bot.inventory);
+      await nextTurn();
+      const { name, count } = window.pendingResult;
+      assert.equal(give(name, count), 0, 'result had room');
+      delete window.pendingResult;
     },
     // Closing returns the grid to the inventory, as the server does.
     closeWindow: (window) => {
@@ -495,7 +505,7 @@ test('handoff between withdraw stacks stops the transfer and closes the chest', 
 });
 
 test('bot crafting uses the 2x2 grid, counts results from the inventory, and checks ingredients first', async (t) => {
-  const { driver, log, count } = botFixture(t, { items: [['oak_log', 3]] });
+  const { driver, bot, log, count } = botFixture(t, { items: [['oak_log', 3]] });
   const result = await run(driver, { type: 'craft', item: 'oak_planks', count: 10 });
   assert.equal(result.message, 'Crafted 12 oak_planks.');
   assert.deepEqual(
@@ -503,6 +513,9 @@ test('bot crafting uses the 2x2 grid, counts results from the inventory, and che
     [null, null, null],
   );
   assert.equal(count('oak_planks'), 12);
+  assert.equal(count('oak_log'), 0);
+  assert.equal(bot.inventory.selectedItem, null);
+  assert.equal(bot.inventory.grid.size, 0);
   await assert.rejects(
     run(driver, { type: 'craft', item: 'stone_pickaxe', count: 1 }),
     /^Error: Missing ingredients for 1 stone_pickaxe: 3 more of cobblestone\/blackstone\/cobbled_deepslate and 2 more stick\.$/,

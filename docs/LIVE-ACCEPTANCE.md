@@ -26,7 +26,9 @@ node scripts/live-bot-acceptance.js --accept-eula --scenario stale-removal-model
 
 Options: `--scenario ID` (repeatable) or `--all`; `--port N`; `--out FILE` (defaults to `results.json` in the run directory); `--account NAME` (offline username, default `LiveBot`); `--java PATH`; `--model NAME` and `--ollama URL` for model scenarios; `--keep-server`. Use distinct ports and, if supplying `--out`, distinct output files for concurrent runs.
 
-A full `--all` run has not been timed yet; expect it to take well over ten minutes, because the three pit scenarios each wait out the bot's 180-second mining deadline.
+A full offline `--all` run took about 15 minutes in Boat. The three pit
+scenarios each wait out the bot's 180-second mining deadline. See the
+[observed results](DEVELOPMENT.md#validation).
 
 ## What a run does
 
@@ -83,7 +85,7 @@ For each scenario, confirm in the results and `server.out` that the fixture buil
 
 ## Known limitations
 
-- The console reply patterns and SNBT formats were written for vanilla 1.21.1 and are covered by unit tests with representative lines, but have not yet been observed against a real server by this runner. A first live run may need pattern or fixture adjustments; check `server.out` when a command step fails.
+- The console reply patterns and SNBT formats are specific to vanilla 1.21.1. Check `server.out` when a console command fails or times out.
 - The pit fixture relies on mining fatigue slowing Mineflayer's digging so 64 logs cannot be reached in 180 s. If the bot exhausts the shaft or reaches the quota, `recovery-timeout` fails rather than passing.
 - The harness's overall `collect` deadline is the job limit + 75 s: the driver's 60 s return budget, which starts after the 180 s mining deadline, plus a 15 s margin. A `recovery-timeout` failure with "Action timed out." means the return overran that margin and should be reviewed as a finding.
 - Cancellation races: if the return trip finishes before the cancel lands, the cancel scenarios fail with "interrupt issued while recovery was running".

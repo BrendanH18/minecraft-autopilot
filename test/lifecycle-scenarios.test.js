@@ -322,10 +322,15 @@ const RIGS = {
             .reduce((best, next) => (next.count > best.count ? next : best));
           return Recipe.find(id, metadata).filter((recipe) => !recipe.requiresTable || table);
         },
-        // Clicks fill the 2x2 grid one ingredient at a time; a shift-click moves a grid item back.
+        // Clicks fill the 2x2 grid. A shift-click moves a result or leftover ingredient into the inventory.
         clickWindow: async (slot, _button, mode) => {
           const grid = bot.inventory.grid;
-          if (mode === 1) {
+          if (slot === 0 && mode === 1) {
+            grid.clear();
+            const output = registry.items[result.id].name;
+            held[output] = (held[output] || 0) + result.count;
+            log.crafts++;
+          } else if (mode === 1) {
             held[grid.get(slot)]++;
             grid.delete(slot);
           } else if (slot >= bot.inventory.inventoryStart) {
@@ -339,12 +344,8 @@ const RIGS = {
         putSelectedItemRange: async () => {
           bot.inventory.selectedItem = null;
         },
-        // Taking the result finishes one craft; a stopped craft keeps waiting until the server answers.
-        putAway: () => {
-          bot.inventory.grid.clear();
-          const output = registry.items[result.id].name;
-          held[output] = (held[output] || 0) + result.count;
-          log.crafts++;
+        // A stopped craft keeps waiting for confirmation of the already submitted result.
+        _syncWindow: () => {
           reached.emit('craft');
           return scenario.transition === 'takeover-while-stopping' ? later() : delay(20);
         },

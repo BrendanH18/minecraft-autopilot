@@ -67,6 +67,37 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
+**Offline bot acceptance (20 November 2026)** used Mineflayer 4.39.0, Node
+24.22.1, and OpenJDK 21.0.13.1 on Linux x64 against a fresh offline vanilla
+Minecraft 1.21.1 superflat world in Boat. Server jar SHA-256 was
+`e3bc55693e93cda0188f2e60aea28113fc647c5e85a15fa3d1b347349231b4bb`.
+A clean `1b1d7f4` run of `npm run acceptance:bot -- --accept-eula --all`
+passed all ten offline scenarios in 15 min 5 s. The real Ollama scenario was
+skipped. The results and vanilla console log showed the following:
+
+- Mining timed out after 180 s with 15 of 64 logs collected. The return
+  attempt ended after about 5 s and reported failure. The server placed the
+  bot 9.3 blocks from its start with all 15 logs still held.
+- Lease cancellation and emergency stop interrupted pit recovery. The bridge
+  settled in 94 ms and 399 ms respectively. The bot held 16 and 15 logs,
+  and its server position stayed fixed across all three samples in each run.
+- The combined collect, deposit, and home criteria passed with eight more logs
+  in the seeded chest and the cobblestone untouched. Stale removal during
+  scripted inference and a blocked lid both prevented success. Final
+  inspection returned to within one block of home with the step in place,
+  and reported failure when the step was removed.
+- The exact withdrawal moved eight logs into inventory and preserved the five
+  cobblestone in the chest. The reported chest baseline matched the server.
+- Crafting was intermittent on `1b1d7f4`. A separate run stopped at four of
+  twelve planks with two logs still held. Moving the result directly into
+  inventory and refreshing the crafting window between crafts passed six
+  consecutive replays, including a clean checkout of `4b2e42c`. Each ended
+  with both pickaxes, three planks, and exactly one placed crafting table.
+
+The [release checklist](RELEASE.md) still calls for final-candidate review,
+the remaining bot withdrawal and crafting cases, real-model runs, MCP on
+Fabric, packaged Fabric gameplay, and authenticated handoff.
+
 **Live gameplay (October 2026)** used the Fabric development client and the bot against a local offline vanilla 1.21.1 server and a single-player world. Each item below was observed working:
 
 These are historical observations, not acceptance results for the latest release candidate. The [release checklist](RELEASE.md) requires fresh checks of the current packaged code.
@@ -175,7 +206,7 @@ These are behaviors found during live testing that the code depends on:
   - Each block attempt during collection is capped at 20 s.
   - Deposits open the container from wherever it is in reach (4 blocks from the eyes), and walk with `GoalGetToBlock` otherwise. They count stored items from the container window, because a failed transfer leaves the remainder on the cursor until the window closes.
   - Withdrawals reuse that approach and count from the window too. `bot.inventory` is only synced from an open container window when it closes, so room is read from the window's own player slots, and each click sequence moves at most one stack and no more than fits: items left on the cursor would be dropped on the ground when the window closes. They call `bot.transfer` directly because `window.withdraw` refuses whenever the stale `bot.inventory` has no empty slot, even if a matching stack has room.
-  - Crafting calls `bot.craft` once per craft, so cancellation lands between crafts, with a recipe built from a minecraft-data shape whose cells are filled from what `planCraft` consumes. minecraft-data lists one shape per material, so mixed planks or stone would otherwise find no recipe. A craft whose result has no room is refused first, because mineflayer drops a result it cannot put away. A held crafting table is placed with `placeBlock` on an air block beside the feet that has solid ground and does not overlap the 0.6-wide player.
+  - Crafting fills the grid one ingredient at a time and checks cancellation between clicks. The grid uses a minecraft-data recipe shape filled from what `planCraft` consumes, which allows mixed planks or stone. The bot checks inventory room before crafting, shift-clicks each result directly into inventory, and waits for the server to refresh the window before starting another craft or closing the table. A held crafting table is placed with `placeBlock` on an air block beside the feet that has solid ground and does not overlap the 0.6-wide player.
   - Planning a path to a collection target gets 2 s instead of the pathfinder's 5 s default. An unreachable log high in a tree used to burn the full 5 s; a block that times out is retried with the full budget only after quicker blocks run out.
   - After mining, the bot walks to where the drop lands (the first solid block below), not to the mined block, which may be in the air. Walking to a point in the air cost up to 10 s per log.
 - **Death screen.** Servers can send the death screen before the health update, so Fabric treats `DeathScreen` as death.

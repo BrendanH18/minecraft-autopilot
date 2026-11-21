@@ -1239,11 +1239,16 @@ export class MineflayerDriver {
       await delay(50);
     }
     signal.throwIfAborted();
-    // A left-click on the result with something else on the cursor is ignored, and putAway would then wait forever.
+    // A stale cursor makes a result click unsafe.
     if (window.selectedItem) throw new Error('Could not return the remaining ingredients from the cursor.');
-    await this.bot.putAway(0);
+    // Shift-click puts the result straight into the inventory. Picking it up first lets a delayed server
+    // update restore the old cursor between this craft and the next. There is only one craft in the grid.
+    await this.bot.clickWindow(0, 0, 1);
     // Each cell's single item was used up; mirror that locally as mineflayer's own crafting does.
     for (let slot = 1; slot <= width * width; slot++) window.updateSlot(slot, null);
+    // The first result-slot update can arrive before the rest of the server's inventory updates.
+    // Refresh the active window before closing a table or starting another craft.
+    await this.operations.withSignal(this.bot._syncWindow(window), AbortSignal.timeout(this.containerTimeoutMs));
   }
 
   // Room for one craft's output in the main slots once that craft's ingredients are used up.
