@@ -24,9 +24,13 @@ const groups = [
   'harborplan',
   'aqueduct',
   'viaduct',
+  'textile',
+  'note-score',
+  'library-plan',
+  'mural',
 ];
 
-test('the build planning inventory contains exactly 400 distinct commands', () => {
+test('the build planning inventory contains exactly 500 distinct commands', () => {
   assert.deepEqual(
     BUILD_PLANNING_GROUPS.map(({ name }) => name),
     groups,
@@ -38,10 +42,14 @@ test('the build planning inventory contains exactly 400 distinct commands', () =
     assert.equal(specs.length, 25, name);
     for (const { signature } of specs) commands.add(`${name} ${signature.split(' ')[0]}`);
   }
-  assert.equal(commands.size, 400);
+  assert.equal(commands.size, 500);
 });
 
 const samples = {
+  textile: ['checker-layout', '3', '2', '2', '1', '4,8'],
+  'note-score': ['retune-clicks', '24,4,1', '0,4,24'],
+  'library-plan': ['pull-slips', '8,0,8', '8,8,5'],
+  mural: ['turn-right', '2', '1,2,3,4'],
   orchardplan: ['planting-grid', '17', '11', '1', '2', '4', '3'],
   greenhouse: ['wall-glazing', '7', '5', '4', '6'],
   maproom: ['scale-span', '3'],
