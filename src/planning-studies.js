@@ -10,6 +10,7 @@ import { runScreen } from './planning-study-screen.js';
 import { runFactorial } from './planning-study-factorial.js';
 import { runSummarize } from './planning-study-summarize.js';
 import { runPareto } from './planning-study-pareto.js';
+import { findRecipe, listRecipes } from './planning-recipes.js';
 
 export const STUDY_LIMIT_BYTES = 1_000_000;
 export const STUDY_WORKFLOWS = Object.freeze({
@@ -127,6 +128,18 @@ export function registerPlanningStudies(program, { print }) {
     .command('search <terms...>')
     .description('Find planners whose group, command, or description matches all search terms.')
     .action((terms) => print(searchPlanners(terms.join(' '))));
+  study
+    .command('recipes [group]')
+    .description('List runnable planning recipes, optionally for one group.')
+    .action((group) => print(listRecipes(group)));
+  study
+    .command('recipe <group> <command>')
+    .description('Run a built-in planning comparison.')
+    .option('--request', 'Print the reusable comparison request.')
+    .action((group, command, options) => {
+      const { purpose, request } = findRecipe(group, command);
+      print(options.request ? request : { purpose, ...calculateStudy('compare', group, command, request) });
+    });
   const descriptions = {
     batch: 'Evaluate independent argument rows: {cases:[[args],...]}.',
     compare: 'Compare candidates with a baseline: {baseline:[args],candidates:[[args],...]}.',

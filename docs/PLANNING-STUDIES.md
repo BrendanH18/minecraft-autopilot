@@ -28,6 +28,28 @@ mc-agent study compare beacon-plan tier-materials '{"baseline":[3,3],"candidates
 The baseline needs 83 blocks. Adding the fourth layer takes another 81 blocks,
 bringing the candidate total to 164.
 
+## Runnable comparison recipes
+
+`mc-agent study recipes` lists 1,000 recipes, one per planner across the
+original 40 groups. Each recipe has a short purpose, a baseline, and at least one
+alternative that changes the result. Use them to see the planner with concrete
+inputs, or export a request and substitute your own measurements and estimates.
+
+```sh
+mc-agent study recipes
+mc-agent study recipes reach
+mc-agent study recipe reach roundtrip-radius
+mc-agent study recipe reach roundtrip-radius --request > request.json
+mc-agent study compare reach roundtrip-radius @request.json
+```
+
+The round-trip example gives a player 90 seconds at four blocks per second.
+Cutting preparation time from 20 to 10 seconds changes the modeled round-trip
+radius from 140 to 160 blocks. Both cases assume the same constant speed on
+the way out and back. Recipe reports use the standard comparison format and
+include the recipe's purpose. The exported request contains only the inputs
+expected by `study compare`.
+
 ## Requests and reports
 
 All nine commands use this form:
