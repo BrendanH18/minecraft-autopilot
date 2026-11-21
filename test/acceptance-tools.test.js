@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
 import { projectRoot } from '../src/config.js';
+import { modBundleFiles } from '../src/bundle.js';
 import { ACCEPTANCE_GATES, OPEN_GATES, findGate, requiredBackends } from '../src/acceptance-gates.js';
 import {
   registerAcceptanceTools,
@@ -45,6 +46,10 @@ const VERIFIED = {
     recorded: 'b'.repeat(64),
     matches: true,
     predatesBuild: false,
+  },
+  mods: {
+    archiveSha256: 'b'.repeat(64),
+    jars: modBundleFiles.map(({ name }) => ({ name, expectedSha256: 'c'.repeat(64), sha256: 'c'.repeat(64) })),
   },
 };
 

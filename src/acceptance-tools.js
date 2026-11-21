@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { open, readFile, stat } from 'node:fs/promises';
-import { createReadStream, constants } from 'node:fs';
+import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { execFile, spawnSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+import { modBundleFiles } from './bundle.js';
 import { dataDirectory, projectRoot, writePrivateJson } from './config.js';
 import {
   ACCEPTANCE_GATES,
@@ -18,6 +20,8 @@ export const ACCEPTANCE_FILE = 'acceptance-sessions.json';
 export const ARCHIVE_NAME = 'minecraft-agent-0.1.0.zip';
 export const MAX_SESSIONS = 1000;
 const MAX_BYTES = 4 * 1024 * 1024;
+const modJarNames = modBundleFiles.map(({ name }) => name);
+const execFileAsync = promisify(execFile);
 export const ACCEPTANCE_NOTE =
   'Records human observations only; it runs no gameplay and never edits docs/RELEASE.md. A person must review the evidence before ticking a box.';
 export const UNVERIFIED = 'Not acceptance of a verified release candidate';
@@ -35,6 +39,28 @@ const line = z
   .regex(/^[^\n\r]*$/);
 const note = z.string().min(1).max(2000);
 const time = z.iso.datetime();
+const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const modProvenanceSchema = z
+  .object({
+    archiveSha256: sha256.nullable(),
+    jars: z
+      .array(
+        z
+          .object({
+            name: z
+              .string()
+              .max(200)
+              .regex(/^[a-zA-Z0-9_.+-]+\.jar$/),
+            expectedSha256: sha256.nullable(),
+            sha256: sha256.nullable(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(20)
+      .refine((jars) => new Set(jars.map(({ name }) => name)).size === jars.length, 'duplicate mod jar names'),
+  })
+  .strict();
 const sessionSchema = z
   .object({
     id: z.uuid(),
@@ -71,16 +97,14 @@ const sessionSchema = z
         archive: z
           .object({
             name: z.string().max(200),
-            sha256: z.string().regex(/^[0-9a-f]{64}$/),
-            recorded: z
-              .string()
-              .regex(/^[0-9a-f]{64}$/)
-              .nullable(),
+            sha256,
+            recorded: sha256.nullable(),
             matches: z.boolean(),
             predatesBuild: z.boolean(),
           })
           .strict()
           .nullable(),
+        mods: modProvenanceSchema.optional(),
       })
       .strict(),
     warnings: z.array(z.string().max(500)).max(20),
@@ -158,9 +182,15 @@ export function defaultGit(args, cwd = projectRoot) {
 }
 
 async function sha256File(path) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
-  return hash.digest('hex');
+  const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    if (!(await file.stat()).isFile()) throw new Error('Not a regular file.');
+    const hash = createHash('sha256');
+    for await (const chunk of file.createReadStream({ autoClose: false })) hash.update(chunk);
+    return hash.digest('hex');
+  } finally {
+    await file.close();
+  }
 }
 async function readOptional(path) {
   try {
@@ -171,8 +201,53 @@ async function readOptional(path) {
   }
 }
 
-/** Reads the git commit, worktree state, dist/BUILD.json, and archive checksum; missing pieces become null with a warning. */
-export async function collectProvenance({ root = projectRoot, git = defaultGit, node = process.version } = {}) {
+async function collectModProvenance(modsDir, archivePath, archive, commit, warnings) {
+  const jars = await Promise.all(
+    modJarNames.map(async (name) => ({
+      name,
+      expectedSha256: null,
+      sha256: await sha256File(join(modsDir, name)).catch(() => null),
+    })),
+  );
+  const result = { archiveSha256: null, jars };
+  if (!archive?.matches || archive.predatesBuild) return result;
+  const readEntry = async (name) => {
+    const { stdout } = await execFileAsync('unzip', ['-p', resolve(archivePath), name], {
+      encoding: 'buffer',
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 10_000,
+    });
+    return stdout;
+  };
+  try {
+    const build = JSON.parse(await readEntry('BUILD.json'));
+    if (!commit || build?.sourceCommit !== commit || build.sourceModified !== false) {
+      warnings.push('The archive BUILD.json does not record the current clean commit.');
+      return result;
+    }
+    for (const jar of jars) {
+      const bytes = await readEntry(`mods/${jar.name}`);
+      jar.expectedSha256 = createHash('sha256').update(bytes).digest('hex');
+    }
+    if ((await sha256File(archivePath)) === archive.sha256) result.archiveSha256 = archive.sha256;
+    else warnings.push('The candidate archive changed while its mod jars were being checked.');
+  } catch (error) {
+    warnings.push(
+      error.code === 'ENOENT'
+        ? 'Could not run unzip or read the candidate archive. Check that unzip is on PATH and the archive exists.'
+        : 'Could not read BUILD.json and all packaged mod jars from the candidate archive.',
+    );
+  }
+  return result;
+}
+
+/** Reads source, bundle, and optional launcher mod provenance for one acceptance session. */
+export async function collectProvenance({
+  root = projectRoot,
+  git = defaultGit,
+  node = process.version,
+  modsDir,
+} = {}) {
   const warnings = [];
   const revision = git(['rev-parse', 'HEAD']),
     changes = git(['status', '--porcelain', '--untracked-files=normal']);
@@ -210,8 +285,9 @@ export async function collectProvenance({ root = projectRoot, git = defaultGit, 
     }
   }
   let archive = null;
+  const archivePath = join(root, 'dist', ARCHIVE_NAME);
   try {
-    const sha256 = await sha256File(join(root, 'dist', ARCHIVE_NAME));
+    const archiveSha256 = await sha256File(archivePath);
     const sums = await readOptional(join(root, 'dist/ARCHIVE_SHA256SUMS'));
     const entry = sums
       ?.split('\n')
@@ -224,9 +300,9 @@ export async function collectProvenance({ root = projectRoot, git = defaultGit, 
     const [buildAt, sumsAt] = [await modified('BUILD.json'), await modified('ARCHIVE_SHA256SUMS')];
     archive = {
       name: ARCHIVE_NAME,
-      sha256,
+      sha256: archiveSha256,
       recorded,
-      matches: recorded === sha256,
+      matches: recorded === archiveSha256,
       predatesBuild: buildAt !== null && sumsAt !== null && buildAt > sumsAt,
     };
     if (archive.predatesBuild)
@@ -239,7 +315,12 @@ export async function collectProvenance({ root = projectRoot, git = defaultGit, 
     if (error.code !== 'ENOENT') throw error;
     warnings.push(`dist/${ARCHIVE_NAME} is missing; no artifact checksum was recorded.`);
   }
-  return { provenance: { commit, dirty, node: String(node).slice(0, 64), build, archive }, warnings };
+  const provenance = { commit, dirty, node: String(node).slice(0, 64), build, archive };
+  if (modsDir !== undefined) {
+    provenance.mods = await collectModProvenance(modsDir, archivePath, archive, commit, warnings);
+    warnings.push(...launcherModProblems(provenance));
+  }
+  return { provenance, warnings };
 }
 
 const optional = (value, schema, label) => {
@@ -274,6 +355,7 @@ export function createSession({
   config.note = optional(options.note, note, 'Note');
   const allWarnings = [...warnings];
   if (backend === 'demo') allWarnings.push('The demo backend is a rehearsal and never counts as acceptance evidence.');
+  if (hasFabric(backend) && !provenance.mods) allWarnings.push(...launcherModProblems(provenance));
   return {
     id,
     gate: gate.id,
@@ -347,8 +429,24 @@ export function finishSession(sessions, reference, result, { note: text, now = n
   return { sessions: replace(sessions, updated), session: updated };
 }
 
+const hasFabric = (backend) => backend === 'fabric' || backend === 'both';
+
+function launcherModProblems({ mods, archive }) {
+  if (!mods) return ['launcher mod jars were not checked; start with --mods-dir'];
+  if (!archive || mods.archiveSha256 !== archive.sha256)
+    return ['launcher mod jars were not verified against the recorded archive'];
+  const problems = [];
+  for (const name of modJarNames) {
+    const jar = mods.jars.find((entry) => entry.name === name);
+    if (!jar?.expectedSha256) problems.push(`archive hash missing for ${name}`);
+    else if (!jar.sha256) problems.push(`launcher mod jar missing or unreadable: ${name}`);
+    else if (jar.sha256 !== jar.expectedSha256) problems.push(`launcher mod jar differs from the archive: ${name}`);
+  }
+  return problems;
+}
+
 /** Provenance problems that stop a session counting as acceptance of a verified release candidate. */
-export function provenanceProblems({ provenance: p }) {
+export function provenanceProblems({ backend, provenance: p }) {
   const problems = [];
   if (!p.commit) problems.push('git commit unknown');
   if (p.dirty !== false) problems.push(p.dirty ? 'worktree had uncommitted changes' : 'worktree state unknown');
@@ -360,6 +458,7 @@ export function provenanceProblems({ provenance: p }) {
   if (!p.archive) problems.push('archive checksum missing');
   else if (!p.archive.matches) problems.push('archive checksum not verified against ARCHIVE_SHA256SUMS');
   else if (p.archive.predatesBuild) problems.push('archive predates BUILD.json; packaging did not finish');
+  if (hasFabric(backend)) problems.push(...launcherModProblems(p));
   return problems;
 }
 
@@ -389,8 +488,9 @@ const summary = (session) => ({
   steps: latestSteps(session).size,
 });
 
-/** Pure: per open gate and required backend, the latest finished session and whether it is eligible evidence. */
+/** Pure: reports the latest evidence for each open gate and checks that eligible gates share one candidate. */
 export function acceptanceStatus(sessions) {
+  const candidates = new Map();
   const gates = OPEN_GATES.map((gate) => {
     const backends = requiredBackends(gate).map((backend) => {
       const finished = sessions
@@ -402,27 +502,36 @@ export function acceptanceStatus(sessions) {
     });
     // Gates that need one session per backend only count when both came from the same candidate.
     const latest = backends.map((entry) => sessions.find((session) => session.id === entry.latest?.id)).filter(Boolean);
-    const candidates = new Set(
+    const candidateKeys = new Set(
       latest.map((session) => `${session.provenance.commit}|${session.provenance.archive?.sha256 ?? ''}`),
     );
-    const problems =
-      latest.length > 1 && candidates.size > 1 ? ['backend sessions come from different commits or archives'] : [];
+    const problems = candidateKeys.size > 1 ? ['backend sessions come from different commits or archives'] : [];
+    const eligible = backends.every((entry) => entry.eligible) && problems.length === 0;
+    if (eligible) {
+      const [key] = candidateKeys;
+      const { commit, archive } = latest[0].provenance;
+      if (!candidates.has(key)) candidates.set(key, { commit, archiveSha256: archive.sha256, gates: [] });
+      candidates.get(key).gates.push(gate.id);
+    }
     return {
       id: gate.id,
       title: gate.title,
       backend: gate.backend,
       keyboard: gate.keyboard,
       owner: gate.owner,
-      eligible: backends.every((entry) => entry.eligible) && problems.length === 0,
+      eligible,
       problems,
       backends,
     };
   });
+  const problems = candidates.size > 1 ? ['eligible gates come from different commits or archives'] : [];
   return {
     gates,
-    eligible: gates.filter((gate) => gate.eligible).length,
+    candidates: [...candidates.values()],
+    problems,
+    eligible: problems.length ? 0 : gates.filter((gate) => gate.eligible).length,
     open: gates.length,
-    note: `${ACCEPTANCE_NOTE} "Eligible" means the latest finished session passed every step on a clean commit with a matching BUILD.json and verified archive; it does not close the gate.`,
+    note: `${ACCEPTANCE_NOTE} Gate eligibility requires passing steps and verified candidate provenance for the latest finished sessions. The total counts eligible gates when they share one candidate.`,
   };
 }
 
@@ -462,6 +571,14 @@ export function renderMarkdown(sessions) {
         ? `- Provenance: **${UNVERIFIED}:** ${problems.join('; ')}.`
         : '- Provenance: clean commit, BUILD.json matches with sourceModified false, archive checksum verified.',
     ];
+    if (p.mods)
+      lines.push(
+        '- Launcher mods at session start:',
+        ...p.mods.jars.map(
+          (jar) =>
+            `  - \`${jar.name}\` installed SHA-256 \`${jar.sha256 ?? 'unavailable'}\`, archive SHA-256 \`${jar.expectedSha256 ?? 'unavailable'}\``,
+        ),
+      );
     if (session.backend === 'demo') lines.push(`- **${UNVERIFIED}:** the demo backend is a rehearsal.`);
     lines.push(
       '- Steps:',
@@ -537,8 +654,9 @@ export function registerAcceptanceTools(
     .action((id) => print({ gate: findGate(id), note: ACCEPTANCE_NOTE }));
   group
     .command('start <gate>')
-    .description('Start a session recording the commit, worktree state, BUILD.json, and archive checksum.')
+    .description('Start a session and record source, archive, and optional launcher mod provenance.')
     .requiredOption('--backend <backend>', `backend under test: ${SESSION_BACKENDS.join(', ')}`)
+    .option('--mods-dir <path>', 'hash packaged jars in the launcher profile mods directory (uses unzip)')
     .option('--launcher <text>', 'launcher and profile, for example "Minecraft Launcher, Fabric Loader 0.16.14"')
     .option('--server <text>', 'world or server, for example "single-player" or "vanilla 1.21.1, offline"')
     .option('--model <text>', 'model name and version')
@@ -549,7 +667,7 @@ export function registerAcceptanceTools(
       if (sessions.length >= MAX_SESSIONS)
         throw new Error(`At most ${MAX_SESSIONS} sessions can be recorded; archive ${path} first.`);
       findGate(gateId);
-      const { provenance, warnings } = await collectProvenance({ root, git, node });
+      const { provenance, warnings } = await collectProvenance({ root, git, node, modsDir: options.modsDir });
       const session = createSession({
         gate: gateId,
         backend: options.backend,
@@ -636,7 +754,7 @@ export function registerAcceptanceTools(
     });
   group
     .command('status')
-    .description('Show, per open gate, the latest finished session and whether it is eligible evidence.')
+    .description('Show the latest evidence for each open gate and whether eligible gates share one candidate.')
     .action(async () => print(acceptanceStatus(await readSessions(path))));
   return group;
 }
