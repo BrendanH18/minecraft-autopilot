@@ -112,26 +112,31 @@ function platformPlan({ bot, lane }) {
   };
 }
 
-function withdrawPlan({ bot, lane }, { offset = 2, extraLogs = 0, fullInventory = false } = {}) {
+function withdrawPlan({ bot, lane }, { outOfRange = false, extraLogs = 0, fullInventory = false } = {}) {
   const o = laneOrigin(lane);
-  const chest = point(o, offset, STAND, 0);
+  const chest = outOfRange ? point(o, 14, STAND, 14) : point(o, 2, STAND, 0);
   const start = center(point(o, 0, STAND, 0));
+  // An observable block in the same chunk proves the bot has received the out-of-range chest's chunk.
+  const marker = outOfRange ? { ...point(o, 2, STAND, 0), name: LOG } : null;
   const stocks = [
     '{Slot:0b,id:"minecraft:oak_log",count:20}',
     '{Slot:1b,id:"minecraft:cobblestone",count:5}',
     ...(extraLogs ? [`{Slot:2b,id:"minecraft:oak_log",count:${extraLogs}}`] : []),
   ];
   const held = fullInventory ? { [LOG]: 60, 'minecraft:cobblestone': 35 * 64 } : {};
-  const clearArea = `fill ${at(o, -3, STAND, -3)} ${at(o, Math.max(4, offset), STAND + 3, 3)} air`;
+  const clearCorner = outOfRange ? at(o, 14, STAND + 3, 14) : at(o, 4, STAND + 3, 3);
+  const clearArea = `fill ${at(o, -3, STAND, -3)} ${clearCorner} air`;
   return {
     origin: o,
     points: { start, chest },
+    marker,
     held,
     stock: { [LOG]: 20 + extraLogs, 'minecraft:cobblestone': 5 },
     fixture: [
       forceload(o, 'add'),
       clearArea,
       `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[${stocks.join(',')}]}`,
+      ...(marker ? [`setblock ${marker.x} ${marker.y} ${marker.z} ${marker.name}`] : []),
     ],
     prepare: [
       ...resetPlayer(bot),
@@ -1030,10 +1035,13 @@ export const scenarios = [
     lane: 12,
     title: 'Withdrawing with no container in range fails without moving',
     release: [RELEASE.withdraw],
-    plan: (args) => withdrawPlan(args, { offset: 18 }),
+    plan: (args) => withdrawPlan(args, { outOfRange: true }),
     run: (ctx, plan) =>
       runWithdraw(ctx, plan, { count: 8, moved: 0, failure: /No chest or barrel within 16 blocks/, noCandidate: true }),
-    actions: ['bridge: withdraw oak_log 8 (the seeded chest is 18 blocks east)'],
+    actions: [
+      'wait for the bridge to see the marker in the chest chunk',
+      'bridge: withdraw oak_log 8 (chest outside 16 blocks)',
+    ],
     expect: ['job failed and reports no candidate', 'server chest contents, bot inventory, and position are unchanged'],
   },
   {
