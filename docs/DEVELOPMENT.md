@@ -67,6 +67,37 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
+**Offline bot acceptance (20 November 2026)** used Mineflayer 4.39.0, Node
+24.22.1, and OpenJDK 21.0.13.1 on Linux x64 against a fresh offline vanilla
+Minecraft 1.21.1 superflat world in Boat. Server jar SHA-256 was
+`e3bc55693e93cda0188f2e60aea28113fc647c5e85a15fa3d1b347349231b4bb`.
+A clean `1b1d7f4` run of `npm run acceptance:bot -- --accept-eula --all`
+passed all ten offline scenarios in 15 min 5 s. The real Ollama scenario was
+skipped. The results and vanilla console log showed the following:
+
+- Mining timed out after 180 s with 15 of 64 logs collected. The return
+  attempt ended after about 5 s and reported failure. The server placed the
+  bot 9.3 blocks from its start with all 15 logs still held.
+- Lease cancellation and emergency stop interrupted pit recovery. The bridge
+  settled in 94 ms and 399 ms respectively. The bot held 16 and 15 logs,
+  and its server position stayed fixed across all three samples in each run.
+- The combined collect, deposit, and home criteria passed with eight more logs
+  in the seeded chest and the cobblestone untouched. Stale removal during
+  scripted inference and a blocked lid both prevented success. Final
+  inspection returned to within one block of home with the step in place,
+  and reported failure when the step was removed.
+- The exact withdrawal moved eight logs into inventory and preserved the five
+  cobblestone in the chest. The reported chest baseline matched the server.
+- Crafting was intermittent on `1b1d7f4`. A separate run stopped at four of
+  twelve planks with two logs still held. Moving the result directly into
+  inventory and refreshing the crafting window between crafts passed six
+  consecutive replays, including a clean checkout of `4b2e42c`. Each ended
+  with both pickaxes, three planks, and exactly one placed crafting table.
+
+The [release checklist](RELEASE.md) still calls for final-candidate review,
+the remaining bot withdrawal and crafting cases, real-model runs, MCP on
+Fabric, packaged Fabric gameplay, and authenticated handoff.
+
 **Live gameplay (October 2026)** used the Fabric development client and the bot against a local offline vanilla 1.21.1 server and a single-player world. Each item below was observed working:
 
 These are historical observations, not acceptance results for the latest release candidate. The [release checklist](RELEASE.md) requires fresh checks of the current packaged code.

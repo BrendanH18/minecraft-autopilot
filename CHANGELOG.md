@@ -138,6 +138,10 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Fixed
 
+- The server bot moves a craft's result directly into inventory and refreshes
+  the crafting window before proceeding, preventing stale cursor state from
+  interrupting a batch of planks.
+
 - Give bot collection a 15 s margin past its 60 s return budget, so a full-length return after a mining timeout reports its inventory progress instead of "Action timed out."
 - End bot jobs interrupted by death, disconnect, or a world/dimension change as `cancelled` with the shared lifecycle message, matching the demo and Fabric, instead of `failed` with the driver's raw reason.
 - Check Fabric action/retreat deadlines before eating and back off failed consumption, with isolated timing-policy regression tests.
