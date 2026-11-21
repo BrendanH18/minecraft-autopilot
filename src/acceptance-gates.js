@@ -203,11 +203,12 @@ export const ACCEPTANCE_GATES = deep([
     title: 'Bot withdraw and craft on a local server',
     release:
       'Validate bot withdraw and craft against a local server with the same cases, including a real local model with `--verify-withdraw` and `--verify-craft`.',
-    prerequisites: [BOT, 'A chest within 16 blocks holding logs and cobblestone, and a local model.'],
+    prerequisites: [
+      BOT,
+      'For the real-model check, a chest within 16 blocks holding logs and cobblestone, and a local model.',
+    ],
     steps: [
-      'Run `npm run acceptance:bot -- --accept-eula --scenario withdraw --scenario craft-bootstrap`.',
-      'Withdraw with the count omitted, reading the chest and inventory on the server before and after.',
-      'Repeat the Fabric withdraw and craft failure cases with the bot.',
+      'Run `npm run acceptance:bot -- --accept-eula --scenario withdraw --scenario withdraw-omitted --scenario withdraw-no-candidate --scenario withdraw-short-stock --scenario withdraw-full-inventory --scenario craft-bootstrap --scenario craft-missing-ingredients --scenario craft-full-inventory`.',
       'Run a real local model with `--verify-withdraw` and `--verify-craft`.',
     ],
     evidence: [
