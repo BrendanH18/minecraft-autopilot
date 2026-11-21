@@ -258,13 +258,20 @@ no_start_reason() {
 
 # Runs a boat new or resume with --fail-fast, retrying briefly while no machine is
 # ready: such an attempt fails at once and doesn't count against the start limits.
+# A failed attempt can leave Boat finishing a resume for a moment, so the next one is
+# answered "resume already in progress"; that is waited out too.
 fail_fast() {
-    local attempt out
+    local attempt out wait why
     for attempt in 1 2 3 4 5 6; do
         if out=$("$@" --fail-fast 2>&1); then printf '%s\n' "$out"; return 0; fi
-        [[ $out == *no_ready_machine* ]] && [ "$attempt" -lt 6 ] || { printf '%s\n' "$out"; return 1; }
-        echo "boat-check: no machine is ready; retrying in 5 s" >&2
-        sleep 5
+        case "$out" in
+            *no_ready_machine*) wait=5 why="no machine is ready" ;;
+            *"already in progress"*) wait=10 why="Boat is still busy with an earlier attempt" ;;
+            *) printf '%s\n' "$out"; return 1 ;;
+        esac
+        [ "$attempt" -lt 6 ] || { printf '%s\n' "$out"; return 1; }
+        echo "boat-check: $why; retrying in $wait s" >&2
+        sleep "$wait"
     done
 }
 
@@ -286,6 +293,12 @@ ensure_sandbox() {
                 reason=$(no_start_reason)
                 [ -z "$reason" ] || die 3 "can't resume $id now. $reason"
                 if out=$(fail_fast boat resume "$id" --ttl "$idle" --json); then return; fi
+                # An earlier attempt's resume may have finished after all.
+                case "$(sandbox_state "$id")" in
+                    provisioned|cloning|ready|idle|running)
+                        echo "boat-check: $id is up after all; reusing it" >&2
+                        return ;;
+                esac
                 echo "$out" >&2
                 # Replace it only when its data is gone; otherwise keep it for the next try.
                 [[ $out == *snapshot_data_expired* ]] \

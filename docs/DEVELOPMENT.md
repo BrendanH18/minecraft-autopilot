@@ -83,7 +83,10 @@ in seconds), and the next check resumes it. A resume counts as a start unless
 Boat still holds the machine. Sandboxes start with `--no-env`, so none of the
 account's stored logins, tokens or keys go in. They also start with
 `--fail-fast`: a start that finds no machine ready fails without counting, and
-the script retries for about 30 seconds. When the plan's included starts are
+the script tries six times, 5 seconds apart. Such a failed resume can leave
+Boat busy for a moment, answering the next attempt with "resume already in
+progress"; the script waits 10 seconds before retrying that, and reuses the
+sandbox if the earlier resume finished after all. When the plan's included starts are
 used up, the script refuses to pay for extra ones unless `MCA_BOAT_PAID_STARTS=1`.
 Other settings are `MCA_BOAT_KEY`, which gives a second agent sharing a
 checkout its own sandbox, and `MCA_BOAT_TYPE` (default `default`: 4 vCPUs,
