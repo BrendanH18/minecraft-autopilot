@@ -37,6 +37,67 @@ npm run dev:mod      # Fabric development client with a test identity
 
 `dev:mod` checks that the Minecraft assets are cached and refuses to download them. The first `runClient` with downloads enabled must happen through `node scripts/gradle.js runClient --allow-downloads`.
 
+## Boat checks
+
+Agents run builds, tests and the headless bot acceptance in a
+[Boat](https://boat.dev) sandbox through `scripts/boat-check.sh`, not on the
+development machine. It needs the `boat` CLI, signed in, plus `jq` and `git`.
+
+```sh
+scripts/boat-check.sh                 # the hand-off checks in CONTRIBUTING.md
+scripts/boat-check.sh -- npm test     # any command
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario withdraw
+scripts/boat-check.sh --fetch dist -- npm run build:mod   # a bundle for packaged acceptance on the Mac
+scripts/boat-check.sh --save          # hand-off checks, then refresh the warm snapshot
+scripts/boat-check.sh --status        # this worktree's sandbox
+scripts/boat-check.sh --done          # delete it when the work ends
+```
+
+Each worktree gets one long-lived sandbox, so a series of checks spends one of
+the account's daily sandbox starts instead of one per check. The first check
+creates it from the saved snapshot `minecraft-autopilot-warm`, or from a bare
+machine when there is none, names it
+`minecraft-autopilot-check-<worktree>-<path hash>-<key>` (the account is shared by every
+project), and records its id in `.runtime/boat-check/`.
+Every check then pushes the working tree (tracked and untracked, non-ignored
+files) into a new directory under `/home/user/checks/` and runs there with no
+time limit. The three newest check directories are kept. `--fetch PATH`
+copies `PATH` from the check directory to `.runtime/boat-check/<check>/` here.
+A bot acceptance run also brings back its world, about 100 MB. Interrupting
+the script interrupts the check in the sandbox too.
+
+Caches that outlive a check live in `/home/user/mca-cache`, and each checkout
+links to them: Gradle's user home (with the vanilla server jar), `.deps`, the
+npm cache, and `node_modules` hard-linked from a copy keyed by
+`package-lock.json`. When the lockfile changes, the script runs `npm ci`. When
+the files that pin the mod's dependencies change (the same files as CI's
+cache key), it runs the [fresh-clone setup](#setup-from-a-fresh-clone) with
+downloads. It installs OpenJDK 21 if the sandbox lacks it. A bare sandbox goes
+through all of this on its first check, in about three minutes. `boat push`
+copies no Git metadata, so the script also sends a bundle of `HEAD`. Build
+stamps and acceptance results then record the real commit and whether the
+tree was modified.
+
+The sandbox stops by itself 45 minutes after its last check (`MCA_BOAT_IDLE`,
+in seconds), and the next check resumes it. A resume counts as a start unless
+Boat still holds the machine. Sandboxes start with `--no-env`, so none of the
+account's stored logins, tokens or keys go in. They also start with
+`--fail-fast`: a start that finds no machine ready fails without counting, and
+the script retries for about 30 seconds. When the plan's included starts are
+used up, the script refuses to pay for extra ones unless `MCA_BOAT_PAID_STARTS=1`.
+Other settings are `MCA_BOAT_KEY`, which gives a second agent sharing a
+checkout its own sandbox, and `MCA_BOAT_TYPE` (default `default`: 4 vCPUs,
+8 GB). There are also `MCA_BOAT_SNAPSHOT`, `MCA_BOAT_MAX_CHECK` and
+`MCA_BOAT_KEEP_CHECKS`. A check holds a per-sandbox lock, so two runs never
+share a sandbox at once.
+
+`--save` runs the checks and, if they pass, saves the sandbox as the warm
+snapshot, without check directories. The sandbox remains available for this
+worktree's later checks. Re-run it after changes to dependencies or the
+toolchain. The Minecraft client, packaged Fabric acceptance, authenticated
+handoff and Ollama runs stay on the Mac, and the script refuses `dev:mod`,
+`runClient` and model options.
+
 ## Status
 
 **Implemented:**
@@ -256,7 +317,7 @@ tail -f console.in | java -Xmx2G -jar server.jar nogui > server.out 2>&1   # run
 | `src/objective.js` | Independent inventory and home verification for explicit planner criteria |
 | `src/config.js`, `src/runtime.js`, `src/bridge-server.js` | Paths, private files, process ownership, cleanup, HTTP serving |
 | `mod/src/main/java/dev/minecraftagent/` | Fabric controller, client events, bridge, and Java lease/storage helpers |
-| `scripts/` | Dependency setup, offline build wrapper, packaging, syntax checks |
+| `scripts/` | Dependency setup, offline build wrapper, packaging, syntax checks, Boat checks |
 | `test/`, `mod/src/test/` | Regression tests |
 
 ### Local storage
@@ -266,7 +327,7 @@ All of these directories are ignored by Git:
 - `.gradle-user/`: Gradle distribution, dependencies, and Minecraft assets.
 - `.deps/`: Baritone jar and its extracted native dependency.
 - `.npm-cache/`, `node_modules/`: npm cache and dependencies.
-- `.runtime/`: bridge discovery, locks, server sign-in caches, waypoints, test servers, and temporary files.
+- `.runtime/`: bridge discovery, locks, server sign-in caches, waypoints, test servers, temporary files, and the Boat check sandbox id and fetched results (`.runtime/boat-check/`).
 - `mod/run/`: development game profile and worlds. Cleanup preserves this directory.
 - `dist/`: packaged mod jars, install notes, and checksums.
 
