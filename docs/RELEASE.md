@@ -15,7 +15,9 @@ The CI workflow is configured, but its remote execution on the final release com
 
 ## Live checks required before shipping
 
-Record each session with [`mc-agent acceptance`](ACCEPTANCE.md). The [bot scenario runner](LIVE-ACCEPTANCE.md) and the [Fabric lifecycle checklist](LIFECYCLE-SCENARIOS.md) cover several of these boxes. Tools never tick a box; a person reviews the evidence first.
+Record each session with [`mc-agent acceptance`](ACCEPTANCE.md). For packaged Fabric and authenticated handoff, pass the launcher profile's `mods` folder with `acceptance start --mods-dir`. The [bot scenario runner](LIVE-ACCEPTANCE.md) and the [Fabric lifecycle checklist](LIFECYCLE-SCENARIOS.md) cover several of these boxes.
+
+Before ticking any remaining box, capture `acceptance status` with every open gate eligible on one candidate. Keep its commit and archive SHA-256 with the reviewed evidence for publication. The status report covers the open gates, so take this snapshot while they are all still open. A person reviews the evidence and ticks the boxes.
 
 - [ ] Install the packaged jars in a normal Fabric launcher profile, enter a real world, attach the CLI, and observe the existing character.
 - [ ] Run collection with partial progress and recovery from a pit on the latest Fabric and bot code. Verify an unreachable return is reported as failed and inventory progress remains observable. *(Bot: partial progress with a return and an unreachable home both verified on 20 October 2026. Fabric and an actual pit are still pending.)*
@@ -46,12 +48,12 @@ npm run build:mod
 npm run verify:mod
 ```
 
-Commit the final source, confirm `git status --short` is empty, and rebuild the bundle. `dist/BUILD.json` must identify that commit with `sourceModified: false`. Verify the archive against `dist/ARCHIVE_SHA256SUMS` before uploading it.
+Before live acceptance, commit the candidate source, confirm `git status --short` is empty, and build the bundle. `dist/BUILD.json` must identify that commit with `sourceModified: false`. Keep that archive and its checksums through acceptance and publication.
 
 The installation download is `dist/minecraft-agent-0.1.0.zip`; it includes three mod jars, install instructions, license, jar checksums, and build metadata. The CLI remains source-installed with `npm ci`; `package.json` is private, and this release does not publish an npm package. Provide the source/tag link alongside the mod download.
 
-After the live checks and remote CI pass, tag the verified commit as `v0.1.0` and publish the archive and its checksum. Release notes must call it an experimental preview, list the tested launcher/model/server configurations, and retain the documented limitations and known issues. Creating the archive locally does not publish a release.
+After the live checks and remote CI pass, confirm the ZIP's SHA-256 matches both `dist/ARCHIVE_SHA256SUMS` and the saved candidate status. Tag the saved candidate commit as `v0.1.0` and publish that exact ZIP and its checksum. Release notes must call it an experimental preview, list the tested launcher/model/server configurations, and retain the documented limitations and known issues.
 
 ## Planning estimate
 
-The code and packaging can be prepared independently of live account access. The remaining critical path is packaged Fabric acceptance, recovery/storage failure scenarios, authenticated handoff, and any resulting fixes, then remote CI and a clean-source artifact rebuild on the release commit. There is no fixed session-count estimate. There is no scheduled release date; authenticated handoff and Fabric gameplay with the packaged mod have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.
+The code and packaging can be prepared independently of live account access. The remaining critical path includes packaged Fabric acceptance, recovery and storage failure scenarios, authenticated handoff, any resulting fixes, and remote CI on the candidate commit. There is no fixed session-count estimate. There is no scheduled release date; authenticated handoff and Fabric gameplay with the packaged mod have not yet been verified. See the [roadmap](ROADMAP.md) for priorities and [changelog](../CHANGELOG.md) for the planned release contents.

@@ -28,9 +28,10 @@ export const ACCEPTANCE_GATES = deep([
     prerequisites: [
       PACKAGED,
       'A normal launcher profile for Minecraft Java 1.21.1 with Fabric Loader 0.16.14 or newer.',
+      'Copy the three packaged jars into the profile before recording their hashes with acceptance start --mods-dir.',
     ],
     steps: [
-      'Install the three packaged jars from the archive mods directory into a normal Fabric launcher profile.',
+      'Confirm the three packaged jars are installed in the launcher profile and record the installation.',
       'Enter a real world with the existing character.',
       'Attach the CLI to the profile config/minecraft-agent/bridge.json (`mc-agent attach <path>`).',
       'Run `mc-agent observe` and confirm it reports the existing character.',
