@@ -33,3 +33,5 @@ Use `--` after the command name when passing signed offsets. For example, `mc-ag
 | `dither-mix` | `<first>` `<second>` `<target>` | Split one material into two alternating checkerboard shades. |
 | `registration-marks` | `<ground>` | Locate the first and last inked pixel on each row. |
 | `palette-kits` | `<stack-size>` | Pack each mural material into full stacks and loose blocks. |
+
+To use a mural in the [textile planner](PLANNING-TEXTILES.md), pass the width and flat pixel list, map design colors to IDs 1–16, and add one to both coordinates.

@@ -179,7 +179,7 @@ const commands = [
   command(
     'fringe-ends <width> <cells> <spacing> <fringe-color>',
     ['s', 'S', 's', 's'],
-    'List fringe placements immediately outside both short ends of a row-oriented runner.',
+    'List fringe placements immediately above the top row and below the bottom row.',
     (w, cells, spacing, id) => {
       const h = heightOf(w, cells);
       colors([id]);

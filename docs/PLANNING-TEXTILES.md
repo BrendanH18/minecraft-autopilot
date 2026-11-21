@@ -21,7 +21,7 @@ Dimensions are in whole blocks. The input codes `s`, `c` and `i` denote positive
 | `loom-draft <threading> <lift-masks> <warp-colors> <weft-colors>` | `S,C,S,S` | Render a shaft-loom drawdown from column threading, lifted shafts and yarn colors. |
 | `braid-layout <strand-colors> <rows>` | `S,s` | Lay a three-strand runner, alternating the left and right crossings after each row. |
 | `bookmatch <half-width> <half> <shared-center>` | `s,S,c` | Reflect a half-pattern across its right edge or through its last column. |
-| `fringe-ends <width> <cells> <spacing> <fringe-color>` | `s,S,s,s` | List fringe placements immediately outside both short ends of a row-oriented runner. |
+| `fringe-ends <width> <cells> <spacing> <fringe-color>` | `s,S,s,s` | List fringe placements immediately above the top row and below the bottom row. |
 | `palette-remap <cells> <source-colors> <target-colors>` | `S,S,S` | Replace selected colors simultaneously, allowing swaps and palette consolidation. |
 | `color-takeoff <cells>` | `S` | Count the carpets needed for each color appearing in the design. |
 | `warp-floats <width> <cells> <warp-colors>` | `s,S,S` | Measure the longest continuous run matching the warp color in each column. |
@@ -36,8 +36,10 @@ Dimensions are in whole blocks. The input codes `s`, `c` and `i` denote positive
 | `repeat-unit <edge>` | `S` | Recover the shortest color sequence that repeats exactly to fill a sample edge. |
 | `dye-lots <wool-needed> <colored-stock> <dyes> <blank-wool>` | `C,C,C,c` | Assign undyed wool and matching dyes to shortages in caller-supplied color priority order. |
 
-For `twill-layout`, a positive step moves the start of the over-band to the right as rows advance. For `tile-motif`, the shift applies once per motif height. A bookmatch with a shared center includes the last column of the half-pattern once. Fringe placements use the supplied width across each runner end, at rows 0 and height + 1.
+For `twill-layout`, a positive step moves the start of the over-band to the right as rows advance. For `tile-motif`, the shift applies once per motif height. The bookmatch output width is twice the half-width minus the shared-center flag. A bookmatch with a shared center includes the last column of the half-pattern once. Fringe placements use the supplied width across each runner end, at rows 0 and height + 1.
 
 Salvage assumes one recoverable carpet per occupied cell. Wool orders apply the vanilla same-color recipe of two wool for three carpets. The reported crafted surplus counts only extra carpets produced by those batches. Haul estimates use the caller's stack and trip limits. Stock-frontier installation consumes carpets in row order and halts at the first missing color.
 
 In a loom draft the least significant bit lifts shaft 1. A lifted shaft exposes its warp color and a lowered shaft exposes the weft color of the current row. Opposing yarns of the same color appear as one visible color in a warp-float survey. A runner alignment of null denotes insufficient clearance. A null shearing estimate denotes a positive wool order with no sheep in that color. Patch junction offsets count blocks to the left of a join. Dye lots assume one matching dye and one blank wool make one colored wool. Blank wool and colored stock are separate inventories.
+
+To use a textile layout in the [mural planner](PLANNING-MURAL.md), pass its width and flat color list. Subtract one from textile row and column positions to obtain mural coordinates. Mural treats zero as an ordinary color.
