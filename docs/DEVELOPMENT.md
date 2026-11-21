@@ -131,6 +131,15 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
+**Fabric fixture helper (21 November 2026).** In Boat, all 14
+[fixture setups](LIVE-ACCEPTANCE.md#fabric-fixtures) started on vanilla
+Minecraft 1.21.1 with OpenJDK 21.0.13.1. An offline Mineflayer 4.39.0 client
+joined each server to trigger player setup. Server reads confirmed the starting
+inventory, position, container stock, both halves of the double chest, and the
+empty crafting-table placement area. All servers shut down cleanly, including
+one Ctrl+C and one end-of-input test. These results cover fixture setup and
+server reads. Packaged Fabric gameplay still requires the release checklist.
+
 **Offline bot acceptance (20 November 2026)** used Mineflayer 4.39.0, Node
 24.22.1, and OpenJDK 21.0.13.1 on Linux x64 against a fresh offline vanilla
 Minecraft 1.21.1 superflat world in Boat. Server jar SHA-256 was
