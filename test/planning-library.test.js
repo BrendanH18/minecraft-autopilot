@@ -143,5 +143,8 @@ test('library plans handle full shelves, empty catalogs, immediate returns and c
   assert.throws(() => run('swap-count', '1,2', '2,3'), /same volumes/);
   assert.throws(() => run('shelf-mask', '1,0'), /six/);
   assert.throws(() => run('hold-slips', '1,2', '3'), /Title/);
+  assert.equal(run('next-accession', '', 1000000, 2), null);
+  assert.equal(run('next-accession', '1000000', 1000000, 1), null);
+  assert.deepEqual(run('next-accession', '', 1000000, 1), { first: 1000000, last: 1000000 });
   assert.throws(() => run('reserve-copy', '0', '3,2', 1), /chronological/);
 });

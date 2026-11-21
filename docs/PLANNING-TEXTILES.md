@@ -34,7 +34,7 @@ Dimensions are in whole blocks. The input codes `s`, `c` and `i` denote positive
 | `patch-junctions <upper-panel-widths> <lower-panel-widths>` | `S,S` | Locate four-way seam junctions where adjacent patchwork rows have identical join offsets. |
 | `align-edges <first-edge> <second-edge>` | `S,S` | Find the earliest cyclic left shift of the second edge maximizing color matches. |
 | `repeat-unit <edge>` | `S` | Recover the shortest color sequence that repeats exactly to fill a sample edge. |
-| `dye-lots <wool-needed> <colored-stock> <dyes> <blank-wool>` | `C,C,C,c` | Assign undyed wool and matching dyes to shortages in caller-supplied color priority order. |
+| `dye-lots <wool-needed> <colored-stock> <dyes> <blank-wool>` | `C,C,C,c` | Assign undyed wool and matching dyes to shortages in ascending color ID order. |
 
 For `twill-layout`, a positive step moves the start of the over-band to the right as rows advance. For `tile-motif`, the shift applies once per motif height. The bookmatch output width is twice the half-width minus the shared-center flag. A bookmatch with a shared center includes the last column of the half-pattern once. Fringe placements use the supplied width across each runner end, at rows 0 and height + 1.
 

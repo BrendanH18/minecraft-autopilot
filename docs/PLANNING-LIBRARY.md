@@ -15,7 +15,7 @@ IDs, shelf slots, and input-order positions start at one. A zero in a shelf layo
 | `swap-count <current> <target>` | `S,S` | Count the fewest arbitrary two-volume swaps that restore a specified shelf order. |
 | `inventory-delta <catalog> <observed>` | `indexes,indexes` | Compare title multiplicities and list only discrepancies in title order. |
 | `missing-serials <first> <last> <observed>` | `s,s,indexes` | Compress unobserved serial numbers in an inclusive catalog range into gap intervals. |
-| `next-accession <occupied> <minimum> <size>` | `indexes,s,s` | Find the first free consecutive ID range large enough for a new accession. |
+| `next-accession <occupied> <minimum> <size>` | `indexes,s,s` | Find the first free consecutive ID range large enough for a new accession. Returns null if the range would exceed ID 1,000,000. |
 | `edition-audit <titles> <editions> <current-editions>` | `S,S,S` | List copies whose edition differs from the current catalog edition. |
 | `catalog-tabs <sorted-titles> <cards-per-tab>` | `S,s` | Build tab labels from fixed-size groups of sorted title cards. |
 | `cross-references <links> <start>` | `C,s` | Trace catalog redirects to a terminal title or the first repeated title. |
@@ -38,7 +38,7 @@ For `shelf-mask`, bit 0 is top left and bit 5 is bottom right, viewed from the f
 
 `cross-references` and `reading-order` use list positions as volume IDs. A zero link ends a redirect chain or marks a volume that has no prerequisite. A cycle in a reading order is an input error.
 
-`hold-slips` returns zero for a request that can be filled immediately and a one-based queue position for a waiting request. A loan due today is eligible for renewal if it has no holds and has renewals left. For `loan-peak`, a same-day return contributes zero occupied days. The earliest peak day is null if all loans have zero duration. For `reserve-copy`, each return day is the first day its copy can be reserved again. Each new reservation occupies that copy until the start of its due day.
+`hold-slips` returns zero for a request that can be filled immediately and a one-based queue position for a waiting request. A loan due today is eligible for renewal if it has no holds and has renewals left. For `loan-peak`, a same-day return contributes zero occupied days. The earliest peak day is null if all loans have zero duration. For `reserve-copy`, list request days in nondecreasing order. Same-day requests are processed in input order. Each return day is the first day its copy can be reserved again. Each new reservation occupies that copy until the start of its due day.
 
 `preservation-copies` reports additions for each branch to retain the specified minimum if the other branch is lost. For `rotation-picks`, supply last-display days on the same clock; zero may stand for a title never displayed if other titles have positive display days.
 

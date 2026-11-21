@@ -24,7 +24,7 @@ The types `c` and `s` denote nonnegative and positive whole numbers. Uppercase c
 | `step-onsets <lead-in> <step-lengths>` | `c,S` | `2 2,3,5` | Onsets after the lead-in and an exclusive end tick after the final step. |
 | `bar-address <ticks> <beats-per-bar> <ticks-per-beat>` | `C,s,s` | `0,3,11,12 3 4` | Bar and beat (one-based) plus tick offset (zero-based) using the supplied beat count and beat length. |
 | `quantize <ticks> <grid>` | `C,s` | `0,2,4,5,7 4` | Onsets on the nearest grid tick. Half-grid ties round later. |
-| `swing-pairs <ticks> <half-pair> <delay>` | `C,s,c` | `0,4,4,8,12 4 1` | Delay odd half-pair positions by the requested ticks. Delay must be shorter than one half-pair. |
+| `swing-pairs <ticks> <half-pair> <delay>` | `C,s,c` | `0,4,4,8,12 4 1` | Delay odd half-pair positions by the requested ticks. Each input tick must be a multiple of the half-pair length. Delay must be shorter than one half-pair. |
 | `ratchet-step <start> <length> <hits>` | `c,s,s` | `6 8 3` | Spread attacks inside a single step, rounding ideal offsets down to whole ticks. |
 | `pulse-mask <steps> <hits> <rotation>` | `s,c,c` | `8 3 1` | Binary rhythm with evenly dispersed hits, rotated forward by the supplied step count. Before rotation the first hit lands on step zero. |
 | `canon-entries <ticks> <pitches> <delays>` | `C,C,C` | `0,2 4,7 0,2` | Copy a phrase to one voice per supplied delay. Ties play in voice order, then original event order. |

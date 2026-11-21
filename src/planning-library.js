@@ -183,7 +183,8 @@ export const libraryGroup = {
           if (id - first >= size) break;
           first = id + 1;
         }
-        return { first, last: first + size - 1 };
+        const last = first + size - 1;
+        return last <= 1_000_000 ? { first, last } : null;
       },
     ),
     command(

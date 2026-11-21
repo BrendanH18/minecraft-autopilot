@@ -351,7 +351,7 @@ const commands = [
   command(
     'dye-lots <wool-needed> <colored-stock> <dyes> <blank-wool>',
     ['C', 'C', 'C', 'c'],
-    'Assign undyed wool and matching dyes to shortages in caller-supplied color priority order.',
+    'Assign undyed wool and matching dyes to shortages in ascending color ID order.',
     (need, stock, dyes, blank) => {
       same(need, dyes);
       demand(stock.length <= 16, 'Supply stock for at most 16 colors.');
