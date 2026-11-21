@@ -105,3 +105,13 @@ test('textile validates swatches, stock and expanded output', () => {
   assert.deepEqual(run('stock-frontier', 1, '1', '1'), { placed: 1, blocked: null });
   assert.deepEqual(run('bookmatch', 2, '1,2', 0), [1, 2, 2, 1]);
 });
+
+test('dye lots treat omitted trailing stock as empty', () => {
+  assert.deepEqual(run('dye-lots', '3,4', '1', '3,4', 3), {
+    lots: [
+      { dye: 2, missing: 0 },
+      { dye: 1, missing: 3 },
+    ],
+    blankLeft: 0,
+  });
+});

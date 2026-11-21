@@ -353,11 +353,12 @@ const commands = [
     ['C', 'C', 'C', 'c'],
     'Assign undyed wool and matching dyes to shortages in caller-supplied color priority order.',
     (need, stock, dyes, blank) => {
-      same(need, stock, dyes);
+      same(need, dyes);
+      demand(stock.length <= 16, 'Supply stock for at most 16 colors.');
       demand(need.length <= 16, 'Supply at most 16 color totals.');
       let remaining = blank;
       const lots = need.map((qty, i) => {
-        const deficit = Math.max(0, qty - stock[i]);
+        const deficit = Math.max(0, qty - (stock[i] ?? 0));
         const dye = Math.min(deficit, dyes[i], remaining);
         remaining -= dye;
         return { dye, missing: deficit - dye };
