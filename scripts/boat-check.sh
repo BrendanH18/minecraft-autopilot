@@ -154,14 +154,15 @@ echo "boat-check: $( [ "$status" = 0 ] && echo passed || echo "failed ($status)"
 # The snapshot keeps the toolchain and the caches in /home/user/mca-cache, not checkouts.
 boat exec "$id" --timeout 600 "rm -rf /home/user/checks" >/dev/null
 remote_dir=""
-since=$(( $(date +%s) - 120 ))
+# Reusing a name keeps its createdAt, so wait for a new snapshotId under the name.
+prev=$(boat snapshots --json 2>/dev/null | jq -r --arg n "$snapshot" \
+    '[.named[]? | select(.name == $n) | .snapshotId // ""][0] // ""' || true)
 echo "boat-check: saving $id as $snapshot" >&2
 boat snapshot "$id" "$snapshot" >/dev/null || die 1 "saving $snapshot failed"
 deadline=$((SECONDS + 600)) snap=""
 while :; do   # poll once more after the deadline before giving up
-    snap=$(boat snapshots --json 2>/dev/null | jq -r --arg n "$snapshot" --arg id "$id" --argjson since "$since" \
-        '[.named[]? | select(.name == $n and .sourceSandboxId == $id
-            and ((.createdAt // "") | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) >= $since)
+    snap=$(boat snapshots --json 2>/dev/null | jq -r --arg n "$snapshot" --arg id "$id" --arg prev "$prev" \
+        '[.named[]? | select(.name == $n and .sourceSandboxId == $id and (.snapshotId // "") != $prev)
           | .status][0] // ""' || true)
     case "$snap" in ready|failed) break ;; esac
     [ "$SECONDS" -lt "$deadline" ] || break
