@@ -536,3 +536,12 @@ Each group adds 25 commands for planning a Minecraft settlement offline.
 | `orchardplan`, `greenhouse` | 50 | [Gardens](PLANNING-GARDENS.md) |
 | `maproom`, `bookbind`, `bannerhall` | 75 | [Settlements](PLANNING-SETTLEMENTS.md) |
 | `harborplan`, `aqueduct`, `viaduct` | 75 | [Crossings](PLANNING-CROSSINGS.md) |
+
+## Batch 16: 100 creative project planners
+
+| CLI group | Commands | Guide |
+| --- | ---: | --- |
+| `textile` | 25 | [Textiles](PLANNING-TEXTILES.md) |
+| `note-score` | 25 | [Note-block scores](PLANNING-SCORE.md) |
+| `library-plan` | 25 | [Libraries](PLANNING-LIBRARY.md) |
+| `mural` | 25 | [Pixel murals](PLANNING-MURAL.md) |

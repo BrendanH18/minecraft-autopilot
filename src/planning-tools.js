@@ -14,6 +14,11 @@ import { gardenGroups } from './planning-gardens.js';
 import { crossingGroups } from './planning-crossings.js';
 import { settlementGroups } from './planning-settlements.js';
 
+import { textileGroup } from './planning-textiles.js';
+import { scoreGroup } from './planning-score.js';
+import { libraryGroup } from './planning-library.js';
+import { muralGroup } from './planning-mural.js';
+
 // Batch 10: the original 40 groups of 25 typed planners.
 export const PLANNING_GROUPS = [...SPATIAL_GROUPS, ...RESOURCE_GROUPS, ...ANALYSIS_GROUPS, ...COORDINATION_GROUPS];
 
@@ -28,6 +33,10 @@ export const BUILD_PLANNING_GROUPS = [
   ...gardenGroups,
   ...settlementGroups,
   ...crossingGroups,
+  textileGroup,
+  scoreGroup,
+  libraryGroup,
+  muralGroup,
 ];
 
 // The typed planners exposed in study workflows.

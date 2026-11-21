@@ -1,9 +1,9 @@
 # Offline planning studies
 
-`mc-agent study` adds nine workflows to each of the 1,600 typed planners (the
-1,000 from batch 10 and 200 each from batches 13, 14, and 15): **14,400 supported
+`mc-agent study` adds nine workflows to each of the 1,700 typed planners (the
+1,000 from batch 10, 200 each from batches 13–15, and 100 from batch 16): **15,300 supported
 planner/workflow combinations**. These are nine reusable capabilities, not
-14,400 algorithms. No action is executed and no bridge, model, or Minecraft
+15,300 algorithms. No action is executed and no bridge, model, or Minecraft
 connection is needed. The original planner's assumptions, argument types, and
 output restrictions still apply.
 
@@ -318,7 +318,7 @@ choose one best case, or establish feasibility or a global optimum.
 
 Each listed group contains 25 planners. Each planner supports `batch`,
 `compare`, `sweep`, `sensitivity`, `rank`, `screen`, `factorial`, `summarize`,
-and `pareto`: **225 combinations per group × 64 groups = 14,400**. The guides
+and `pareto`: **225 combinations per group × 68 groups = 15,300**. The guides
 enumerate all signatures; `study catalog` provides their exact names and
 argument types at runtime.
 
@@ -337,13 +337,17 @@ argument types at runtime.
 | [Gardens](PLANNING-GARDENS.md) | `orchardplan`, `greenhouse` | 450 |
 | [Settlements](PLANNING-SETTLEMENTS.md) | `maproom`, `bookbind`, `bannerhall` | 675 |
 | [Crossings](PLANNING-CROSSINGS.md) | `harborplan`, `aqueduct`, `viaduct` | 675 |
+| [Textiles](PLANNING-TEXTILES.md) | `textile` | 225 |
+| [Note-block scores](PLANNING-SCORE.md) | `note-score` | 225 |
+| [Libraries](PLANNING-LIBRARY.md) | `library-plan` | 225 |
+| [Pixel murals](PLANNING-MURAL.md) | `mural` | 225 |
 
 Batch 13 accounts for 4,800 of these combinations: `factorial`, `summarize`,
 and `pareto` on the 1,000 batch 10 planners (3,000), the same three workflows
 on the 200 batch 13 planners (600), and the six earlier workflows on those 200
 planners (1,200).
 
-The planner fixture tests exercise all 14,400 combinations with independent expected
+The planner fixture tests exercise all 15,300 combinations with independent expected
 results from the planner examples, via the study API and Commander. Focused
 tests cover changed arguments, baseline deltas, shape changes, sorted
 candidates, factorial ordering, summary statistics, dominance, invalid
