@@ -41,13 +41,15 @@ directory in it. See [Boat checks](docs/DEVELOPMENT.md#boat-checks).
 - The ask-first rule below covers this Mac only. In a sandbox, `npm ci`, `--allow-downloads` and other installs need no approval.
 
 Generic Boat commands, for genuine one-offs outside the checks. Every sandbox
-you create by hand (`boat new`, `boat run --keep`) passes
-`--name minecraft-autopilot-<purpose>`; never leave one with Boat's default
-"Box <date>" name, which can't be traced to a project (owner decision,
-2026-11-21). The check script names its sandboxes
-`minecraft-autopilot-check-<worktree>-<key>`.
+you create by hand passes `--name minecraft-autopilot-<purpose>` to `boat new`;
+never leave one with Boat's default "Box <date>" name, which can't be traced to
+a project (owner decision, 2026-11-21). `boat run` has no `--name`: its sandbox
+is deleted when the command ends, and with `--keep` you rename it at once with
+`boat rename <id> minecraft-autopilot-<purpose>`. Hand-made sandboxes also get
+`--no-env`. The check script names its sandboxes
+`minecraft-autopilot-check-<worktree>-<path hash>-<key>`.
 
-- One-shot job: `boat run --push . -- <command>` (new sandbox, run, cost, delete; exits with the command's exit code)
+- One-shot job: `boat run --no-env --push . -- <command>` (new sandbox, run, cost, delete; exits with the command's exit code)
 - Create: `id=$(boat new --json --no-env --fail-fast --name minecraft-autopilot-<purpose> | jq -r 'select(.event=="ready") | .id')`
 - Run: `boat exec "$id" --cwd my-app "npm test"` (30 s timeout; `--timeout 0` = no limit)
 - Server: `boat exec "$id" --detach "npm run dev"`, then `boat exec "$id" --status <pid>`

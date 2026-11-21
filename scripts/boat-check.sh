@@ -117,9 +117,15 @@ rm -f "$bundle"
 # boat exec streams JSON frames when its output isn't a terminal: print each frame's
 # text (stdout and stderr together) and keep the frames for the exit status.
 encoded=$(printf '%s' "$cmd" | base64 | tr -d '\n')
+# The tracked files that are executable here, so the sandbox copy matches this tree's
+# modes rather than the commit's (which would hide a dropped execute bit).
+modes=$(git ls-files -z | while IFS= read -r -d '' path; do
+            if [ -f "$path" ] && [ -x "$path" ]; then printf '%s\0' "$path"; fi
+        done | base64 | tr -d '\n')
+[ -n "$modes" ] || modes=-
 exec_log=$local_dir/$check.jsonl
 set +e
-boat exec "$id" --json --timeout 0 "bash $remote_dir/scripts/boat-check-remote.sh $remote_dir $keep_checks $encoded" \
+boat exec "$id" --json --timeout 0 "bash $remote_dir/scripts/boat-check-remote.sh $remote_dir $keep_checks $encoded $modes" \
     | tee "$exec_log" \
     | jq -R --unbuffered -j '. as $line | (try fromjson catch null) as $frame
         | if ($frame | type) != "object" then $line + "\n"
@@ -181,22 +187,34 @@ die() { local code=$1; shift; echo "boat-check: $*" >&2; exit "$code"; }
 # The owner writes its pid right after mkdir, so a contender that finds no pid waits
 # a few seconds for it before it treats the lock as stale.
 take_lock() {
-    local other="" tries=0
-    while ! mkdir "$lock" 2>/dev/null; do
+    local other cur tries=0
+    until mkdir "$lock" 2>/dev/null; do
+        tries=$((tries + 1))
+        [ "$tries" -le 10 ] \
+            || die 4 "couldn't take $lock. If no boat-check is running, remove it (and $lock.reclaim)."
         other=$(cat "$lock/pid" 2>/dev/null || true)
-        if [ -z "$other" ] && [ "$tries" -lt 5 ]; then
-            tries=$((tries + 1)); sleep 1; continue
-        fi
-        if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
+        if [ -z "$other" ]; then sleep 1; continue; fi   # its owner is still writing the pid
+        if kill -0 "$other" 2>/dev/null; then
             die 4 "another boat-check (pid $other) is using this worktree's sandbox. Wait for it, or give a second agent in this checkout its own sandbox with MCA_BOAT_KEY=<name>."
         fi
-        # Stale: its owner is gone. Only one contender wins the rename.
-        mv "$lock" "$lock.stale.$$" 2>/dev/null && rm -rf "$lock.stale.$$"
-        mkdir "$lock" 2>/dev/null && break
-        die 4 "another boat-check took $lock first; try again"
+        # Stale: its owner is gone. Contenders reclaim it one at a time, and only while it
+        # still holds the dead pid, so none can remove a lock another one just took.
+        if mkdir "$lock.reclaim" 2>/dev/null; then
+            cur=$(cat "$lock/pid" 2>/dev/null || true)
+            if [ "$cur" = "$other" ]; then rm -rf "$lock"; fi
+            rmdir "$lock.reclaim"
+        else
+            sleep 1
+        fi
     done
     echo $$ > "$lock/pid"
     have_lock=1
+}
+
+# Deletes the recorded sandbox before it's replaced; keeps its id when that fails.
+delete_for_replacement() {
+    boat delete "$id" --yes --json >/dev/null 2>&1 || [ "$(sandbox_state "$id")" = gone ] \
+        || die 1 "couldn't delete $id to replace it; it stays recorded. Try again, or boat delete $id --yes"
 }
 
 # Prints the sandbox's state, "gone" when Boat confirms it doesn't exist, or "unknown"
@@ -273,11 +291,11 @@ ensure_sandbox() {
                 [[ $out == *snapshot_data_expired* ]] \
                     || die 3 "couldn't resume $id; it stays recorded for the next check (or --done)"
                 echo "boat-check: $id's data has expired; replacing it" >&2
-                boat delete "$id" --yes --json >/dev/null 2>&1 || true ;;
+                delete_for_replacement ;;
             gone) echo "boat-check: sandbox $id is gone; creating a new one" >&2 ;;
             unknown) die 1 "couldn't look up sandbox $id; try again (boat info $id)" ;;
             error) echo "boat-check: sandbox $id is in an error state; replacing it" >&2
-               boat delete "$id" --yes --json >/dev/null 2>&1 || true ;;
+               delete_for_replacement ;;
             *) die 1 "sandbox $id is $st; try again when it settles (boat info $id)" ;;
         esac
         rm -f "$state"
@@ -295,8 +313,9 @@ ensure_sandbox() {
     fi
     # The account is shared by every project, so the name says which one this is
     # (Boat allows 120 characters).
-    name=$(printf '%s' "$(basename "$root")" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-50)
-    name="minecraft-autopilot-check-$name-$key"
+    # A short hash of the checkout's path tells apart checkouts with the same folder name.
+    name=$(printf '%s' "$(basename "$root")" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-40)
+    name="minecraft-autopilot-check-$name-$(printf '%s' "$root" | cksum | awk '{ printf "%06x", $1 % 16777216 }')-$key"
     new_log=$local_dir/new-$key.log
     # --no-env: none of the account's stored logins, tokens or keys go into the sandbox.
     if ! fail_fast boat new --json --no-env --type "$type" --ttl "$idle" --name "$name" ${from[@]+"${from[@]}"} >"$new_log"; then

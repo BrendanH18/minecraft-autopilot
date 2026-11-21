@@ -2,6 +2,7 @@
 # Runs inside the Boat sandbox for scripts/boat-check.sh; don't run it directly.
 #
 #   boat-check-remote.sh <checkout> <check directories to keep> <base64 command>
+#                        <base64 NUL-separated tracked paths that are executable, or ->
 #
 # Prepares the freshly pushed checkout and runs the command in it. Everything that
 # outlives one check lives in /home/user/mca-cache, which the warm snapshot keeps:
@@ -9,7 +10,7 @@
 # server jar), the pinned Baritone and Fabric API jars, the npm cache, and
 # node_modules for the current package-lock.json. The checkout links to them.
 set -euo pipefail
-dir=$1 keep=$2 encoded=$3
+dir=$1 keep=$2 encoded=$3 modes=${4:--}
 
 # Lead a process group of our own, so an interrupted scripts/boat-check.sh can stop
 # the whole check (test server, bot, Gradle) the way Ctrl+C would.
@@ -35,11 +36,15 @@ if [ -f "$dir.bundle" ] && [ ! -e .git ]; then
     git fetch -q "$dir.bundle" HEAD
     git reset -q FETCH_HEAD
     rm -f "$dir.bundle"
-    # Restore the executable bits Git records (mod/gradlew, these scripts), skipping
-    # files the working tree deleted.
-    git ls-files -s -z | while IFS= read -r -d '' entry; do
-        path=${entry#*$'\t'}
-        if [[ $entry == 100755* ]] && [ -f "$path" ]; then chmod +x "$path"; fi
+    # Give tracked files the execute bits they have in the source tree, which
+    # boat-check.sh sent, so a mode change shows up here as it does there.
+    declare -A executable=()
+    if [ "$modes" != - ]; then
+        while IFS= read -r -d '' path; do executable[$path]=1; done < <(printf '%s' "$modes" | base64 -d)
+    fi
+    git ls-files -z | while IFS= read -r -d '' path; do
+        [ -f "$path" ] || continue
+        if [ -n "${executable[$path]:-}" ]; then chmod +x "$path"; else chmod -x "$path"; fi
     done
     # Here the cache directories are symlinks, which .gitignore's "dir/" patterns miss.
     printf '%s\n' /.gradle-user /.deps /.npm-cache >> .git/info/exclude
