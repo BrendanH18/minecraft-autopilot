@@ -13,8 +13,8 @@ Docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; neve
 - Public URL for a port: `boat ssh "$id" "host 3000 --private"`
 - Always pass the sandbox id. `current` does not work in a non-interactive shell.
 - When done: `boat stop "$id"` (keeps the disk for at least 14 days) or `boat delete "$id" --yes` (erases it)
-- Exceptions (run on this Mac): the Minecraft client (`npm run dev:mod`, `runClient`, the normal launcher), packaged Fabric acceptance, Microsoft-authenticated handoff and Ollama local-model runs. Boat has no GPU, and Microsoft account credentials never go into a sandbox.
-- Headless runs against the offline vanilla server (`npm run acceptance:bot` without Ollama) run in Boat.
+- Exceptions (run on this Mac): the Minecraft client (`npm run dev:mod`, `runClient`, the normal launcher), packaged Fabric acceptance, Microsoft-authenticated handoff and Ollama local-model runs. Boat has no GPU, and Microsoft account credentials never go into a sandbox. For packaged acceptance, build the bundle in a sandbox and copy it back with `boat scp -r "$id":/home/user/<repo>/dist .` before stopping the sandbox.
+- Headless runs against the offline vanilla server (`npm run acceptance:bot` without Ollama) run in Boat. A fresh sandbox has no `node_modules` or server jar (both gitignored): install Java 21 if missing and run the fresh-clone setup in `docs/DEVELOPMENT.md`, whose build caches the jar. Then run `boat exec "$id" --cwd <repo> --timeout 0 "npm run acceptance:bot -- --accept-eula --scenario <scenario>"` (or `--all`, which takes well over ten minutes).
 - The ask-first rule below covers this Mac only. In a sandbox, `npm ci`, `--allow-downloads` and other installs need no approval.
 
 ## Installs and local files (this Mac)
