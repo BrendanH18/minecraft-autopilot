@@ -52,7 +52,7 @@ npm run dev:mod      # Fabric development client with a test identity
 6. **Simulation:** a deterministic demo that exercises the real HTTP adapter and CLI.
 
 **Not implemented:**
-- Combat, crafting, and building.
+- Combat, building, smelting, and crafting beyond the [allowlisted basic recipes](USAGE.md#craft-items).
 - Seamless reconnect or account transfer between the client and the bot.
 - Automatic takeover from ordinary mouse or movement input.
 
