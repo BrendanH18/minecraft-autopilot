@@ -8,11 +8,20 @@ class ActionTimingTest {
     @Test
     void failedEatingAllowsRetreatBeforeAnotherAutomaticAttempt() {
         ActionTiming timing = new ActionTiming();
-        assertTrue(timing.canAutoEat(0));
+        assertTrue(timing.canAutoEat(0, false));
         timing.eatingFailed(5_000_000_000L);
-        assertFalse(timing.canAutoEat(5_000_000_001L));
-        assertFalse(timing.canAutoEat(14_999_999_999L));
-        assertTrue(timing.canAutoEat(15_000_000_000L));
+        assertFalse(timing.canAutoEat(5_000_000_001L, false));
+        assertFalse(timing.canAutoEat(14_999_999_999L, false));
+        assertTrue(timing.canAutoEat(15_000_000_000L, false));
+    }
+
+    @Test
+    void inventoryActionsDeferAutomaticEatingEvenWhenBackoffHasExpired() {
+        ActionTiming timing = new ActionTiming();
+        assertFalse(timing.canAutoEat(0, true));
+        timing.eatingFailed(0);
+        assertFalse(timing.canAutoEat(10_000_000_000L, true));
+        assertTrue(timing.canAutoEat(10_000_000_000L, false));
     }
 
     @Test
@@ -36,6 +45,6 @@ class ActionTimingTest {
         assertFalse(timing.retreatExpired(79_999_999_999L));
         assertTrue(timing.retreatExpired(80_000_000_000L));
         assertFalse(timing.expired(80_000_000_000L), "retreat has its own shorter deadline");
-        assertFalse(timing.canAutoEat(80_000_000_000L));
+        assertFalse(timing.canAutoEat(80_000_000_000L, false));
     }
 }

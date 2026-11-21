@@ -2,10 +2,16 @@ package dev.minecraftagent;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class CraftingRecipesTest {
@@ -23,7 +29,7 @@ class CraftingRecipesTest {
     }
 
     @Test
-    void allowlistMatchesTheSharedRecipeTable() {
+    void allowsOnlySupportedOutputs() {
         assertEquals(
                 List.of(
                         "minecraft:oak_planks",
@@ -51,6 +57,31 @@ class CraftingRecipesTest {
         assertEquals(4, CraftingRecipes.get("oak_planks").yield());
         assertEquals(4, CraftingRecipes.get("torch").yield());
         assertEquals(1, CraftingRecipes.get("chest").yield());
+    }
+
+    @Test
+    void allowlistMatchesNodeRecipes() throws IOException, InterruptedException {
+        Process node = new ProcessBuilder(
+                        "node",
+                        "--input-type=module",
+                        "--eval",
+                        "import { RECIPES } from '../src/recipes.js'; process.stdout.write(JSON.stringify(RECIPES));")
+                .redirectErrorStream(true)
+                .start();
+        String output;
+        try (var stdout = node.getInputStream()) {
+            output = new String(stdout.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertEquals(0, node.waitFor(), output);
+
+        JsonObject nodeRecipes = JsonParser.parseString(output).getAsJsonObject();
+        assertEquals(nodeRecipes.keySet(), Set.copyOf(CraftingRecipes.outputs()), "allowlisted outputs");
+        Gson gson = new Gson();
+        for (String name : CraftingRecipes.outputs()) {
+            JsonObject fabricRecipe = gson.toJsonTree(CraftingRecipes.get(name)).getAsJsonObject();
+            fabricRecipe.remove("pattern"); // Only Fabric needs the grid layout.
+            assertEquals(nodeRecipes.get(name), fabricRecipe, name);
+        }
     }
 
     @Test

@@ -6,6 +6,19 @@ import org.junit.jupiter.api.Test;
 
 class StorageOpeningTest {
     @Test
+    void placementUsesTheReconciledBlockOnlyAfterItsAcknowledgement() {
+        StorageOpening opening = new StorageOpening();
+        opening.expect();
+        opening.sent(12);
+        assertEquals(StorageOpening.Placement.WAITING, opening.placement(true), "the table may be predicted");
+        opening.acknowledge(11);
+        assertEquals(StorageOpening.Placement.WAITING, opening.placement(true));
+        opening.acknowledge(12);
+        assertEquals(StorageOpening.Placement.REJECTED, opening.placement(false));
+        assertEquals(StorageOpening.Placement.CONFIRMED, opening.placement(true));
+    }
+
+    @Test
     void cancellationRetainsLateReplyCleanupUntilAcknowledged() {
         StorageOpening opening = new StorageOpening();
         opening.expect();

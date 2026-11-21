@@ -28,7 +28,7 @@ final class ActionTiming {
         eatingBackoff = true;
     }
 
-    boolean canAutoEat(long now) {
-        return !eatingBackoff || now - eatingRetryAt >= 0;
+    boolean canAutoEat(long now, boolean inventoryBusy) {
+        return !inventoryBusy && (!eatingBackoff || now - eatingRetryAt >= 0);
     }
 }

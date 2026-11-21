@@ -246,6 +246,7 @@ public final class AgentController {
                 throw new IllegalArgumentException("Unsupported action: " + type);
         }
         stopMotion();
+        if (Set.of("deposit", "withdraw", "craft", "inspect_storage").contains(type)) endEating();
         action = requested.deepCopy();
         job = new JsonObject();
         job.addProperty("id", UUID.randomUUID().toString());
@@ -375,7 +376,9 @@ public final class AgentController {
             return;
         }
         // Reflexes run locally every tick, independent of model latency.
-        if (client.player.getHungerManager().getFoodLevel() <= 16 && timing.canAutoEat(now) && beginEating()) {
+        if (client.player.getHungerManager().getFoodLevel() <= 16
+                && timing.canAutoEat(now, storage.active())
+                && beginEating()) {
             resumeAfterEating = running() || recovering;
             if (running()) job.addProperty("message", "Paused to eat.");
             survivalMessage = "Eating";
@@ -510,10 +513,6 @@ public final class AgentController {
 
     private void resumeMotion() {
         resumeAfterEating = false;
-        if (storage.active()) {
-            storage.resume();
-            return;
-        }
         if (recovering || (running() && Set.of("goto", "home").contains(string(action, "type")))) {
             BaritoneAPI.getSettings().allowBreak.value = recovering && collecting();
             baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(destination, 1));
