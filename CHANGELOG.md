@@ -50,15 +50,15 @@ Changes being prepared for the initial experimental release. Acceptance is track
   earlier elsewhere in the session no longer fails a correct task. Stale,
   blocked, merged-with-unread, or unattributed storage still fails closed.
   `inspect_storage` accepts an optional `containers` list (1–16 positions;
-  `inspect-storage --container x,y,z`); Fabric ignores it and keeps refreshing
-  every known container. See [usage](docs/USAGE.md).
+  `inspect-storage --container x,y,z`). Fabric honours it too; see the Fabric
+  parity entry above. See [usage](docs/USAGE.md).
 
 - Collection stops promptly when the inventory is full (server bot and demo).
   Instead of breaking blocks whose drops cannot be picked up until the 180 s
   mining deadline, collection fails with `Inventory full; collected N of M
   <block>.`, keeps its progress, and still makes the bounded return attempt.
   A new `inventory-full-collect` [lifecycle scenario](docs/LIFECYCLE-SCENARIOS.md)
-  covers both backends; Fabric detection is not implemented yet. The demo now
+  covers both backends; Fabric followed (see the Fabric parity entry above). The demo now
   respects 64-item stacks, so the `full` scenario refuses further collection.
 
 - v0.1 acceptance tooling. `mc-agent acceptance` (`list`, `show`, `start`,
@@ -66,8 +66,9 @@ Changes being prepared for the initial experimental release. Acceptance is track
   sessions with commit, worktree, build and archive provenance, and reports
   which sessions are eligible evidence. It never edits the release checklist.
   `npm run acceptance:bot` runs scripted bot recovery and storage scenarios
-  against a local vanilla server with independent `data get` checks; it has
-  not yet been run against a real server. A shared lifecycle scenario table is
+  against a local vanilla server with independent `data get` checks; offline
+  runs on 20 November 2026 are recorded in
+  [DEVELOPMENT.md](docs/DEVELOPMENT.md#validation). A shared lifecycle scenario table is
   tested against the demo driver and the bot driver on a mocked bot, and generates the Fabric manual
   checklist; see [acceptance](docs/ACCEPTANCE.md),
   [live bot acceptance](docs/LIVE-ACCEPTANCE.md), and
@@ -164,7 +165,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Validation limits
 
-Recorded live tests used development single-player/offline multiplayer. Real Ollama planning and a real MCP agent (Claude Code) were validated with the bot. Authenticated handoff, normal launcher installation, and Fabric recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, seamless transfer, and guaranteed survival are not implemented.
+Recorded live tests used development single-player/offline multiplayer. Real Ollama planning and a real MCP agent (Claude Code) were validated with the bot. Authenticated handoff, normal launcher installation, and Fabric recovery/tool changes remain on the acceptance checklist. Combat, crafting, building, seamless transfer, and guaranteed survival were not implemented at the time; allowlisted crafting was added later (see Unreleased).
 
 ## Batch 6 — logistics, terrain, routine audit, and timelines
 
