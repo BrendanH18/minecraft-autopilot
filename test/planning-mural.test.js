@@ -106,6 +106,15 @@ test('mural rejects incomplete rows, bad bounds and oversized transforms', () =>
   assert.throws(() => run('turn-right', 2, '0,0,0'), /Width/);
   assert.throws(() => run('cut-panel', ...base, 2, 0, 2, 1), /exceeds/);
   assert.throws(() => run('magnify', ...base, 1000000), /limited/);
+  assert.throws(() => run('stencil-overlay', ...base, 2, '1,2,3', 0, 0, 0), /Stencil width/);
+  assert.throws(() => run('flood-recolor', ...base, 3, 0, 1), /Seed/);
+  assert.throws(() => run('row-runs', ...base, 2), /Row/);
+  assert.throws(() => run('repair-list', ...base, '1,2'), /equal lengths/);
+  assert.throws(() => run('relief-layers', ...base, '1,2'), /height/);
+  assert.equal(run('color-bounds', ...base, 3), null);
+  assert.deepEqual(run('registration-marks', 2, '0,0', 0), [null]);
+  const uniqueColors = Array.from({ length: 1000 }, (_, i) => i).join(',');
+  assert.throws(() => run('color-seams', 25, uniqueColors), /seam pairs/);
   assert.equal(run('trim-ground', 2, '0,0', 0), null);
   assert.deepEqual(run('trim-ground', 3, '0,0,0,0,1,0', 0), raster(1, 1, [1]));
 });

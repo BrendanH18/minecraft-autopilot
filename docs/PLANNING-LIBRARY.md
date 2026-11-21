@@ -41,3 +41,5 @@ For `shelf-mask`, bit 0 is top left and bit 5 is bottom right, viewed from the f
 `hold-slips` returns zero for a request that can be filled immediately and a one-based queue position for a waiting request. A loan due today is eligible for renewal if it has no holds and has renewals left. For `loan-peak`, a same-day return contributes zero occupied days. The earliest peak day is null if all loans have zero duration. For `reserve-copy`, each return day is the first day its copy can be reserved again. Each new reservation occupies that copy until the start of its due day.
 
 `preservation-copies` reports additions for each branch to retain the specified minimum if the other branch is lost. For `rotation-picks`, supply last-display days on the same clock; zero may stand for a title never displayed if other titles have positive display days.
+
+When several copies are already available, `reserve-copy` selects the copy that became available earliest. Equal availability days favor the lowest copy number.

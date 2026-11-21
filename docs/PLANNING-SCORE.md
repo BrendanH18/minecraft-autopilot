@@ -2,7 +2,7 @@
 
 Use `note-score` to arrange a tune, mark its triggers, and budget the delays for a note-block build. For example, `mc-agent note-score retune-clicks 24,4,1 0,4,24` reports `[1,0,23]` in the JSON result. The first block needs one forward click to wrap from 24 to 0.
 
-Tunings are whole semitone steps from 0 through 24 relative to an instrument's lowest note. Assign positive integer IDs to instruments. Times are whole redstone ticks. Timing calculations assume ten redstone ticks per second at normal game speed. A timeline begins at tick zero, may include leading silence, and accepts simultaneous events. Pass its ticks in nondecreasing order. Comma-separated lists are nonempty, and paired lists must match in length. Lists and generated output arrays have at most 1,000 entries. Scalar and list elements have magnitude at most 1,000,000.
+Tunings are whole semitone steps from 0 through 24 relative to an instrument's lowest note. Assign positive integer IDs to instruments. Times are whole redstone ticks. Timing calculations assume ten redstone ticks per second at normal game speed. A timeline begins at tick zero, may include leading silence, and accepts simultaneous events. Pass timeline ticks in nondecreasing order. For individual lookups, `bar-address` accepts ticks in any order and preserves that order. Comma-separated lists are nonempty, and paired lists must match in length. Lists and generated output arrays have at most 1,000 entries. Scalar and list elements have magnitude at most 1,000,000.
 
 When an interval list starts with a minus sign, put `--` after the command name. For example, `mc-agent note-score interval-walk -- 7 -2,3` returns the pitches `[7,5,8]`.
 

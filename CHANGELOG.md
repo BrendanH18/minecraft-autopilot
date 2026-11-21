@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- [Batch 16](docs/IMPROVEMENTS.md#batch-16-100-creative-project-planners) adds 100 offline planners for textile floors, note-block scores, library collections, and pixel murals.
+
 - Experimental `withdraw` and `craft` actions. `withdraw ITEM [COUNT]` takes an
   item from a chest or barrel within 16 blocks and reports the container like a
   deposit. `craft ITEM COUNT` makes 1–64 of an allowlisted item (planks, sticks,
