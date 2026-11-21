@@ -35,9 +35,11 @@ if [ -f "$dir.bundle" ] && [ ! -e .git ]; then
     git fetch -q "$dir.bundle" HEAD
     git reset -q FETCH_HEAD
     rm -f "$dir.bundle"
-    # Restore the executable bits Git records (mod/gradlew, these scripts).
+    # Restore the executable bits Git records (mod/gradlew, these scripts), skipping
+    # files the working tree deleted.
     git ls-files -s -z | while IFS= read -r -d '' entry; do
-        if [[ $entry == 100755* ]]; then chmod +x "${entry#*$'\t'}"; fi
+        path=${entry#*$'\t'}
+        if [[ $entry == 100755* ]] && [ -f "$path" ]; then chmod +x "$path"; fi
     done
     # Here the cache directories are symlinks, which .gitignore's "dir/" patterns miss.
     printf '%s\n' /.gradle-user /.deps /.npm-cache >> .git/info/exclude
@@ -70,16 +72,20 @@ for link in .gradle-user:gradle-user .deps:deps .npm-cache:npm-cache; do
     ln -s "$cache/${link#*:}" "${link%%:*}"
 done
 
-# node_modules, keyed by package-lock.json and hard-linked into each checkout.
-lock_key=$(sha256sum package-lock.json | cut -c1-16)
+# node_modules, keyed by package.json and package-lock.json. Each checkout gets its own
+# copy, so a check that edits a dependency can't change the cache. A new cache entry
+# is copied aside first and renamed into place, so an interrupted copy is never used.
+lock_key=$(cat package.json package-lock.json | sha256sum | cut -c1-16)
 if [ -d "$cache/node_modules/$lock_key/node_modules" ]; then
-    cp -al "$cache/node_modules/$lock_key/node_modules" node_modules
+    cp -a --reflink=auto "$cache/node_modules/$lock_key/node_modules" node_modules
 else
-    say "package-lock.json changed or no node_modules is cached; running npm ci"
+    say "package.json or package-lock.json changed, or no node_modules is cached; running npm ci"
     npm ci --no-audit --no-fund --prefer-offline
     find "$cache/node_modules" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-    mkdir -p "$cache/node_modules/$lock_key"
-    cp -al node_modules "$cache/node_modules/$lock_key/"
+    mkdir -p "$cache/node_modules/.incoming/$lock_key"
+    cp -a --reflink=auto node_modules "$cache/node_modules/.incoming/$lock_key/"
+    mv "$cache/node_modules/.incoming/$lock_key" "$cache/node_modules/$lock_key"
+    rm -rf "$cache/node_modules/.incoming"
 fi
 
 # The fresh-clone setup from docs/DEVELOPMENT.md, with downloads, whenever the files

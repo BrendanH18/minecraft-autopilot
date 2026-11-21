@@ -81,6 +81,7 @@ fi
 
 have_lock=0
 take_lock
+id=$(cat "$state" 2>/dev/null || true)   # again, now that no other run can change it
 extended=0 remote_dir="" bundle="" new_log="" exec_log="" remote_running=1
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -126,9 +127,15 @@ boat exec "$id" --json --timeout 0 "bash $remote_dir/scripts/boat-check-remote.s
           else empty end'
 status=${PIPESTATUS[0]}
 set -e
-remote_running=0
+# Only an exit frame proves the check ended; without one, cleanup still interrupts it.
 code=$(jq -R -r 'try fromjson catch null | select(type == "object" and .type == "exit") | .exitCode // 1' "$exec_log" 2>/dev/null | tail -n 1 || true)
-[ -z "$code" ] || status=$code
+if [ -n "$code" ]; then
+    status=$code
+    remote_running=0
+else
+    echo "boat-check: boat exec ended without the check's exit status" >&2
+    [ "$status" != 0 ] || status=1
+fi
 rm -f "$exec_log"
 
 for path in ${fetch[@]+"${fetch[@]}"}; do
