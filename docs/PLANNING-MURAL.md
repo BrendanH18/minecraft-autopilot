@@ -4,6 +4,8 @@ Build and audit block-art panels using a width and comma-separated material IDs 
 
 Every command takes `<width> <pixels>` immediately after its name. The table shows the remaining arguments. Colors in reports follow first encounter order. Patches use four-way adjacency.
 
+Use `--` after the command name when passing signed offsets. For example, `mc-agent mural shift-art -- 2 1,2 -1 0 0` moves the artwork one column left and fills the exposed cell with zero, yielding `[2,0]`.
+
 | Command | Extra arguments | Result |
 | --- | --- | --- |
 | `turn-right` | — | Rotate the mural clockwise by a quarter turn. |
