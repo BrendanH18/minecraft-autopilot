@@ -14,19 +14,24 @@
 # The first check creates the sandbox from the saved snapshot minecraft-autopilot-warm
 # (cold if there is none) and records its id in .runtime/boat-check/. Later checks reuse
 # it: each one pushes the working tree into a new directory and runs there with no time
-# limit. The sandbox stops by itself MCA_BOAT_IDLE seconds (default 2700) after the last
-# check ends; the next check resumes it. Overrides: MCA_BOAT_KEY (a second agent sharing
-# this checkout gets its own sandbox), MCA_BOAT_SNAPSHOT, MCA_BOAT_TYPE (default
-# "default"), MCA_BOAT_MAX_CHECK (longest check in seconds, default 7200) and
-# MCA_BOAT_KEEP_CHECKS (check directories kept in the sandbox, default 3). Starts beyond
-# the plan's included ones cost money; the script refuses them unless MCA_BOAT_PAID_STARTS=1.
+# limit. The sandbox is stopped as soon as the check ends, so it bills nothing between
+# checks; the next check resumes it. A resume within about 10 minutes of the stop
+# usually takes back Boat's kept machine, which is no start. While a check runs, the
+# sandbox's auto-stop is 30 minutes, renewed every 10 minutes only while this script is
+# alive, so a killed check leaves it up at most 30 minutes. Overrides: MCA_BOAT_IDLE
+# (seconds to keep the sandbox up after a check instead of stopping it, default 0),
+# MCA_BOAT_KEY (a second agent sharing this checkout gets its own sandbox),
+# MCA_BOAT_SNAPSHOT, MCA_BOAT_TYPE (default "default"), MCA_BOAT_MAX_CHECK (seconds after
+# which the script stops renewing the auto-stop, default 7200) and MCA_BOAT_KEEP_CHECKS
+# (check directories kept in the sandbox, default 3). Starts beyond the plan's included
+# ones cost money; the script refuses them unless MCA_BOAT_PAID_STARTS=1.
 # See docs/DEVELOPMENT.md#boat-checks.
 main() {
 set -euo pipefail
 export BOAT_NO_UPDATE=1
 snapshot=${MCA_BOAT_SNAPSHOT:-minecraft-autopilot-warm}
 type=${MCA_BOAT_TYPE:-default}
-idle=${MCA_BOAT_IDLE:-2700}
+idle=${MCA_BOAT_IDLE:-0}
 max_check=${MCA_BOAT_MAX_CHECK:-7200}
 keep_checks=${MCA_BOAT_KEEP_CHECKS:-3}
 key=${MCA_BOAT_KEY:-default}
@@ -52,9 +57,14 @@ done
 for tool in boat jq git base64; do
     command -v "$tool" >/dev/null || die 2 "$tool is not installed"
 done
-for n in "$idle" "$max_check" "$keep_checks"; do
-    [[ $n =~ ^[1-9][0-9]*$ ]] || die 2 "MCA_BOAT_IDLE, MCA_BOAT_MAX_CHECK and MCA_BOAT_KEEP_CHECKS must be positive whole numbers"
+[[ $idle =~ ^(0|[1-9][0-9]*)$ ]] || die 2 "MCA_BOAT_IDLE must be a whole number of seconds (0 stops the sandbox when a check ends)"
+for n in "$max_check" "$keep_checks"; do
+    [[ $n =~ ^[1-9][0-9]*$ ]] || die 2 "MCA_BOAT_MAX_CHECK and MCA_BOAT_KEEP_CHECKS must be positive whole numbers"
 done
+# Auto-stop while a check runs, renewed every keepalive_every seconds while this script
+# lives (owner decision, 2026-11-22). A hard-killed check stops renewing it, so Boat
+# stops the sandbox within busy_ttl seconds.
+busy_ttl=1800 keepalive_every=600
 [[ $key =~ ^[A-Za-z0-9_-]{1,40}$ ]] || die 2 "MCA_BOAT_KEY may only use letters, digits, - and _ (at most 40)"
 if [ -z "$cmd" ]; then
     # The hand-off checks, as CONTRIBUTING.md lists them.
@@ -74,7 +84,7 @@ id=$(cat "$state" 2>/dev/null || true)
 if [ "$action" = status ]; then
     [ -n "$id" ] || { echo "boat-check: this worktree has no sandbox (key $key)"; exit 0; }
     boat info "$id" --json 2>/dev/null | jq -r --arg key "$key" \
-        '.sandbox // . | "boat-check: sandbox \(.id) (key \($key)): \(.state), \(.type), auto-stop \(.ttlSeconds // "off") s after its last start or check"' \
+        '.sandbox // . | "boat-check: sandbox \(.id) (key \($key)): \(.state), \(.type), auto-stop timer \(.ttlSeconds // "off") s"' \
         || echo "boat-check: sandbox $id (key $key) isn't found; the next check replaces it"
     exit 0
 fi
@@ -82,7 +92,7 @@ fi
 have_lock=0
 take_lock
 id=$(cat "$state" 2>/dev/null || true)   # again, now that no other run can change it
-extended=0 remote_dir="" bundle="" new_log="" exec_log="" remote_running=1
+armed=0 extended=0 keepalive_pid="" remote_dir="" bundle="" new_log="" exec_log="" remote_running=1
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
@@ -96,14 +106,18 @@ if [ "$action" = finish ]; then
     die 1 "couldn't delete sandbox $id: boat delete $id --yes"
 fi
 
+# From here on, whatever sandbox this run creates or resumes is stopped (or set back to
+# MCA_BOAT_IDLE) on exit, even if starting it fails part way.
+armed=1
 ensure_sandbox
 
 check="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 [ -z "$(git status --porcelain --untracked-files=normal)" ] || check="$check-dirty"
 remote_dir=/home/user/checks/$check
-# Keep the sandbox up for the whole check; the exit trap sets it back to the idle timeout.
-boat extend "$id" --ttl $((idle + max_check)) >/dev/null
+# Keep the sandbox up for the check, but no longer than busy_ttl after this script dies.
+boat extend "$id" --ttl "$busy_ttl" >/dev/null
 extended=1
+start_keepalive
 echo "boat-check: pushing the working tree to $id:$remote_dir" >&2
 boat push "$id" . --to "$remote_dir" >/dev/null
 # `boat push` copies files, not Git metadata. A bundle of HEAD lets the sandbox rebuild
@@ -279,20 +293,29 @@ ensure_sandbox() {
     local st waited=0 out
     if [ -n "$id" ]; then
         st=$(sandbox_state "$id")
-        while [ "$st" = stopping ] && [ "$waited" -lt 300 ]; do
-            sleep 5; waited=$((waited + 5)); st=$(sandbox_state "$id")
-        done
         case "$st" in
             provisioned|cloning|ready|idle|running)
                 echo "boat-check: reusing sandbox $id" >&2
                 return ;;
-            stopped)
-                # A resume counts as one start, unless Boat still holds the machine.
+            stopping|stopped)
                 echo "boat-check: resuming sandbox $id" >&2
+                # A resume during stopping takes back the same machine, which is no start;
+                # when Boat can't, it refuses with sandbox_stopping and starts nothing.
+                if [ "$st" = stopping ]; then
+                    if out=$(fail_fast boat resume "$id" --ttl "$busy_ttl" --json); then return; fi
+                    [[ $out == *sandbox_stopping* ]] || { echo "$out" >&2; die 3 "couldn't resume $id; it stays recorded for the next check (or --done)"; }
+                    echo "boat-check: Boat can't take $id back while it stops; waiting for the stop to finish" >&2
+                    while st=$(sandbox_state "$id"); [ "$st" = stopping ] && [ "$waited" -lt 300 ]; do
+                        sleep 5; waited=$((waited + 5))
+                    done
+                    [ "$st" = stopped ] || die 1 "sandbox $id is $st; try again when it settles (boat info $id)"
+                fi
+                # A resume counts as one start, unless Boat still holds the machine (for
+                # about 10 minutes after the stop).
                 local reason
                 reason=$(no_start_reason)
                 [ -z "$reason" ] || die 3 "can't resume $id now. $reason"
-                if out=$(fail_fast boat resume "$id" --ttl "$idle" --json); then return; fi
+                if out=$(fail_fast boat resume "$id" --ttl "$busy_ttl" --json); then return; fi
                 # An earlier attempt's resume may have finished after all.
                 case "$(sandbox_state "$id")" in
                     provisioned|cloning|ready|idle|running)
@@ -331,7 +354,7 @@ ensure_sandbox() {
     name="minecraft-autopilot-check-$name-$(printf '%s' "$root" | cksum | awk '{ printf "%06x", $1 % 16777216 }')-$key"
     new_log=$local_dir/new-$key.log
     # --no-env: none of the account's stored logins, tokens or keys go into the sandbox.
-    if ! fail_fast boat new --json --no-env --type "$type" --ttl "$idle" --name "$name" ${from[@]+"${from[@]}"} >"$new_log"; then
+    if ! fail_fast boat new --json --no-env --type "$type" --ttl "$busy_ttl" --name "$name" ${from[@]+"${from[@]}"} >"$new_log"; then
         cat "$new_log" >&2
         record_new_id
         die 1 "creating a sandbox failed${id:+ (recorded $id; --done deletes it)}"
@@ -352,9 +375,34 @@ record_new_id() {
     [ -z "$id" ] || echo "$id" > "$state"
 }
 
+# Renews the busy auto-stop every keepalive_every seconds, but only while this script's
+# own process is alive (checked every few seconds) and for at most MCA_BOAT_MAX_CHECK
+# seconds. The exit trap kills it; if the script is killed outright, it stops renewing
+# and Boat stops the sandbox within busy_ttl seconds.
+start_keepalive() {
+    local parent=$$
+    (
+        trap - EXIT INT TERM
+        set +e
+        start=$(date +%s) next=$((start + keepalive_every))
+        while kill -0 "$parent" 2>/dev/null; do
+            now=$(date +%s)
+            [ $((now - start)) -lt "$max_check" ] || exit 0
+            if [ "$now" -ge "$next" ]; then
+                kill -0 "$parent" 2>/dev/null || exit 0
+                boat extend "$id" --ttl "$busy_ttl" >/dev/null 2>&1
+                next=$((now + keepalive_every))
+            fi
+            sleep 5
+        done
+    ) </dev/null >/dev/null 2>&1 &
+    keepalive_pid=$!
+}
+
 # shellcheck disable=SC2329  # run by the EXIT trap
 cleanup() {
     set +e
+    [ -z "$keepalive_pid" ] || kill "$keepalive_pid" 2>/dev/null
     [ -z "$new_log" ] || { record_new_id; rm -f "$new_log"; }
     [ -z "$bundle" ] || rm -f "$bundle"
     [ -z "$exec_log" ] || rm -f "$exec_log"
@@ -363,9 +411,18 @@ cleanup() {
         # as Ctrl+C would, so the test server and bot shut down cleanly.
         boat exec "$id" "pgid=\$(cat $remote_dir/.runtime/boat-check.pgid 2>/dev/null) && kill -INT -- -\$pgid 2>/dev/null; true" >/dev/null 2>&1
     fi
-    if [ "$extended" = 1 ]; then
-        boat extend "$id" --ttl "$idle" >/dev/null 2>&1 \
-            || echo "boat-check: couldn't reset $id's auto-stop: boat extend $id --ttl $idle" >&2
+    # Armed before the sandbox is created or resumed, so a run that fails part way still
+    # stops it. The id may be empty, gone or unknown; then this does nothing or warns.
+    if [ "$armed" = 1 ] && [ -n "$id" ]; then
+        if [ "$idle" = 0 ]; then
+            # A stopped sandbox bills nothing, and a resume within about 10 minutes takes
+            # back the kept machine without a start (owner decision, 2026-11-22).
+            boat stop "$id" --json >/dev/null 2>&1 || [ "$(sandbox_state "$id")" = gone ] \
+                || echo "boat-check: couldn't stop $id; it stops by itself within $busy_ttl s, or: boat stop $id" >&2
+        else
+            boat extend "$id" --ttl "$idle" >/dev/null 2>&1 || [ "$(sandbox_state "$id")" = gone ] \
+                || echo "boat-check: couldn't reset $id's auto-stop: boat extend $id --ttl $idle" >&2
+        fi
     fi
     if [ "${have_lock:-0}" = 1 ] && [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$lock"; fi
 }
