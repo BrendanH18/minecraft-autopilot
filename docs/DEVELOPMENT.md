@@ -156,6 +156,12 @@ empty crafting-table placement area. All servers shut down cleanly, including
 one Ctrl+C and one end-of-input test. These results cover fixture setup and
 server reads. Packaged Fabric gameplay still requires the release checklist.
 
+The `takeover` and `cobblestone-hostiles-dimension` fixtures also ran in Boat
+on the same Minecraft, Java, and Mineflayer versions. Server reads confirmed
+the oak logs and mining fatigue, cobblestone and an iron pickaxe, the husk's
+position, and a teleport onto the prepared Nether platform. The packaged
+client actions and release of control still need to be observed in game.
+
 **Offline bot acceptance (20 November 2026)** used Mineflayer 4.39.0, Node
 24.22.1, and OpenJDK 21.0.13.1 on Linux x64 against a fresh offline vanilla
 Minecraft 1.21.1 superflat world in Boat. Server jar SHA-256 was

@@ -109,6 +109,16 @@ function fakeConsole() {
   return { serverConsole, written };
 }
 
+test('dimension-scoped setup commands match the nested command reply', async () => {
+  const { serverConsole, written } = fakeConsole();
+  const command = 'execute in minecraft:the_nether run fill 0 200 0 4 200 4 minecraft:stone';
+  const reply = serverConsole.command(command, { timeoutMs: 1000 });
+  await new Promise(setImmediate);
+  assert.deepEqual(written, [`${command}\n`]);
+  serverConsole.push(`${LOG_PREFIX}Successfully filled 25 blocks\n`);
+  assert.equal(await reply, 'Successfully filled 25 blocks');
+});
+
 test('readiness waits for the "Done (" line split across chunks and records the version', async () => {
   const { serverConsole } = fakeConsole();
   const ready = serverConsole.ready({ timeoutMs: 1000 });
@@ -179,9 +189,9 @@ test('command errors and timeouts reject without blocking later commands', async
   await new Promise(setImmediate);
   serverConsole.push(`${LOG_PREFIX}Set the weather to clear\n`);
   assert.equal(await next, 'Set the weather to clear');
-  await assert.rejects(serverConsole.command('summon zombie'), /No reply pattern is known for "summon"/);
+  await assert.rejects(serverConsole.command('say hello'), /No reply pattern is known for "say"/);
   await assert.rejects(serverConsole.command('say a\nstop'), /Invalid console command/);
-  assert.ok(!written.some((text) => text.startsWith('summon') || text.includes('stop')));
+  assert.ok(!written.some((text) => text.startsWith('say') || text.includes('stop')));
 });
 
 test('block and entity data helpers parse replies; a missing Items path is empty, a non-container is an error', async () => {

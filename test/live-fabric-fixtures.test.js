@@ -22,6 +22,8 @@ test('Fabric fixture dry run lists all setups and uses the named player without 
   assert.deepEqual(
     [...plan.matchAll(/^\[([a-z-]+)\]$/gm)].map((match) => match[1]),
     [
+      'takeover',
+      'cobblestone-hostiles-dimension',
       'pit',
       'deposit-return',
       'withdraw',
@@ -42,6 +44,28 @@ test('Fabric fixture dry run lists all setups and uses the named player without 
   assert.match(plan, /data get entity FabricTester Pos/);
   assert.match(plan, /\[pit\][\s\S]*effect give FabricTester minecraft:mining_fatigue/);
   assert.match(plan, /\[deposit-barrel\][\s\S]*minecraft:barrel\[facing=up\]/);
+});
+
+test('the takeover fixture gives time to interrupt mining and prints independent follow-up reads', () => {
+  const plan = fixturePlan('takeover', 'FixtureUser');
+  assert.match(plan.fixture.join('\n'), /fill .* minecraft:oak_log/);
+  assert.match(plan.prepare.join('\n'), /effect give FixtureUser minecraft:mining_fatigue/);
+  assert.deepEqual(plan.verify, ['data get entity FixtureUser Inventory', 'data get entity FixtureUser Pos']);
+  assert.ok(plan.actions.includes('mc-agent collect oak_log 8'));
+  assert.match(plan.actions.join('\n'), /kill -9 <pid>.*\n.*cancelled goto job with a lease expired message/);
+});
+
+test('the dimension change targets the prepared floor and the named player', () => {
+  const plan = fixturePlan('cobblestone-hostiles-dimension', 'FixtureUser');
+  assert.match(plan.fixture.join('\n'), /fill .* minecraft:cobblestone/);
+  assert.ok(plan.fixture.includes('execute in minecraft:the_nether run fill 0 200 0 4 200 4 minecraft:stone'));
+  assert.match(plan.actions.join('\n'), /execute in minecraft:the_nether run tp FixtureUser 2\.5 201 2\.5/);
+  assert.match(plan.actions.join('\n'), /cancelled goto job with a dimension changed message/);
+  assert.ok(plan.verify.includes('data get entity FixtureUser Dimension'));
+  assert.match(
+    plan.verify.join('\n'),
+    /data get entity @e\[type=minecraft:husk,tag=fabric_fixture_hostile,limit=1\] Pos/,
+  );
 });
 
 test('Fabric double chest starts empty and records both halves for three-stack takeover', () => {

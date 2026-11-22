@@ -156,6 +156,8 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
 
 | Fixtures | Setup and reads |
 | --- | --- |
+| `takeover` | Oak logs and mining fatigue give the operator time to press F8, open and close the inventory, or send emergency stop during mining. For expiry, use `kill -9 <pid>` on the controlling CLI during navigation and verify that the lease expired and cancelled the job. Use fresh runs and compare server inventory and position five seconds apart after each interruption. The inference check uses a real local model. |
+| `cobblestone-hostiles-dimension` | Cobblestone blocks, an iron pickaxe, and a stationary husk enclosed in glass. Read player inventory after collection and compare `mc-agent threats` with server positions. During the printed navigation run, enter the provided teleport command to land on a prepared Nether platform. Verify that the dimension change cancelled the job and repeat the player position and dimension reads. |
 | `pit` | Bot runner's oak-log shaft and mining fatigue, with player inventory and position reads before collection and after recovery. |
 | `deposit-chest`, `deposit-barrel`, `deposit-full-chest`, `deposit-double-chest` | Three stacks of logs and nearby storage. The single chest setup also prints the contents-removal and blocked-lid commands for fresh inspection. The double chest prints item reads for both halves. |
 | `deposit-return` | The bot runner's elevated home and chest out of reach. Optionally remove the step once the player is back at home to test the blocked return. |
