@@ -24,6 +24,7 @@ node scripts/live-bot-acceptance.js --accept-eula --scenario collect-and-store
 node scripts/live-bot-acceptance.js --accept-eula --fast
 node scripts/live-bot-acceptance.js --accept-eula --all
 node scripts/live-bot-acceptance.js --accept-eula --scenario stale-removal-model --model YOUR_LOCAL_MODEL [--no-thinking]
+node scripts/live-bot-acceptance.js --accept-eula --scenario withdraw-craft-model --model YOUR_LOCAL_MODEL [--no-thinking]
 ```
 
 Choose one of `--scenario ID` (repeatable), `--all`, or `--fast`. The fast preset
@@ -83,6 +84,7 @@ Ctrl+C is designed to stop the current scenario, clean up, skip the rest, stop t
 | `craft-bootstrap` | Open ground, no crafting table; player holds 3 oak logs and 3 cobblestone. `craft oak_planks 12` → `crafting_table 1` → `stick 4` → `stone_pickaxe 1` → `wooden_pickaxe 1`. | Every craft `completed` and reports its amount; server inventory holds 1 stone pickaxe, 1 wooden pickaxe, and 3 planks with no logs, cobblestone, sticks, or crafting table left; `execute if block` finds no table on the eight blocks beside the start before, and exactly one after, at the block the `stone_pickaxe` job reported placing; the `wooden_pickaxe` job reuses it; bridge inventory agrees with the server. | Bot withdraw and craft, inventory-grid and table recipes and held-table placement. |
 | `craft-missing-ingredients` | Player holds 2 oak logs. `craft oak_planks 12` needs 3. | Job fails with `Missing ingredients`; the server still shows both logs and no planks. | Bot withdraw and craft, missing ingredients. |
 | `craft-full-inventory` | Player holds 2 oak logs and 35 full cobblestone stacks. `craft oak_planks 4` would consume one log, leaving every slot occupied. | Job fails with `Inventory full`; the server still shows all the starting items and no planks. | Bot withdraw and craft, full inventory. |
+| `withdraw-craft-model` | Player holds two sticks. A crafting table and a chest with 5 cobblestone and 20 oak logs are nearby. A local model (`--model`) withdraws 3 cobblestone and crafts one stone pickaxe. | Agent reports `criteria_met`. The server shows only one stone pickaxe in the player's inventory and exactly 2 cobblestone and 20 oak logs in the chest. Skipped without `--model`. | Bot withdraw and craft, real-model workflow. |
 
 ### Collect-and-store without a model
 

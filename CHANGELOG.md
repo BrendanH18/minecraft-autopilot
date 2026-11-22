@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- The opt-in `withdraw-craft-model` bot scenario uses a local Ollama model to withdraw cobblestone and craft a stone pickaxe, with independent server checks of the chest and player inventory.
+
 - Run the offline storage and crafting scenarios with `acceptance:bot --fast`. The weekly and on-demand GitHub Actions workflow retains the results and vanilla server log.
 
 - A local fixture helper prepares repeatable pit, storage and crafting setups for packaged Fabric acceptance and prints independent server reads for before and after each action.

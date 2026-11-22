@@ -869,17 +869,49 @@ test('craft refusal fails acceptance if ingredients disappear despite the expect
   }
 });
 
+test('withdraw-craft-model checks the agent result against both independent server reads', async () => {
+  const scenario = byId('withdraw-craft-model');
+  const start = { x: laneOrigin(scenario.lane).x + 0.5, y: -60, z: 0.5 };
+  const model = 'test-model';
+  for (const [status, oakLogs, leftoverSticks, failure] of [
+    ['criteria_met', 20, 0, null],
+    ['criteria_unmet', 20, 0, /agent reports criteria_met/],
+    ['criteria_met', 19, 0, /server chest lost exactly three cobblestone/],
+    ['criteria_met', 20, 1, /server inventory holds only the crafted stone pickaxe/],
+  ]) {
+    const world = fakeWorld({ start });
+    const deps = fakeDeps(world, {
+      runAgent: async (_adapter, goal, options) => {
+        assert.match(goal, /Withdraw exactly three cobblestone.*craft one stone pickaxe/);
+        assert.equal(options.model, model);
+        assert.equal(options.fetchImpl, undefined);
+        assert.deepEqual(options.criteria, { craft: { item: 'stone_pickaxe', count: 1 } });
+        world.chest.find((item) => item.id === 'minecraft:cobblestone').count = 2;
+        world.chest.find((item) => item.id === 'minecraft:oak_log').count = oakLogs;
+        world.inventory = [{ id: 'minecraft:stone_pickaxe', count: 1 }];
+        if (leftoverSticks) world.inventory.push({ id: 'minecraft:stick', count: leftoverSticks });
+        return { status };
+      },
+    });
+    const record = await runScenario(scenario, env(world, deps, { model }));
+    assert.equal(record.status, failure ? 'fail' : 'pass', record.reason);
+    if (failure) assert.match(record.reason, failure);
+  }
+});
+
 test('model-only scenarios are skipped without --model and never faked', async () => {
-  const world = fakeWorld();
-  const deps = fakeDeps(world, {
-    runAgent: async () => {
-      throw new Error('must not run');
-    },
-  });
-  const record = await runScenario(byId('stale-removal-model'), env(world, deps));
-  assert.equal(record.status, 'skipped');
-  assert.match(record.reason, /--model/);
-  assert.equal(world.written.length, 0);
+  for (const scenario of scenarios.filter((entry) => entry.requiresModel)) {
+    const world = fakeWorld();
+    const deps = fakeDeps(world, {
+      runAgent: async () => {
+        throw new Error('must not run');
+      },
+    });
+    const record = await runScenario(scenario, env(world, deps));
+    assert.equal(record.status, 'skipped');
+    assert.match(record.reason, /--model/);
+    assert.equal(world.written.length, 0);
+  }
 });
 
 test('scripted planner serves decisions in order and runs hooks during the matching inference', async () => {
