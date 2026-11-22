@@ -78,9 +78,21 @@ copies no Git metadata, so the script also sends a bundle of `HEAD`. Build
 stamps and acceptance results then record the real commit and whether the
 tree was modified.
 
-The sandbox stops by itself 45 minutes after its last check (`MCA_BOAT_IDLE`,
-in seconds), and the next check resumes it. A resume counts as a start unless
-Boat still holds the machine. Sandboxes start with `--no-env`, so none of the
+The script stops the sandbox as soon as a check ends, and the next check
+resumes it (owner decision, 2026-11-22; it used to idle for 45 minutes). A
+stopped sandbox bills nothing. Boat keeps the machine, unbilled, for about 10
+minutes after the stop, and a resume in that time (or while the sandbox still
+reads `stopping`) takes it back without counting as a start. A later resume
+counts as one start. While a check runs, the sandbox's auto-stop is 30
+minutes, and a background keepalive renews it every 10 minutes only while the
+script's own process is alive. If the script is killed outright, for example
+by an agent's tool timeout, the renewals stop and Boat stops the sandbox within
+30 minutes. The keepalive also gives up after `MCA_BOAT_MAX_CHECK` seconds
+(default 7200), so a hung check can't keep a sandbox up indefinitely. The exit
+trap that stops the sandbox is armed before the script creates or resumes it,
+so a run that fails part way still stops it. `MCA_BOAT_IDLE=<seconds>` keeps
+the sandbox up that long after a check instead of stopping it.
+Sandboxes start with `--no-env`, so none of the
 account's stored logins, tokens or keys go in. They also start with
 `--fail-fast`: a start that finds no machine ready fails without counting, and
 the script tries six times, 5 seconds apart. Such a failed resume can leave
@@ -90,8 +102,7 @@ sandbox if the earlier resume finished after all. When the plan's included start
 used up, the script refuses to pay for extra ones unless `MCA_BOAT_PAID_STARTS=1`.
 Other settings are `MCA_BOAT_KEY`, which gives a second agent sharing a
 checkout its own sandbox, and `MCA_BOAT_TYPE` (default `default`: 4 vCPUs,
-8 GB). There are also `MCA_BOAT_SNAPSHOT`, `MCA_BOAT_MAX_CHECK` and
-`MCA_BOAT_KEEP_CHECKS`. A check holds a per-sandbox lock, so two runs never
+8 GB). There are also `MCA_BOAT_SNAPSHOT` and `MCA_BOAT_KEEP_CHECKS`. A check holds a per-sandbox lock, so two runs never
 share a sandbox at once.
 
 `--save` runs the checks and, if they pass, saves the sandbox as the warm

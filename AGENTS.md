@@ -20,8 +20,14 @@ directory in it. See [Boat checks](docs/DEVELOPMENT.md#boat-checks).
   (or `--all`, which takes well over ten minutes); the results come back to
   `.runtime/boat-check/<check>/`.
 - When your work ends: `scripts/boat-check.sh --done` deletes your sandbox.
-  Otherwise it stops by itself 45 minutes after its last check, and the next
-  check resumes it.
+  Otherwise the script stops it as soon as each check ends, and the next check
+  resumes it (owner decision, 2026-11-22, replacing the 45-minute idle). A
+  stopped sandbox bills nothing, and a resume within about 10 minutes of the
+  stop takes back Boat's kept machine without spending a start, so don't keep
+  a sandbox idling to save a start. While a check runs, its auto-stop is 30
+  minutes, renewed every 10 minutes only while the script is alive, so a killed
+  check leaves the sandbox up at most 30 minutes. `MCA_BOAT_IDLE=<seconds>`
+  keeps it up after a check instead; use it only with the owner's go-ahead.
 - Never share a sandbox between agents: each agent works in its own worktree,
   or sets `MCA_BOAT_KEY=<name>` when two agents share a checkout.
 - After dependency or toolchain changes, refresh the snapshot with
