@@ -53,7 +53,7 @@ The goal for the month is a reviewed v0.1.0 candidate. Agents do the headless wo
 | Add a `withdraw-craft-model` real-model scenario and a `--fast` preset (no pit scenarios) to the [bot runner](LIVE-ACCEPTANCE.md). | `--dry-run` lists both, and `--fast` passes in Boat in under five minutes. |
 | Add a [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) for pit, chest and barrel deposits, withdrawals, and crafting on a local server. | A dry run prints the fixture and independent server reads for each provided setup, and a Boat run builds them on the vanilla server. |
 | Make `acceptance status` report whether all eligible evidence shares one candidate commit and archive checksum, and let `acceptance start` record the hashes of the jars in a launcher `mods` folder. | Mixed candidates and jars that don't match the archive are reported as ineligible, with tests. |
-| Add a weekly and on-demand `acceptance:bot` workflow on a Namespace runner. It is not a required check. | One manual run passes and uploads `results.json` and `server.out`. |
+| Add a weekly and on-demand `acceptance:bot` workflow on a GitHub-hosted runner. It is not a required check. | One manual run passes and uploads `results.json` and `server.out`. |
 
 ### Week 2 (30 November – 6 December): bot gates and the first Fabric session
 

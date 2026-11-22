@@ -6,7 +6,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
-- Run the offline storage and crafting scenarios with `acceptance:bot --fast`. The weekly and on-demand Namespace workflow retains the results and vanilla server log.
+- Run the offline storage and crafting scenarios with `acceptance:bot --fast`. The weekly and on-demand GitHub Actions workflow retains the results and vanilla server log.
 
 - A local fixture helper prepares repeatable pit, storage and crafting setups for packaged Fabric acceptance and prints independent server reads for before and after each action.
 
