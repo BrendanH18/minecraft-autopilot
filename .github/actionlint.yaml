@@ -1,4 +1,0 @@
-self-hosted-runner:
-  # CI runs on Namespace runner profiles, which actionlint does not know.
-  labels:
-    - namespace-profile-*

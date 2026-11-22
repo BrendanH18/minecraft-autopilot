@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   node:
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,7 +30,6 @@ jobs:
           node-version: 22
           # .npmrc points the npm cache at .npm-cache; setup-node reads it from npm config.
           cache: npm
-      # .github/actionlint.yaml declares the Namespace runner labels.
       - name: Lint workflows
         env:
           ACTIONLINT_VERSION: 1.7.12
@@ -48,7 +47,7 @@ jobs:
       - run: npm start -- demo --smoke
 
   mod:
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
