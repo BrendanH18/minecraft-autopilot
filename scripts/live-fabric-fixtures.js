@@ -99,8 +99,9 @@ function lowHealthPlan(player) {
     actions: [
       'mc-agent set-home',
       `In the fixture terminal, enter tp ${player} 120.5 ${STAND} 0.5`,
+      'mc-agent wait 120',
+      'From a second terminal, confirm with mc-agent job that the wait job is running.',
       `Enter ${poison} in the fixture terminal. Read Health until it is at most 8, then enter ${clearPoison}.`,
-      `mc-agent goto 128 ${STAND} 0`,
       'Check for a retreat toward the saved home. In separate runs, press F8 or run mc-agent stop during retreat.',
       'Check mc-agent job and repeat the position reads five seconds apart after interruption.',
     ],

@@ -118,7 +118,9 @@ test('the eating and retreat fixtures expose independent vitals and use repeatab
   assert.ok(retreat.verify.includes(`data get entity ${player} Health`));
   assert.equal(retreat.actions[0], 'mc-agent set-home');
   assert.match(retreat.actions[1], /enter tp/);
-  assert.match(retreat.actions[2], /poison.*Health.*at most 8.*clear.*poison/);
+  assert.equal(retreat.actions[2], 'mc-agent wait 120');
+  assert.match(retreat.actions[3], /wait job is running/);
+  assert.match(retreat.actions[4], /poison.*Health.*at most 8.*clear.*poison/);
 });
 
 test('collection fixtures arrange a partial return and leave exactly one main inventory slot before interruption', () => {
