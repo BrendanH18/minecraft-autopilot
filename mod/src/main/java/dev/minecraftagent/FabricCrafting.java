@@ -42,6 +42,7 @@ final class FabricCrafting {
     private Step step;
     private long stepStarted;
     private int expectedOutput;
+    private boolean filledGrid;
 
     FabricCrafting(MinecraftClient client, CraftingRecipes.Recipe recipe, int requested) {
         this.client = client;
@@ -68,9 +69,13 @@ final class FabricCrafting {
 
     /** Start crafting in this handler's grid, {@code gridWidth} 2 for the player's own grid or 3 for a table. */
     void use(ScreenHandler handler, int gridWidth, long now) {
-        this.handler = handler;
         cells = CraftingRecipes.layout(recipe, gridWidth);
         gridSlots = gridWidth * gridWidth;
+        if (!handler.getCursorStack().isEmpty())
+            throw new IllegalStateException("The crafting cursor is occupied; take control to clear it.");
+        if (!gridEmpty(handler))
+            throw new IllegalStateException("The crafting grid already contains items; clear it before starting.");
+        this.handler = handler;
         step = Step.FILL;
         stepStarted = now;
     }
@@ -102,10 +107,7 @@ final class FabricCrafting {
                     return new FabricStorage.Result(true, "Crafted " + crafted + " " + outputName + ".");
                 if (!handler.getCursorStack().isEmpty())
                     throw new IllegalStateException("The crafting cursor is occupied; take control to clear it.");
-                if (!gridEmpty()) {
-                    returnGrid();
-                    if (!gridEmpty()) throw new IllegalStateException("The crafting grid could not be emptied.");
-                }
+                if (!gridEmpty(handler)) throw new IllegalStateException("Items appeared in the crafting grid.");
                 List<CraftingRecipes.Click> clicks = CraftingRecipes.fill(recipe, cells, sources());
                 if (clicks == null) {
                     Map<String, Integer> held = new LinkedHashMap<>();
@@ -123,6 +125,7 @@ final class FabricCrafting {
                                     + " Crafted " + crafted + " of " + requested + ".");
                 }
                 // One client-thread batch, so the cursor is empty again before any takeover can run.
+                filledGrid = true;
                 for (CraftingRecipes.Click click : clicks) click(click.slot(), click.button(), SlotActionType.PICKUP);
                 if (!handler.getCursorStack().isEmpty())
                     throw new IllegalStateException("Filling the crafting grid left items on the cursor.");
@@ -140,6 +143,9 @@ final class FabricCrafting {
                     }
                     return null;
                 }
+                if (result.getCount() != recipe.yield())
+                    throw new IllegalStateException("The server offered " + result.getCount() + " " + outputName
+                            + " per craft; expected " + recipe.yield() + ".");
                 if (InventoryRoom.capacity(mainSlots(client.player.getInventory()), outputName, output.getMaxCount())
                         < result.getCount()) {
                     returnGrid();
@@ -155,8 +161,9 @@ final class FabricCrafting {
             }
             case AWAIT_TAKE:
                 if (count(output) >= expectedOutput
-                        && gridEmpty()
+                        && gridEmpty(handler)
                         && handler.getSlot(0).getStack().isEmpty()) {
+                    filledGrid = false;
                     step = Step.FILL;
                     stepStarted = now;
                 } else if (now - stepStarted > STEP_TIMEOUT) {
@@ -170,16 +177,18 @@ final class FabricCrafting {
 
     /** Quick-moves leftover grid items back into the inventory while this grid is still the current handler. */
     void returnGrid() {
-        if (handler == null
+        if (!filledGrid
+                || handler == null
                 || client.player == null
                 || client.interactionManager == null
                 || client.player.currentScreenHandler != handler
                 || !handler.getCursorStack().isEmpty()) return;
         for (int slot = 1; slot <= gridSlots; slot++)
             if (!handler.getSlot(slot).getStack().isEmpty()) click(slot, 0, SlotActionType.QUICK_MOVE);
+        filledGrid = !gridEmpty(handler);
     }
 
-    private boolean gridEmpty() {
+    private boolean gridEmpty(ScreenHandler handler) {
         for (int slot = 1; slot <= gridSlots; slot++)
             if (!handler.getSlot(slot).getStack().isEmpty()) return false;
         return true;

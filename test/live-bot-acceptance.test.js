@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
@@ -26,7 +27,10 @@ import {
   prepareServerDirectory,
   RUNTIME,
   serverProperties,
+  ShutdownError,
   settle,
+  startBot,
+  startServer,
 } from '../scripts/live-acceptance/processes.js';
 import {
   parseOptions,
@@ -172,7 +176,7 @@ test('commands are serialized, matched to their reply, and tolerate log noise', 
   assert.match(await clear, /^Removed 4 item/);
 });
 
-test('command errors and timeouts reject without blocking later commands', async () => {
+test('command errors leave the console usable, but a missing reply invalidates the queue', async () => {
   const { serverConsole, written } = fakeConsole();
   const bad = serverConsole.command('data get entity LiveBot Pos');
   await new Promise(setImmediate);
@@ -181,17 +185,68 @@ test('command errors and timeouts reject without blocking later commands', async
     bad,
     (error) => error instanceof CommandError && /failed: No entity was found/.test(error.message),
   );
-  await assert.rejects(
-    serverConsole.command('time set 1000', { timeoutMs: 20 }),
-    /Timed out after 20 ms waiting for a reply to "time set 1000"/,
-  );
   const next = serverConsole.command('weather clear');
   await new Promise(setImmediate);
   serverConsole.push(`${LOG_PREFIX}Set the weather to clear\n`);
   assert.equal(await next, 'Set the weather to clear');
+  const timeout = serverConsole.command('time set 1000', { timeoutMs: 20 });
+  const afterTimeout = serverConsole.command('time set 2000');
+  await Promise.all([
+    assert.rejects(timeout, /Timed out after 20 ms waiting for a reply to "time set 1000"/),
+    assert.rejects(afterTimeout, /ended before sending.*Timed out/),
+  ]);
   await assert.rejects(serverConsole.command('say hello'), /No reply pattern is known for "say"/);
   await assert.rejects(serverConsole.command('say a\nstop'), /Invalid console command/);
   assert.ok(!written.some((text) => text.startsWith('say') || text.includes('stop')));
+});
+
+test('aborting an issued command rejects promptly and drains its reply before writing cleanup', async () => {
+  const { serverConsole, written } = fakeConsole();
+  const controller = new AbortController();
+  const first = serverConsole.command('clear LiveBot', { signal: controller.signal });
+  await new Promise(setImmediate);
+  controller.abort(new Error('fixture interrupted'));
+  await assert.rejects(first, /fixture interrupted/);
+  const cleanup = serverConsole.command('clear LiveBot minecraft:dirt');
+  await new Promise(setImmediate);
+  assert.deepEqual(written, ['clear LiveBot\n']);
+  serverConsole.push(`${LOG_PREFIX}Removed 4 item(s) from player LiveBot\n`);
+  await new Promise(setImmediate);
+  assert.deepEqual(written, ['clear LiveBot\n', 'clear LiveBot minecraft:dirt\n']);
+  serverConsole.push(`${LOG_PREFIX}No items were found on player LiveBot\n`);
+  assert.match(await cleanup, /^No items/);
+});
+
+test('aborted and closed-console commands are never written', async () => {
+  const { serverConsole, written } = fakeConsole();
+  const first = serverConsole.command('time set 1000');
+  const controller = new AbortController();
+  const queued = serverConsole.command('weather clear', { signal: controller.signal });
+  controller.abort(new Error('fixture interrupted'));
+  await assert.rejects(queued, /fixture interrupted/);
+  await new Promise(setImmediate);
+  serverConsole.push(`${LOG_PREFIX}Set the time to 1000\n`);
+  await first;
+  serverConsole.end('server stopped');
+  await assert.rejects(serverConsole.command('weather clear'), /ended before sending.*server stopped/);
+  assert.deepEqual(written, ['time set 1000\n']);
+});
+
+test('a console write failure detaches the listener and leaves subsequent commands usable', async () => {
+  const { serverConsole, written } = fakeConsole();
+  const write = serverConsole.write;
+  serverConsole.write = () => {
+    throw new Error('stdin failed');
+  };
+  await assert.rejects(serverConsole.command('weather clear'), /stdin failed/);
+  assert.equal(serverConsole.listenerCount('line'), 0);
+  assert.equal(serverConsole.listenerCount('end'), 0);
+  serverConsole.write = write;
+  const next = serverConsole.command('time set 1000');
+  await new Promise(setImmediate);
+  assert.deepEqual(written, ['time set 1000\n']);
+  serverConsole.push(`${LOG_PREFIX}Set the time to 1000\n`);
+  assert.equal(await next, 'Set the time to 1000');
 });
 
 test('block and entity data helpers parse replies; a missing Items path is empty, a non-container is an error', async () => {
@@ -1067,7 +1122,7 @@ test('an interrupt during a scenario cleans up, skips the rest, and still stops 
   };
   const deps = fakeDeps(world);
   const options = {
-    ...parseOptions(['--all', '--accept-eula']),
+    ...parseOptions(['--all', '--accept-eula', '--keep-server']),
     scenarios: [hanging, { ...hanging, id: 'stub-next' }],
     out: '/fake/r.json',
   };
@@ -1076,8 +1131,159 @@ test('an interrupt during a scenario cleans up, skips the rest, and still stops 
   assert.match(results.scenarios[0].reason, /^Interrupted: Interrupted by user/);
   assert.equal(results.scenarios[1].status, 'skipped');
   assert.ok(world.written.includes('fill 90 -60 -5 100 -55 5 air'));
+  assert.equal(world.written.filter((command) => command === 'time set 1000').length, 1);
   assert.equal(deps.calls.botStops, 1);
   assert.equal(deps.calls.serverStops, 1);
+});
+
+test('an interrupt during retained-fixture cleanup still removes the fixture and fails the run', async () => {
+  const world = fakeWorld({ start: { x: 96.5, y: -60, z: 0.5 } });
+  const controller = new AbortController();
+  const write = world.console.write;
+  world.console.write = (text) => {
+    if (text === `clear ${BOT}\n`) controller.abort(new Error('Interrupted during cleanup.'));
+    write(text);
+  };
+  const scenario = {
+    id: 'stub-cleanup',
+    lane: 0,
+    title: 'stub',
+    release: ['x'],
+    actions: ['a'],
+    expect: ['e'],
+    plan: () => ({
+      points: { start: { x: 96.5, y: -60, z: 0.5 } },
+      fixture: ['fill 90 -60 -5 100 -55 5 stone'],
+      prepare: [`tp ${BOT} 96.5 -60 0.5`],
+      cleanup: [`clear ${BOT}`, 'fill 90 -60 -5 100 -55 5 air'],
+    }),
+    run: async (ctx) => ctx.check('passed before cleanup', true),
+  };
+  const deps = fakeDeps(world);
+  const results = await runAcceptance(
+    { ...parseOptions(['--all', '--accept-eula', '--keep-server']), scenarios: [scenario], out: '/fake/r.json' },
+    deps,
+    controller.signal,
+  );
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.match(results.error, /Interrupted during cleanup/);
+  assert.ok(world.written.includes('fill 90 -60 -5 100 -55 5 air'));
+  assert.equal(deps.calls.serverStops, 1);
+});
+
+test('scenario diagnostics cannot overwrite check outcomes and keep bounded strings as details', async () => {
+  const original = byId('craft-no-table');
+  const world = fakeWorld({ start: { x: laneOrigin(original.lane).x + 0.5, y: -60, z: 0.5 } });
+  const scenario = {
+    ...original,
+    run: async (ctx) => {
+      ctx.check('did fail', false, { name: 'misleading', pass: true });
+      ctx.check('big data', true, { note: 'x'.repeat(10_000) });
+    },
+  };
+  const result = await runScenario(scenario, env(world, fakeDeps(world)));
+  assert.equal(result.status, 'fail');
+  assert.equal(result.reason, 'Failed checks: did fail');
+  assert.deepEqual(result.checks[0], { name: 'did fail', pass: false });
+  assert.deepEqual(Object.keys(result.checks[1]).sort(), ['detail', 'name', 'pass']);
+  assert.ok(result.checks[1].detail.length <= 4001);
+});
+
+test('cleanup failure changes a pass to fail and preserves the latest bot output', async () => {
+  const original = byId('craft-no-table');
+  const world = fakeWorld({ start: { x: laneOrigin(original.lane).x + 0.5, y: -60, z: 0.5 } });
+  const deps = fakeDeps(world);
+  const startBot = deps.startBot;
+  const connect = deps.connect;
+  deps.startBot = async () => ({ ...(await startBot()), output: ['bot started\n', 'bot exited\n'] });
+  deps.connect = async (...args) => ({
+    ...(await connect(...args)),
+    emergencyStop: async () => {
+      throw new Error('bridge stop failed');
+    },
+  });
+  const scenario = { ...original, run: async (ctx) => ctx.check('success', true) };
+  const result = await runScenario(scenario, env(world, deps));
+  assert.equal(result.status, 'fail');
+  assert.equal(result.reason, 'Cleanup failed: bridge: /v1/stop');
+  assert.equal(result.observations.botOutput, 'bot started\nbot exited');
+  assert.equal(deps.calls.botStops, 1);
+  assert.ok(result.cleanup.some((entry) => entry.command === 'close bridge connections' && entry.ok));
+});
+
+test('failed bot shutdown retains the failed scenario and skips the remaining selections', async () => {
+  const original = byId('craft-no-table');
+  const world = fakeWorld({ start: { x: laneOrigin(original.lane).x + 0.5, y: -60, z: 0.5 } });
+  const deps = fakeDeps(world);
+  let starts = 0;
+  deps.startBot = async () => {
+    starts++;
+    return {
+      stop: async () => {
+        throw new Error('bot remained running');
+      },
+    };
+  };
+  const scenario = { ...original, run: async (ctx) => ctx.check('success', true) };
+  const options = {
+    ...parseOptions(['--all', '--accept-eula', '--no-thinking']),
+    scenarios: [scenario, byId('craft-rounds-up')],
+  };
+  const results = await runAcceptance(options, deps);
+  const [failed, skipped] = results.scenarios;
+  assert.equal(failed.status, 'fail');
+  assert.deepEqual(failed.cleanup.at(-1), { command: 'stop bot process', ok: false, error: 'bot remained running' });
+  assert.equal(skipped.id, 'craft-rounds-up');
+  assert.equal(skipped.status, 'skipped');
+  assert.match(skipped.reason, /Could not stop the bot/);
+  assert.equal(results.options.noThinking, true);
+  assert.equal(starts, 1);
+  assert.equal(deps.calls.serverStops, 1);
+});
+
+test('a bot that never became ready or exited also prevents the next fixture from starting', async () => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  deps.startBot = async () => {
+    throw new ShutdownError('Bot remained running after bridge startup timed out.');
+  };
+  const options = parseOptions(['--scenario', 'craft-rounds-up', '--scenario', 'craft-no-table', '--accept-eula']);
+  const results = await runAcceptance(options, deps);
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.equal(results.scenarios[1].status, 'skipped');
+  assert.match(results.error, /Could not stop the bot/);
+});
+
+test('a startup timeout records the last available bot output', async (t) => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  const home = await createRunDirectory(RUNTIME);
+  t.after(() => rm(home, { recursive: true, force: true }));
+  deps.startBot = (options) =>
+    startBot({
+      ...options,
+      home,
+      timeoutMs: 100,
+      connect: async () => {
+        throw new Error('bridge unavailable');
+      },
+      spawnImpl: () => {
+        const child = new EventEmitter();
+        child.exitCode = null;
+        child.signalCode = null;
+        child.stdout = new EventEmitter();
+        child.kill = (signal) => {
+          child.signalCode = signal;
+          child.emit('exit', null, signal);
+        };
+        setImmediate(() => child.stdout.emit('data', 'bot startup diagnostic\n'));
+        return child;
+      },
+    });
+  const options = parseOptions(['--scenario', 'craft-rounds-up', '--accept-eula']);
+  const results = await runAcceptance(options, deps);
+  assert.match(results.scenarios[0].reason, /bridge was not ready/);
+  assert.equal(results.scenarios[0].observations.botOutput, 'bot startup diagnostic');
 });
 
 test('overlapping runs keep their server, bot state, and review evidence in separate directories', async (t) => {
@@ -1161,6 +1367,17 @@ test('--fast dry-run includes the offline storage and crafting scenarios and exc
       'craft-bootstrap',
       'craft-missing-ingredients',
       'craft-full-inventory',
+      'deposit-barrel-exact',
+      'deposit-full-chest',
+      'deposit-double-chest-omitted',
+      'deposit-over-held',
+      'withdraw-barrel-exact',
+      'withdraw-no-matching-stock',
+      'craft-rounds-up',
+      'craft-mixed-planks',
+      'craft-mixed-stone',
+      'craft-reuses-consumed-slot',
+      'craft-no-table',
     ],
   );
   assert.throws(() => parseOptions(['--fast', '--all']), /Choose only one/);
@@ -1188,6 +1405,21 @@ test('main prints the dry-run plan without starting anything and refuses without
   assert.equal(started, false);
 });
 
+test('dry-run JSON contains the full selected plan and is refused for live runs', async () => {
+  const requests = ['--dry-run', '--json', '--scenario', 'deposit-double-chest-omitted'];
+  const printed = [];
+  assert.equal(await main(requests, { print: (text) => printed.push(JSON.parse(text)) }), 0);
+  assert.deepEqual(printed[0], buildPlan(parseOptions(requests)));
+  assert.throws(() => parseOptions(['--all', '--json']), /--json requires --dry-run/);
+});
+
+test('a live selection with no completed checks returns an unsuccessful exit status', async () => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  assert.equal(await main(['--scenario', 'stale-removal-model', '--accept-eula'], deps), 1);
+  assert.deepEqual(deps.calls.results.value.summary, { pass: 0, fail: 0, skipped: 1, error: null });
+});
+
 test('settle cancels its escalation timer once the child exits', async () => {
   const timers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
   const before = timers();
@@ -1203,4 +1435,40 @@ test('settle cancels its escalation timer once the child exits', async () => {
   ]);
   assert.equal(signals, 1);
   assert.equal(timers(), before, 'no 60 s timer left keeping the process alive');
+});
+
+test('shutdown escalation rejects if the child never exits', async () => {
+  const child = { pid: 123, exitCode: null, signalCode: null };
+  const exited = new Promise(() => {});
+  await assert.rejects(settle(child, exited, [[() => {}, 1]]), /Process 123 did not exit/);
+});
+
+test('asynchronous server stdin errors fail pending commands and allow signal shutdown', async () => {
+  await mkdir(RUNTIME, { recursive: true });
+  const directory = await mkdtemp(join(RUNTIME, 'server-pipe-'));
+  try {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdin.writable = true;
+    child.stdin.write = () => {
+      setImmediate(() => {
+        child.stdin.writable = false;
+        child.stdin.emit('error', new Error('EPIPE'));
+      });
+    };
+    child.kill = (signal) => {
+      child.signalCode = signal;
+      child.emit('exit', null, signal);
+    };
+    const server = startServer({ directory, spawnImpl: () => child });
+    await assert.rejects(server.console.command('time set 1000'), /server stdin failed: EPIPE/);
+    await server.stop();
+    assert.equal(child.signalCode, 'SIGTERM');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

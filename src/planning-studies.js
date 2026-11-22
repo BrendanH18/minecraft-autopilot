@@ -140,6 +140,20 @@ export function registerPlanningStudies(program, { print }) {
       const { purpose, request } = findRecipe(group, command);
       print(options.request ? request : { purpose, ...calculateStudy('compare', group, command, request) });
     });
+  study
+    .command('examples [group]')
+    .description('List worked planner examples, optionally for one group.')
+    .action(async (group) => {
+      const { listPlanningExamples } = await import('./planning-examples.js');
+      print(listPlanningExamples(group));
+    });
+  study
+    .command('example <group> <command>')
+    .description('Run a worked planner example and show its inputs, result, and hand-checked expected result.')
+    .action(async (group, command) => {
+      const { runPlanningExample } = await import('./planning-examples.js');
+      print(runPlanningExample(group, command));
+    });
   const descriptions = {
     batch: 'Evaluate independent argument rows: {cases:[[args],...]}.',
     compare: 'Compare candidates with a baseline: {baseline:[args],candidates:[[args],...]}.',

@@ -21,6 +21,7 @@ import {
   SEED,
   WORLD_SETUP,
   HELP,
+  ShutdownError,
   preflight,
   portIsFree,
   sha256File,
@@ -37,7 +38,7 @@ import {
 export { SEED, WORLD_SETUP };
 const REVIEW_NOTE =
   'Machine-checked observations only. These results become acceptance evidence for RELEASE.md only after a person reviews them, including server.out.';
-const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast) [--accept-eula] [--server-jar <path>] [--dry-run]
+const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
   [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
 --fast runs offline scenarios without the long pit recovery cases.
 Scenarios: ${scenarioIds.join(', ')}`;
@@ -52,6 +53,7 @@ export function parseOptions(argv) {
       fast: { type: 'boolean' },
       'server-jar': { type: 'string' },
       'dry-run': { type: 'boolean' },
+      json: { type: 'boolean' },
       'keep-server': { type: 'boolean' },
       port: { type: 'string' },
       out: { type: 'string' },
@@ -70,6 +72,7 @@ export function parseOptions(argv) {
   const account = values.account ?? 'LiveBot';
   if (!/^[A-Za-z0-9_]{3,16}$/.test(account))
     throw new Error('--account must be a 3–16 character offline username (letters, digits, _).');
+  if (values.json && !values['dry-run']) throw new Error('--json requires --dry-run.');
   if ([values.scenario, values.all, values.fast].filter(Boolean).length > 1)
     throw new Error('Choose only one of --scenario, --all, and --fast.');
   for (const id of values.scenario ?? [])
@@ -84,6 +87,7 @@ export function parseOptions(argv) {
   return {
     help: !!values.help,
     dryRun: !!values['dry-run'],
+    json: !!values.json,
     keepServer: !!values['keep-server'],
     acceptEula: !!values['accept-eula'],
     port,
@@ -211,7 +215,8 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       record.observations[key] = compact(value);
     },
     check(name, pass, detail = {}) {
-      record.checks.push({ name, pass: !!pass, ...compact(detail) });
+      const report = compact(detail);
+      record.checks.push({ ...(typeof report === 'string' ? { detail: report } : report), name, pass: !!pass });
     },
     server: {
       command: (command) => serverConsole.command(command, { signal }),
@@ -268,10 +273,13 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       }
     },
     async close() {
-      await ctx.bridge.release().catch(() => {});
       const current = observer;
       observer = null;
-      await current?.close().catch(() => {});
+      try {
+        await ctx.bridge.release();
+      } finally {
+        await current?.close();
+      }
     },
   };
   return ctx;
@@ -306,15 +314,14 @@ async function settle(ctx, { points: { start }, marker }, timeoutMs = 15_000) {
   }
 }
 
-/** Fixture → fresh bot session → prepare → run → stop job → cleanup → stop bot. Cleanup always runs. */
-export async function runScenario(scenario, { options, deps, serverConsole, signal, where }) {
-  const record = {
+function scenarioRecord(scenario, reason = null) {
+  return {
     id: scenario.id,
     title: scenario.title,
     release: scenario.release,
     requiresModel: !!scenario.requiresModel,
     status: 'skipped',
-    reason: null,
+    reason,
     startedAt: null,
     durationMs: 0,
     steps: [],
@@ -322,14 +329,17 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
     checks: [],
     cleanup: [],
   };
+}
+
+/** Fixture → fresh bot session → prepare → run → stop job → cleanup → stop bot. Cleanup always runs. */
+export async function runScenario(scenario, { options, deps, serverConsole, signal, where }) {
   if (scenario.requiresModel && !options.model) {
-    record.reason = 'Requires a real local model; pass --model NAME to run it.';
-    return record;
+    return scenarioRecord(scenario, 'Requires a real local model; pass --model NAME to run it.');
   }
   if (signal.aborted) {
-    record.reason = 'Interrupted before this scenario started.';
-    return record;
+    return scenarioRecord(scenario, 'Interrupted before this scenario started.');
   }
+  const record = scenarioRecord(scenario);
   const plan = scenarioPlan(scenario, { bot: options.account });
   record.startedAt = new Date(deps.now()).toISOString();
   if (scenario.requiresModel) record.observations.model = options.model;
@@ -354,35 +364,64 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   } catch (error) {
     record.status = 'fail';
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
+    if (error.botOutput) ctx.note('botOutput', error.botOutput);
+    if (error instanceof ShutdownError)
+      record.cleanup.push({ command: 'stop bot process', ok: false, error: error.message });
   } finally {
     // Cleanup ignores the run signal so an interrupted scenario still leaves no bot activity or fixtures behind.
-    if (bot)
-      await ctx.bridge.emergencyStop().then(
-        () => record.cleanup.push({ command: 'bridge: /v1/stop', ok: true }),
-        (error) => record.cleanup.push({ command: 'bridge: /v1/stop', ok: false, error: error.message }),
-      );
-    await ctx.close();
-    const cleanup = options.keepServer
-      ? plan.cleanup.filter((command) => /^(?:clear|effect) /.test(command))
-      : plan.cleanup;
-    for (const command of cleanup) {
+    const clean = async (command, fn) => {
       try {
-        await serverConsole.command(command);
-        record.cleanup.push({ command, ok: true });
+        record.cleanup.push({ command, ok: true, ...(await fn()) });
       } catch (error) {
         record.cleanup.push({ command, ok: false, error: error.message });
       }
+    };
+    if (bot)
+      await clean('bridge: /v1/stop', async () => {
+        await ctx.bridge.emergencyStop();
+      });
+    await clean('close bridge connections', () => ctx.close());
+    const runCleanup = (command) =>
+      clean(command, async () => {
+        await serverConsole.command(command);
+      });
+    const keepFixture = options.keepServer && !signal.aborted;
+    const deferred = [];
+    for (const command of plan.cleanup) {
+      if (keepFixture && !/^(?:clear|effect) /.test(command)) deferred.push(command);
+      else await runCleanup(command);
     }
     if (bot) {
-      const left = serverConsole
-        .waitFor((message) => message === `${options.account} left the game`, {
-          timeoutMs: 20_000,
-          label: 'the bot to leave',
-        })
-        .catch(() => null);
-      await bot.stop();
-      record.cleanup.push({ command: 'stop bot process', ok: true, leftGame: (await left) !== null });
+      await clean('stop bot process', async () => {
+        const wait = new AbortController();
+        const left = serverConsole
+          .waitFor((message) => message === `${options.account} left the game`, {
+            timeoutMs: 20_000,
+            signal: wait.signal,
+            label: 'the bot to leave',
+          })
+          .catch(() => null);
+        try {
+          await bot.stop();
+          return { leftGame: (await left) !== null };
+        } finally {
+          wait.abort();
+        }
+      });
     }
+    if (signal.aborted) {
+      for (const command of deferred) await runCleanup(command);
+      record.status = 'fail';
+      record.reason = `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
+    }
+    const failures = record.cleanup.filter((entry) => !entry.ok);
+    if (failures.length) {
+      record.status = 'fail';
+      record.reason = [record.reason, `Cleanup failed: ${failures.map(({ command }) => command).join(', ')}`]
+        .filter(Boolean)
+        .join(' | ');
+    }
+    if (record.status === 'fail' && bot?.output?.length) ctx.note('botOutput', bot.output.join('').trim().slice(-3000));
     record.durationMs = deps.now() - started;
   }
   return record;
@@ -471,6 +510,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       account: options.account,
       keepServer: options.keepServer,
       model: options.model,
+      noThinking: !!options.noThinking,
       scenarios: options.scenarios.map((scenario) => scenario.id),
     },
     scenarios: [],
@@ -478,6 +518,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     error: null,
   };
   let server = null;
+  let inspecting = false;
   try {
     await deps.prepareServerDirectory({
       directory: where.server,
@@ -497,15 +538,24 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       const record = await runScenario(scenario, { options, deps, serverConsole: server.console, signal, where });
       results.scenarios.push(record);
       deps.warn(`[${scenario.id}] ${record.status}${record.reason ? `: ${record.reason}` : ''}`);
+      signal.throwIfAborted();
+      if (record.cleanup.some(({ command, ok }) => command === 'stop bot process' && !ok))
+        throw new Error(`Could not stop the bot after ${scenario.id}. Remaining scenarios were skipped.`);
     }
-    if (options.keepServer && !signal.aborted) await deps.keepAlive(server, signal);
+    if (options.keepServer) {
+      inspecting = true;
+      await deps.keepAlive(server, signal);
+    }
   } catch (error) {
     results.error = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
+    const remaining = options.scenarios.slice(results.scenarios.length);
+    results.scenarios.push(...remaining.map((scenario) => scenarioRecord(scenario, results.error)));
   } finally {
     if (server)
       await server.stop().catch((error) => {
         results.error ??= `Server stop failed: ${error.message}`;
       });
+    if (signal.aborted && !inspecting) results.error ??= `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
     results.finishedAt = new Date(deps.now()).toISOString();
     results.summary = summarize(results);
     await deps.writeResults(where.out, results);
@@ -527,7 +577,8 @@ export async function main(argv = process.argv.slice(2), deps = defaultDeps) {
     return 0;
   }
   if (options.dryRun) {
-    deps.print(formatPlan(buildPlan(options)));
+    const plan = buildPlan(options);
+    deps.print(options.json ? JSON.stringify(plan, null, 2) : formatPlan(plan));
     return 0;
   }
   const controller = new AbortController();
@@ -544,7 +595,7 @@ export async function main(argv = process.argv.slice(2), deps = defaultDeps) {
   process.on('SIGTERM', onSignal);
   try {
     const results = await runAcceptance(options, deps, controller.signal);
-    return results.summary.fail || results.error ? 1 : 0;
+    return results.summary.fail || results.error || !results.summary.pass ? 1 : 0;
   } catch (error) {
     deps.warn(`Error: ${error.message}`);
     if (!/See docs\/DEVELOPMENT\.md/.test(error.message)) deps.warn(HELP);

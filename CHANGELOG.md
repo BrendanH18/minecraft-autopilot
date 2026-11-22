@@ -6,6 +6,10 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- `study examples` and `study example GROUP COMMAND` list and run worked
+  planner examples. Reports show the inputs, computed result, and
+  independently calculated expected output. See [worked examples](docs/PLANNING-STUDIES.md#worked-examples).
+
 - Packaged Fabric acceptance fixtures for keyboard and lease takeover, plus cobblestone collection, hostile observations, and dimension-change release.
 
 - The opt-in `withdraw-craft-model` bot scenario uses a local Ollama model to withdraw cobblestone and craft a stone pickaxe, with independent server checks of the chest and player inventory.
@@ -150,6 +154,17 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - Usage, contributor, roadmap, protocol, troubleshooting, and release documentation.
 
 ### Fixed
+
+- Core CLI commands, including `stop`, `observe`, and `mcp`, start without
+  loading the offline planner catalog.
+
+- Fabric checks for lost control before processing queued bridge requests,
+  preserves existing saved homes if a write fails, and validates the crafting
+  grid and recipe yield before taking output.
+
+- Acceptance evidence validates the archived build manifest and serializes
+  updates to the session file. New bot scenarios and Fabric fixtures exercise
+  additional storage, crafting, and player lifecycle cases.
 
 - Fabric defers automatic eating during storage and crafting, and waits for
   server confirmation before using a newly placed crafting table. A regression

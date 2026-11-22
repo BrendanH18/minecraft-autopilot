@@ -133,14 +133,17 @@ function platformPlan({ bot, lane }) {
   };
 }
 
-function withdrawPlan({ bot, lane }, { outOfRange = false, extraLogs = 0, fullInventory = false } = {}) {
+function withdrawPlan(
+  { bot, lane },
+  { outOfRange = false, logs = 20, extraLogs = 0, fullInventory = false, storage = 'chest' } = {},
+) {
   const o = laneOrigin(lane);
   const chest = outOfRange ? point(o, 14, STAND, 14) : point(o, 2, STAND, 0);
   const start = center(point(o, 0, STAND, 0));
   // An observable block in the same chunk proves the bot has received the out-of-range chest's chunk.
   const marker = outOfRange ? { ...point(o, 2, STAND, 0), name: LOG } : null;
   const stocks = [
-    '{Slot:0b,id:"minecraft:oak_log",count:20}',
+    ...(logs ? [`{Slot:0b,id:"minecraft:oak_log",count:${logs}}`] : []),
     '{Slot:1b,id:"minecraft:cobblestone",count:5}',
     ...(extraLogs ? [`{Slot:2b,id:"minecraft:oak_log",count:${extraLogs}}`] : []),
   ];
@@ -152,11 +155,12 @@ function withdrawPlan({ bot, lane }, { outOfRange = false, extraLogs = 0, fullIn
     points: { start, chest },
     marker,
     held,
-    stock: { [LOG]: 20 + extraLogs, 'minecraft:cobblestone': 5 },
+    stock: { [LOG]: logs + extraLogs, 'minecraft:cobblestone': 5 },
+    storage,
     fixture: [
       forceload(o, 'add'),
       clearArea,
-      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:chest[facing=west]{Items:[${stocks.join(',')}]}`,
+      `setblock ${chest.x} ${chest.y} ${chest.z} minecraft:${storage}[facing=west]{Items:[${stocks.join(',')}]}`,
       ...(marker ? [`setblock ${marker.x} ${marker.y} ${marker.z} ${marker.name}`] : []),
     ],
     prepare: [
@@ -582,6 +586,77 @@ const settledAction = async (ctx, action) => {
   }
 };
 
+function depositScenario({ id, lane, title, storage, count, held, moved, failure }) {
+  return {
+    id,
+    lane,
+    title,
+    release: [RELEASE.store],
+    plan(input) {
+      const plan = storePlan(input, { storage, depositLogs: held });
+      const { chest } = plan.points;
+      const containers = [chest];
+      const filler = storage === 'full' ? 27 * 64 : 5;
+      let stock = [{ [LOG]: storage === 'full' ? 0 : 3, 'minecraft:cobblestone': filler }];
+      if (storage === 'double') {
+        const other = { ...chest, z: chest.z - 1 };
+        const items = Array.from({ length: 26 }, (_, slot) => `{Slot:${slot}b,id:"minecraft:cobblestone",count:64}`);
+        // Each half has exactly one empty slot; moving more than one stack must use both halves.
+        plan.fixture.push(...[chest, other].map(({ x, y, z }) => `data merge block ${x} ${y} ${z} {Items:[${items}]}`));
+        containers.push(other);
+        stock = containers.map(() => ({ 'minecraft:cobblestone': 26 * 64 }));
+      }
+      return { ...plan, containers, stock };
+    },
+    async run(ctx, plan) {
+      const read = async () => ({
+        storage: await Promise.all(
+          plan.containers.map(async (position) => itemTotals(await ctx.server.items(position))),
+        ),
+        inventory: itemTotals(await ctx.server.inventory()),
+      });
+      const before = await ctx.step('independent baseline (storage Items and Inventory)', read);
+      ctx.check(
+        'server starts with the expected storage and held items',
+        before.storage.every((contents, index) => sameTotals(contents, plan.stock[index])) &&
+          sameTotals(before.inventory, { [LOG]: held }),
+        { before, stock: plan.stock },
+      );
+      const outcome = await ctx.step(`deposit oak_log${count === undefined ? '' : ` ${count}`}`, () =>
+        settledAction(ctx, { type: 'deposit', item: 'oak_log', ...(count === undefined ? {} : { count }) }),
+      );
+      const state = await ctx.bridge.observe();
+      const after = await ctx.step('independent final state (storage Items and Inventory)', read);
+      const changes = after.storage.map((contents, index) => (contents[LOG] ?? 0) - (before.storage[index][LOG] ?? 0));
+      ctx.check(
+        'job reports the expected transfer or refusal',
+        state.job?.status === (failure ? 'failed' : 'completed') &&
+          outcome.settled === (failure ? 'rejected' : 'completed') &&
+          (failure ? failure.test(outcome.message) : outcome.message.startsWith(`Deposited ${moved} oak_log into `)),
+        { outcome, status: state.job?.status },
+      );
+      ctx.check(
+        'independent server reads show the expected transfer across storage and inventory',
+        changes.every((change) => change > 0 || (moved === 0 && change === 0)) &&
+          changes.reduce((sum, change) => sum + change, 0) === moved &&
+          after.storage.every((contents, index) =>
+            sameTotals({ ...contents, [LOG]: 0 }, { ...before.storage[index], [LOG]: 0 }),
+          ) &&
+          sameTotals(after.inventory, { [LOG]: held - moved }) &&
+          sameTotals(bridgeItemTotals(state.inventory), after.inventory),
+        { before, after, moved, changes },
+      );
+    },
+    actions: [
+      `bridge: deposit oak_log${count === undefined ? '' : ` ${count}`} into ${storage} with ${held} logs held`,
+    ],
+    expect: [
+      failure ? `job fails with ${failure}` : `job reports ${moved} logs deposited`,
+      `server independently shows ${moved} logs moved and non-matching contents preserved`,
+    ],
+  };
+}
+
 async function runWithdraw(ctx, plan, { count, moved = count, failure, noCandidate = false }) {
   const { chest, start } = plan.points;
   const read = async () => ({
@@ -645,8 +720,11 @@ async function runWithdraw(ctx, plan, { count, moved = count, failure, noCandida
     return;
   }
   ctx.check(
-    'job names the seeded chest',
-    reported?.name === 'minecraft:chest' && reported.x === chest.x && reported.y === chest.y && reported.z === chest.z,
+    'job names the seeded container',
+    reported?.name === `minecraft:${plan.storage}` &&
+      reported.x === chest.x &&
+      reported.y === chest.y &&
+      reported.z === chest.z,
     { container: reported, chest },
   );
   ctx.check(
@@ -792,6 +870,60 @@ function craftRefusalScenario({ id, lane, title, count, cobblestone, message }) 
     },
     actions: [`bridge: craft oak_planks ${count}`],
     expect: [`job failed with "${message}"`, 'server inventory retains all ingredients and holds no planks'],
+  };
+}
+
+function craftInventoryScenario({ id, lane, title, held, expected = held, item, count, table = false, failure }) {
+  const supplies = Object.entries(held).map(([name, amount]) => `${name} ${amount}`);
+  return {
+    id,
+    lane,
+    title,
+    release: [RELEASE.craft],
+    plan(input) {
+      const plan = craftPlan(input, supplies);
+      const existingTable = plan.points.beside[0];
+      if (table) plan.fixture.push(`setblock ${at(plan.origin, 1, STAND, 0)} minecraft:crafting_table`);
+      return { ...plan, reads: [tableAt(existingTable)], points: { ...plan.points, existingTable } };
+    },
+    async run(ctx, plan) {
+      const { existingTable } = plan.points;
+      const read = async () => ({
+        inventory: itemTotals(await ctx.server.inventory()),
+        table: await ctx.server.testBlock(existingTable, 'minecraft:crafting_table'),
+      });
+      const before = await ctx.step('independent baseline (Inventory and crafting table)', read);
+      ctx.check(
+        'server starts with the requested ingredients and table setup',
+        sameTotals(before.inventory, held) && before.table === table,
+        before,
+      );
+      const outcome = await ctx.step(`bridge: craft ${item} ${count}`, () =>
+        settledAction(ctx, { type: 'craft', item, count }),
+      );
+      const state = await ctx.bridge.observe();
+      const after = await ctx.step('independent final state (Inventory and crafting table)', read);
+      const produced = (expected[`minecraft:${item}`] ?? 0) - (held[`minecraft:${item}`] ?? 0);
+      ctx.check(
+        'job reports the expected result',
+        outcome.settled === (failure ? 'rejected' : 'completed') &&
+          state.job?.status === (failure ? 'failed' : 'completed') &&
+          (failure ? failure.test(outcome.message) : outcome.message === `Crafted ${produced} ${item}.`),
+        { outcome, status: state.job?.status },
+      );
+      ctx.check(
+        'server inventory and crafting table reflect the expected outcome',
+        sameTotals(after.inventory, expected) &&
+          sameTotals(bridgeItemTotals(state.inventory), after.inventory) &&
+          after.table === table,
+        { after, expected, table },
+      );
+    },
+    actions: [`bridge: craft ${item} ${count}`],
+    expect: [
+      failure ? `job fails with ${failure}` : 'job reports the amount crafted',
+      `server inventory totals ${JSON.stringify(expected)} and the table setup is preserved`,
+    ],
   };
 }
 
@@ -1195,6 +1327,114 @@ export const scenarios = [
       'server inventory holds only 1 stone pickaxe',
     ],
   },
+  depositScenario({
+    id: 'deposit-barrel-exact',
+    lane: 18,
+    title: 'Deposit an exact count into a barrel with existing contents',
+    storage: 'barrel',
+    count: 8,
+    held: 12,
+    moved: 8,
+  }),
+  depositScenario({
+    id: 'deposit-full-chest',
+    lane: 19,
+    title: 'A full chest cannot take any of the requested deposit',
+    storage: 'full',
+    count: 8,
+    held: 8,
+    moved: 0,
+    failure: /is full; deposited 0 of 8 oak_log/,
+  }),
+  depositScenario({
+    id: 'deposit-double-chest-omitted',
+    lane: 20,
+    title: 'Omitted count deposits every matching stack across both halves of a double chest',
+    storage: 'double',
+    held: 80,
+    moved: 80,
+  }),
+  depositScenario({
+    id: 'deposit-over-held',
+    lane: 21,
+    title: 'A deposit larger than the held count fails before transferring items',
+    storage: 'chest',
+    held: 4,
+    count: 8,
+    moved: 0,
+    failure: /Only 4 oak_log in inventory; cannot deposit 8/,
+  }),
+  {
+    id: 'withdraw-barrel-exact',
+    lane: 22,
+    title: 'Withdraw from a barrel with existing contents',
+    release: [RELEASE.withdraw],
+    plan: (args) => withdrawPlan(args, { storage: 'barrel' }),
+    run: (ctx, plan) => runWithdraw(ctx, plan, { count: 8 }),
+    actions: ['bridge: withdraw oak_log 8 (barrel seeded with 20 oak logs and 5 cobblestone)'],
+    expect: ['job names the barrel and reports 8 logs moved', 'server verifies the inventory and barrel deltas'],
+  },
+  {
+    id: 'withdraw-no-matching-stock',
+    lane: 23,
+    title: 'Withdrawing from a chest that holds only other items fails without moving them',
+    release: [RELEASE.withdraw],
+    plan: (args) => withdrawPlan(args, { logs: 0 }),
+    run: (ctx, plan) => runWithdraw(ctx, plan, { count: 8, moved: 0, failure: /holds no oak_log; withdrew 0 of 8/ }),
+    actions: ['bridge: withdraw oak_log 8 (chest seeded with cobblestone only)'],
+    expect: ['job reports zero logs moved', 'chest retains all cobblestone and inventory remains empty'],
+  },
+  craftInventoryScenario({
+    id: 'craft-rounds-up',
+    lane: 24,
+    title: 'A five-plank request requires two whole crafts and produces eight planks',
+    held: { [LOG]: 3 },
+    expected: { [LOG]: 1, 'minecraft:oak_planks': 8 },
+    item: 'oak_planks',
+    count: 5,
+  }),
+  craftInventoryScenario({
+    id: 'craft-mixed-planks',
+    lane: 25,
+    title: 'The inventory grid accepts two different kinds of planks for sticks',
+    held: { 'minecraft:oak_planks': 1, 'minecraft:birch_planks': 1 },
+    expected: { 'minecraft:stick': 4 },
+    item: 'stick',
+    count: 4,
+  }),
+  craftInventoryScenario({
+    id: 'craft-mixed-stone',
+    lane: 26,
+    title: 'A crafting table accepts three different stone materials for a stone pickaxe',
+    held: {
+      'minecraft:cobblestone': 1,
+      'minecraft:blackstone': 1,
+      'minecraft:cobbled_deepslate': 1,
+      'minecraft:stick': 2,
+    },
+    expected: { 'minecraft:stone_pickaxe': 1 },
+    item: 'stone_pickaxe',
+    count: 1,
+    table: true,
+  }),
+  craftInventoryScenario({
+    id: 'craft-reuses-consumed-slot',
+    lane: 27,
+    title: 'A full inventory can craft when consuming an ingredient frees its output slot',
+    held: { [LOG]: 1, 'minecraft:cobblestone': 35 * 64 },
+    expected: { 'minecraft:oak_planks': 4, 'minecraft:cobblestone': 35 * 64 },
+    item: 'oak_planks',
+    count: 4,
+  }),
+  craftInventoryScenario({
+    id: 'craft-no-table',
+    lane: 28,
+    title: 'A table recipe fails without a placed or held table and leaves its inputs intact',
+    held: { 'minecraft:cobblestone': 3, 'minecraft:stick': 2 },
+    item: 'stone_pickaxe',
+    count: 1,
+    failure: /needs a crafting table; none is within 16 blocks and none is held/,
+  }),
 ];
 
 export const scenarioIds = scenarios.map((scenario) => scenario.id);

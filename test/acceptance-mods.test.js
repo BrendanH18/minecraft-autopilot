@@ -2,50 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { crc32 } from 'node:zlib';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
+import { archiveTest, zip } from './acceptance-zip.js';
 import { modBundleFiles } from '../src/bundle.js';
 import { ARCHIVE_NAME, acceptanceFile, registerAcceptanceTools } from '../src/acceptance-tools.js';
 
 const commit = 'a'.repeat(40);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const archiveTest = { skip: spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status !== 0 && 'requires unzip' };
-
-// Write a ZIP with stored entries so the fixture needs only the reader used by acceptance.
-function zip(entries) {
-  const files = [];
-  const directory = [];
-  let offset = 0;
-  for (const [path, text] of entries) {
-    const name = Buffer.from(path);
-    const bytes = Buffer.from(text);
-    const header = Buffer.alloc(30);
-    header.writeUInt32LE(0x04034b50, 0);
-    header.writeUInt16LE(20, 4);
-    header.writeUInt32LE(crc32(bytes), 14);
-    header.writeUInt32LE(bytes.length, 18);
-    header.writeUInt32LE(bytes.length, 22);
-    header.writeUInt16LE(name.length, 26);
-    const entry = Buffer.alloc(46);
-    entry.writeUInt32LE(0x02014b50, 0);
-    entry.writeUInt16LE(20, 4);
-    header.copy(entry, 6, 4, 30);
-    entry.writeUInt32LE(offset, 42);
-    files.push(header, name, bytes);
-    directory.push(entry, name);
-    offset += header.length + name.length + bytes.length;
-  }
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(Buffer.concat(directory).length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...files, ...directory, end]);
-}
 
 async function fixture(t, { archiveCommit = commit } = {}) {
   const root = await testDirectory(t, 'acceptance-mods-');
@@ -131,10 +96,13 @@ test('an archive from a different commit cannot verify the launcher jars', archi
   const { modsDir, start, finish } = await fixture(t, { archiveCommit: 'b'.repeat(40) });
   const started = await start('--mods-dir', modsDir);
   assert.equal(started.session.provenance.archive.matches, true);
-  assert.match(started.session.warnings.join('\n'), /archive BUILD\.json does not record the current clean commit/);
+  assert.match(started.session.warnings.join('\n'), /archive BUILD\.json differs from dist\/BUILD\.json/);
   const result = await finish(started);
   assert.equal(result.eligible, false);
-  assert.deepEqual(result.problems, ['launcher mod jars were not verified against the recorded archive']);
+  assert.deepEqual(result.problems, [
+    'archive BUILD.json not verified against dist/BUILD.json',
+    'launcher mod jars were not verified against the recorded archive',
+  ]);
 });
 
 test('legacy records without mod hashes still load and the Fabric gate explains why evidence is ineligible', async (t) => {
@@ -145,7 +113,7 @@ test('legacy records without mod hashes still load and the Fabric gate explains 
   const onDisk = JSON.parse(await readFile(acceptanceFile(directory), 'utf8'));
   assert.equal(onDisk.version, 1);
   assert.equal(onDisk.sessions[0].provenance.mods, undefined);
-  // A session written by older software also omitted the new warning.
+  delete onDisk.sessions[0].provenance.archive.manifestMatches;
   onDisk.sessions[0].warnings = [];
   await writeFile(acceptanceFile(directory), JSON.stringify(onDisk));
   const status = await run('status');

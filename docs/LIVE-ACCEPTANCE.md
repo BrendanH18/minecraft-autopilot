@@ -20,6 +20,7 @@ The runner never downloads anything. It refuses with a pointer to DEVELOPMENT.md
 ```sh
 node scripts/live-bot-acceptance.js --dry-run --all            # print every command and check; starts nothing
 node scripts/live-bot-acceptance.js --dry-run --fast
+node scripts/live-bot-acceptance.js --dry-run --json --scenario craft-mixed-stone
 node scripts/live-bot-acceptance.js --accept-eula --scenario collect-and-store
 node scripts/live-bot-acceptance.js --accept-eula --fast
 node scripts/live-bot-acceptance.js --accept-eula --all
@@ -30,6 +31,7 @@ node scripts/live-bot-acceptance.js --accept-eula --scenario withdraw-craft-mode
 Choose one of `--scenario ID` (repeatable), `--all`, or `--fast`. The fast preset
 runs offline collection, storage, withdrawal, and crafting scenarios. It
 omits the three pit recovery scenarios and scenarios that require a real model.
+Use `--dry-run --json` to read the selected fixtures, actions, and checks as structured data.
 
 Other options include `--port N`, `--out FILE` (default `results.json` in the run
 directory), `--account NAME` (offline username, default `LiveBot`), `--java PATH`,
@@ -61,7 +63,7 @@ is kept for seven days, including when a scenario fails and produces evidence.
 
 Independent verification uses only server console reads: `data get block X Y Z Items`, `data get entity NAME Inventory`, `data get entity NAME Pos`, and, for blocks without data such as a crafting table, `execute if block X Y Z BLOCK` ("Test passed" or "Test failed"). The bot's own reports are compared against them, never trusted alone.
 
-Ctrl+C is designed to stop the current scenario, clean up, skip the rest, stop the server, and still write results (covered by unit tests with fake processes, not yet observed live); a second Ctrl+C exits immediately and kills the child processes. `--keep-server` leaves every scenario's fixture in place and keeps the server running after the run (each bot session is still stopped) and forwards console commands typed into the runner until Ctrl+C or end of input.
+Ctrl+C stops the current scenario, cleans up its fixture even with `--keep-server`, skips the rest, stops the server, and writes results. The interrupt sequence has unit coverage with fake processes. A second Ctrl+C exits immediately and kills the child processes. After a normal run, `--keep-server` retains fixtures, keeps the server running with every bot session stopped, and forwards console commands until Ctrl+C or end of input.
 
 ## Scenarios
 
@@ -85,6 +87,17 @@ Ctrl+C is designed to stop the current scenario, clean up, skip the rest, stop t
 | `craft-missing-ingredients` | Player holds 2 oak logs. `craft oak_planks 12` needs 3. | Job fails with `Missing ingredients`; the server still shows both logs and no planks. | Bot withdraw and craft, missing ingredients. |
 | `craft-full-inventory` | Player holds 2 oak logs and 35 full cobblestone stacks. `craft oak_planks 4` would consume one log, leaving every slot occupied. | Job fails with `Inventory full`; the server still shows all the starting items and no planks. | Bot withdraw and craft, full inventory. |
 | `withdraw-craft-model` | Player holds two sticks. A crafting table and a chest with 5 cobblestone and 20 oak logs are nearby. A local model (`--model`) withdraws 3 cobblestone and crafts one stone pickaxe. | Agent reports `criteria_met`. The server shows only one stone pickaxe in the player's inventory and exactly 2 cobblestone and 20 oak logs in the chest. Skipped without `--model`. | Bot withdraw and craft, real-model workflow. |
+| `deposit-barrel-exact` | Player holds 12 logs. `deposit oak_log 8` into a barrel holding logs and cobblestone. | The barrel gains exactly 8 logs, retains all cobblestone, and the player keeps 4 logs. | Bot storage verification, barrel. |
+| `deposit-full-chest` | Every chest slot holds a full cobblestone stack. `deposit oak_log 8`. | Job reports a full chest and zero moved. Inventory and chest contents stay the same. | Bot storage verification, full chest. |
+| `deposit-double-chest-omitted` | Each half of a double chest has one free slot. `deposit oak_log` with 80 held. | Both halves gain logs. Their combined gain is 80 and all cobblestone remains. | Bot storage verification, both chest halves and omitted count. |
+| `deposit-over-held` | Player holds 4 logs. `deposit oak_log 8`. | Job reports that the player holds too few logs. Chest and inventory stay the same. | Bot storage verification, insufficient items. |
+| `withdraw-barrel-exact` | Barrel holds 20 logs and 5 cobblestone. `withdraw oak_log 8`. | Job names the barrel and its correct baseline. The server shows exactly 8 logs moved. | Bot withdraw and craft, barrel. |
+| `withdraw-no-matching-stock` | Chest holds cobblestone only. `withdraw oak_log 8`. | Job reports zero logs moved. Chest retains all cobblestone and inventory stays empty. | Bot withdraw and craft, missing item. |
+| `craft-rounds-up` | Player holds 3 oak logs. `craft oak_planks 5`. | Job reports eight planks from two whole crafts. One log remains. | Bot withdraw and craft, whole crafts. |
+| `craft-mixed-planks` | Player holds one oak and one birch plank. `craft stick 4`. | Server inventory holds four sticks and both planks were consumed. | Bot withdraw and craft, mixed inventory-grid inputs. |
+| `craft-mixed-stone` | Player holds one each of cobblestone, blackstone, and cobbled deepslate plus two sticks. `craft stone_pickaxe 1` beside a table. | Server inventory holds one pickaxe and the existing table remains. | Bot withdraw and craft, mixed table inputs. |
+| `craft-reuses-consumed-slot` | Player holds one log and 35 full cobblestone stacks. `craft oak_planks 4`. | The planks occupy the slot freed by the log. All cobblestone remains. | Bot withdraw and craft, full inventory with room after consumption. |
+| `craft-no-table` | Player has the inputs for a stone pickaxe with no crafting table held or nearby. | Job reports that a table is required. The server confirms the inputs remain. | Bot withdraw and craft, missing table. |
 
 ### Collect-and-store without a model
 
@@ -98,13 +111,15 @@ review: { reviewed: false, note }          # a person sets this when they accept
 scope                                      # bot only; not Fabric or authenticated handoff
 environment: { commit, dirty, node, java, platform, javaPreflight }
 minecraft: { expectedVersion, serverVersion, jar, jarSha256, seed, levelType }
-options: { port, account, keepServer, model, scenarios }
+options: { port, account, keepServer, model, noThinking, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
 summary: { pass, fail, skipped, error }, error
 ```
 
 `steps` record every console command, bridge/CLI action, and read with timing and outcome. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. A run from a dirty tree (`dirty: true`) is not release-candidate evidence.
+
+Cleanup failures fail the affected scenario. If the runner cannot stop the bot, it records the failure and skips the remaining scenarios. Failed runs include the last available bot output alongside the server log. A run exits unsuccessfully when it records zero passing scenarios, including a selection made up entirely of real-model scenarios without `--model`.
 
 ## Reviewing a run
 
@@ -163,6 +178,13 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
 | `deposit-return` | The bot runner's elevated home and chest out of reach. Optionally remove the step once the player is back at home to test the blocked return. |
 | `withdraw`, `withdraw-omitted`, `withdraw-no-candidate`, `withdraw-short-stock`, `withdraw-full-inventory` | The bot runner's stocks, distances, and player inventories, with independent chest and player reads. |
 | `craft-bootstrap`, `craft-missing-ingredients`, `craft-full-inventory` | Start with the bot runner's supplies. Bootstrap also reads the possible crafting-table placement blocks before and after crafting. |
+| `eat-interruption` | Bread and measured hunger reduced to about ten, with food level and inventory reads for F8, menu, or stop during the eating animation. |
+| `low-health-retreat` | Disabled regeneration. Save home while healthy, move away, start a wait job, then apply poison and observe or interrupt the retreat. |
+| `collection-return` | Two sand blocks and a shovel for a partial collection and interruption on the way back. |
+| `collect-full-inventory` | An axe, 34 stacks, and enough time to fill the last slot during mining and verify the bounded return. |
+| `withdraw-multi-stack` | A double chest stocked with three stacks and independent reads for both halves after interruption. |
+| `craft-interruption` | A placed crafting table and enough planks for four chests to check interruption between crafts. |
+| `death-navigation`, `disconnect-mining` | Dedicated player death or kick steps during an active job, with the server left running for follow-up observations after respawn or rejoin. |
 
 Fixture startup verifies server setup and baseline reads. The packaged client
 actions, F8, model and MCP sessions, and authenticated handoff still require

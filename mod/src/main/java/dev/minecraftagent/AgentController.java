@@ -5,13 +5,9 @@ import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.utils.input.Input;
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -23,7 +19,9 @@ import net.minecraft.block.Block;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.GameMenuScreen;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.Item;
@@ -70,9 +68,8 @@ public final class AgentController {
     private final MinecraftClient client;
     private final ControlLease lease = new ControlLease();
     private final Map<String, Object> savedSettings = new HashMap<>();
-    private final Path homesFile;
+    private final SavedHomes homes;
     private final FabricStorage storage;
-    private JsonObject homes = new JsonObject();
     private JsonObject job;
     private JsonObject action;
     private long jobStarted;
@@ -84,7 +81,8 @@ public final class AgentController {
     private boolean returning;
     private String collectionFailure;
     private long returnStarted;
-    private String worldIdentity;
+    private ClientWorld controlledWorld;
+    private ClientPlayerEntity controlledPlayer;
     private boolean previousPauseOnLostFocus;
     private boolean eating;
     private long eatStarted;
@@ -99,15 +97,13 @@ public final class AgentController {
     public AgentController(MinecraftClient client) {
         this.client = client;
         storage = new FabricStorage(client);
-        homesFile = RuntimePaths.directory(client.runDirectory.toPath(), System.getenv("MC_AGENT_HOME"))
-                .resolve("homes.json");
-        try {
-            homes = JsonParser.parseString(Files.readString(homesFile)).getAsJsonObject();
-        } catch (Exception ignored) {
-        }
+        homes = new SavedHomes(RuntimePaths.directory(client.runDirectory.toPath(), System.getenv("MC_AGENT_HOME"))
+                .resolve("homes.json"));
+        if (homes.loadFailure() != null) AgentClient.LOGGER.warn("Saved homes unavailable", homes.loadFailure());
     }
 
     public JsonObject request(String path, JsonObject body) {
+        checkControl();
         switch (path) {
             case "/v1/state":
                 return snapshot();
@@ -122,10 +118,12 @@ public final class AgentController {
                         // Switching to a terminal to start the agent unfocuses the game, which opens the pause menu.
                         boolean focusPaused = focusPaused();
                         if (!focusPaused) requirePlayable();
-                        else if (client.player.isDead()) throw new IllegalStateException("Respawn manually first.");
-                        if (lease.expired()) release("Control lease expired.");
+                        else requireLivingPlayer();
+                        if (storage.pendingOpen())
+                            throw new IllegalStateException("Previous storage opening is still awaiting the server.");
                         lease.acquire(id);
-                        worldIdentity = identity();
+                        controlledWorld = client.world;
+                        controlledPlayer = client.player;
                         previousPauseOnLostFocus = client.options.pauseOnLostFocus;
                         client.options.pauseOnLostFocus = false;
                         if (focusPaused) client.setScreen(null);
@@ -182,10 +180,12 @@ public final class AgentController {
                         (int) Math.floor(number(requested, "z", -29_999_984, 29_999_984)));
                 break;
             case "home": {
-                JsonObject home = homes.getAsJsonObject(identity());
+                JsonObject home = homes.get(identity());
                 if (home == null)
                     throw new IllegalStateException(
-                            "No home is saved for this world, player, and dimension. Use set-home first.");
+                            homes.loadFailure() != null
+                                    ? homes.loadFailure().getMessage()
+                                    : "No usable home is saved for this world, player, and dimension. Use set-home first.");
                 goal = new BlockPos(
                         home.get("x").getAsInt(),
                         home.get("y").getAsInt(),
@@ -262,9 +262,7 @@ public final class AgentController {
             switch (type) {
                 case "set_home": {
                     JsonObject home = position(client.player.getBlockPos());
-                    homes.add(identity(), home);
-                    Files.createDirectories(homesFile.getParent());
-                    Files.writeString(homesFile, new Gson().toJson(homes));
+                    homes.save(identity(), home);
                     finish("completed", "Saved home in this world and dimension.");
                     break;
                 }
@@ -308,7 +306,8 @@ public final class AgentController {
         return job.deepCopy();
     }
 
-    public void tick() {
+    /** Check on requests as well as ticks, before an old lease can submit more work. */
+    private void checkControl() {
         storage.maintain();
         if (!lease.active()) return;
         if (lease.expired()) {
@@ -323,7 +322,7 @@ public final class AgentController {
             release("Disconnected or player died.");
             return;
         }
-        if (!identity().equals(worldIdentity)) {
+        if (client.world != controlledWorld || client.player != controlledPlayer) {
             release("World or dimension changed. Start a new session explicitly.");
             return;
         }
@@ -338,8 +337,12 @@ public final class AgentController {
             AgentClient.LOGGER.info(
                     "Releasing control: screen {} opened (window focused: {})", screen, client.isWindowFocused());
             release("A game menu was opened (" + screen + "). Control returned to the player.");
-            return;
         }
+    }
+
+    public void tick() {
+        checkControl();
+        if (!lease.active()) return;
         long now = System.nanoTime();
         // Deadlines are checked before eating, including when consumption never succeeds.
         if (recovering && timing.retreatExpired(now)) {
@@ -394,7 +397,7 @@ public final class AgentController {
                         "Storage action interrupted for survival. Check inventory and storage before retrying.");
             }
             lastRecovery = now;
-            JsonObject home = homes.getAsJsonObject(identity());
+            JsonObject home = homes.get(identity());
             if (home != null) {
                 destination = new BlockPos(
                         home.get("x").getAsInt(),
@@ -501,14 +504,23 @@ public final class AgentController {
 
     private void endEating() {
         if (!eating) return;
-        client.options.useKey.setPressed(false);
-        if (client.player != null && client.interactionManager != null) {
-            client.interactionManager.stopUsingItem(client.player);
-            if (previousSlot >= 0) client.player.getInventory().selectedSlot = previousSlot;
+        try {
+            client.options.useKey.setPressed(false);
+            if (client.player != null
+                    && client.player == controlledPlayer
+                    && client.world == controlledWorld
+                    && client.interactionManager != null) {
+                try {
+                    client.interactionManager.stopUsingItem(client.player);
+                } finally {
+                    if (previousSlot >= 0) client.player.getInventory().selectedSlot = previousSlot;
+                }
+            }
+        } finally {
+            eating = false;
+            foodSlot = -1;
+            previousSlot = -1;
         }
-        eating = false;
-        foodSlot = -1;
-        previousSlot = -1;
     }
 
     private void resumeMotion() {
@@ -595,12 +607,21 @@ public final class AgentController {
     }
 
     private void cancel(String message) {
-        stopMotion();
-        endEating();
-        storage.cancel();
-        resumeAfterEating = false;
-        recovering = false;
-        if (running()) finishWithoutStopping("cancelled", message);
+        try {
+            stopMotion();
+        } finally {
+            try {
+                endEating();
+            } finally {
+                try {
+                    storage.cancel();
+                } finally {
+                    resumeAfterEating = false;
+                    recovering = false;
+                    if (running()) finishWithoutStopping("cancelled", message);
+                }
+            }
+        }
     }
 
     boolean hasControl() {
@@ -623,11 +644,16 @@ public final class AgentController {
 
     public void release(String message) {
         if (!lease.active()) return; // Do not interfere with manual play or a user's own Baritone session.
-        cancel(message);
         lease.release();
-        client.options.pauseOnLostFocus = previousPauseOnLostFocus;
-        restoreSettings();
         survivalMessage = message;
+        try {
+            cancel(message);
+        } finally {
+            controlledWorld = null;
+            controlledPlayer = null;
+            client.options.pauseOnLostFocus = previousPauseOnLostFocus;
+            restoreSettings();
+        }
     }
 
     /**
@@ -722,11 +748,16 @@ public final class AgentController {
     }
 
     private void requirePlayable() {
-        if (client.player == null || client.world == null)
-            throw new IllegalStateException("Enter a Minecraft world first.");
-        if (client.player.isDead()) throw new IllegalStateException("Respawn manually first.");
+        requireLivingPlayer();
         if (client.isPaused() || client.currentScreen != null)
             throw new IllegalStateException("Close the game menu and resume Minecraft first.");
+    }
+
+    private void requireLivingPlayer() {
+        if (client.player == null || client.world == null)
+            throw new IllegalStateException("Enter a Minecraft world first.");
+        if (client.player.isDead() || client.currentScreen instanceof DeathScreen)
+            throw new IllegalStateException("Respawn manually first.");
     }
 
     public JsonObject snapshot() {

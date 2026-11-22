@@ -153,19 +153,56 @@ export class ServerConsole extends EventEmitter {
     const expected = ok ?? REPLIES[verb];
     if (!expected) return Promise.reject(new Error(`No reply pattern is known for "${verb}"; pass { ok }.`));
     const run = async () => {
+      signal?.throwIfAborted();
+      if (this.ended) throw new Error(`Server output ended before sending "${text}": ${this.ended}`);
       // Subscribe before writing so a fast reply is never missed; accepted replies win over generic errors (kill → "No entity was found").
+      const writeFailed = new AbortController();
       const reply = this.waitFor(
         (message) => expected.test(message) || COMMAND_ERRORS.some((pattern) => pattern.test(message)),
-        { timeoutMs, signal, label: `a reply to "${text}"` },
+        {
+          timeoutMs,
+          signal: writeFailed.signal,
+          label: `a reply to "${text}"`,
+        },
       );
-      this.write(`${text}\n`);
-      const message = await reply;
+      try {
+        this.write(`${text}\n`);
+      } catch (error) {
+        writeFailed.abort(error);
+        await reply.catch(() => {});
+        throw error;
+      }
+      let message;
+      try {
+        message = await reply;
+      } catch (error) {
+        // Without a reply we cannot attribute the next matching line to a new command.
+        this.end(error.message);
+        throw error;
+      }
       if (!expected.test(message)) throw new CommandError(`"${text}" failed: ${message}`);
       return message;
     };
     const result = this.queue.then(run, run);
     this.queue = result.catch(() => {});
-    return result;
+    if (!signal) return result;
+    // Abort the caller immediately, but keep the console serialized until the issued reply is drained.
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      const clear = () => signal.removeEventListener('abort', abort);
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+      result.then(
+        (value) => {
+          clear();
+          resolve(value);
+        },
+        (error) => {
+          clear();
+          reject(error);
+        },
+      );
+    });
   }
 
   /** `data get block X Y Z PATH`; a missing Items path is an empty container. */

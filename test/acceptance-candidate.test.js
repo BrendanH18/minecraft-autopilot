@@ -75,3 +75,31 @@ test('status excludes missing or superseded evidence from candidate groups', () 
   assert.deepEqual(status.candidates, [{ commit: COMMIT, archiveSha256: ARCHIVE, gates: [GATES[0]] }]);
   assert.deepEqual(status.problems, []);
 });
+
+test('a selected candidate uses the latest attempt on that exact commit and archive', () => {
+  const earlier = passed(GATES[0]);
+  const unselected = createSession({
+    gate: GATES[0],
+    backend: 'mineflayer',
+    now: LATER,
+    provenance: {
+      ...earlier.provenance,
+      archive: { ...earlier.provenance.archive, sha256: 'd'.repeat(64) },
+    },
+  });
+  const blocked = finishSession([unselected], unselected.id, 'blocked', {
+    note: 'Server unavailable.',
+    now: LATER,
+  }).session;
+  assert.equal(acceptanceStatus([earlier, blocked]).eligible, 0);
+  const options = { commit: COMMIT, archiveSha256: ARCHIVE };
+  assert.equal(acceptanceStatus([earlier, blocked], options).eligible, 1);
+  const selected = createSession({
+    gate: GATES[0],
+    backend: 'mineflayer',
+    now: LATER,
+    provenance: earlier.provenance,
+  });
+  const failed = finishSession([selected], selected.id, 'fail', { note: 'Return failed.', now: LATER }).session;
+  assert.equal(acceptanceStatus([earlier, blocked, failed], options).eligible, 0);
+});

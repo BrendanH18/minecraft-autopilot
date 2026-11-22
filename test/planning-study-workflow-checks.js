@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Command } from 'commander';
 import { STUDY_WORKFLOWS, calculateStudy, registerPlanningStudies } from '../src/planning-studies.js';
 
-function close(actual, expected) {
+export function close(actual, expected) {
   if (typeof expected === 'number') {
     assert.equal(typeof actual, 'number');
     assert.ok(Math.abs(actual - expected) <= 1e-9 * Math.max(1, Math.abs(expected)), `${actual} != ${expected}`);

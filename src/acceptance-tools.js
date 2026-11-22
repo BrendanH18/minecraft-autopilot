@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { open, readFile, stat } from 'node:fs/promises';
+import { mkdir, open, rmdir, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { dirname, join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import { modBundleFiles } from './bundle.js';
 import { dataDirectory, projectRoot, writePrivateJson } from './config.js';
 import {
@@ -20,6 +21,7 @@ export const ACCEPTANCE_FILE = 'acceptance-sessions.json';
 export const ARCHIVE_NAME = 'minecraft-agent-0.1.0.zip';
 export const MAX_SESSIONS = 1000;
 const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_METADATA_BYTES = 64 * 1024;
 const modJarNames = modBundleFiles.map(({ name }) => name);
 const execFileAsync = promisify(execFile);
 export const ACCEPTANCE_NOTE =
@@ -39,6 +41,7 @@ const line = z
   .regex(/^[^\n\r]*$/);
 const note = z.string().min(1).max(2000);
 const time = z.iso.datetime();
+const revisionHash = z.string().regex(/^[0-9a-f]{40,64}$/);
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const modProvenanceSchema = z
   .object({
@@ -78,10 +81,7 @@ const sessionSchema = z
       .strict(),
     provenance: z
       .object({
-        commit: z
-          .string()
-          .regex(/^[0-9a-f]{40,64}$/)
-          .nullable(),
+        commit: revisionHash.nullable(),
         dirty: z.boolean().nullable(),
         node: z.string().max(64),
         build: z
@@ -101,6 +101,7 @@ const sessionSchema = z
             recorded: sha256.nullable(),
             matches: z.boolean(),
             predatesBuild: z.boolean(),
+            manifestMatches: z.boolean().optional(),
           })
           .strict()
           .nullable(),
@@ -136,6 +137,21 @@ const fileSchema = z
 
 export const acceptanceFile = (directory = dataDirectory) => join(directory, ACCEPTANCE_FILE);
 
+async function readBounded(file, limit, label) {
+  const info = await file.stat();
+  if (!info.isFile()) throw new Error(`${label} is not a regular file.`);
+  if (info.size > limit) throw new Error(`${label} is larger than ${limit === MAX_BYTES ? '4 MiB' : '64 KiB'}.`);
+  const buffer = Buffer.alloc(info.size + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await file.read(buffer, offset, buffer.length - offset, offset);
+    if (!bytesRead) break;
+    offset += bytesRead;
+  }
+  if (offset !== info.size) throw new Error(`${label} changed while it was being read.`);
+  return buffer.subarray(0, offset).toString('utf8');
+}
+
 /** Returns recorded sessions, or [] when the file does not exist; a corrupt file is an error and is never overwritten. */
 export async function readSessions(path) {
   let file;
@@ -147,12 +163,7 @@ export async function readSessions(path) {
   }
   let text;
   try {
-    if (!(await file.stat()).isFile())
-      throw new Error(`Acceptance file ${path} is not a regular file; fix or remove it.`);
-    const buffer = Buffer.alloc(MAX_BYTES + 1);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    if (bytesRead > MAX_BYTES) throw new Error(`Acceptance file ${path} is larger than 4 MiB; fix or remove it.`);
-    text = buffer.subarray(0, bytesRead).toString('utf8');
+    text = await readBounded(file, MAX_BYTES, `Acceptance file ${path}`);
   } finally {
     await file.close();
   }
@@ -173,7 +184,35 @@ export async function readSessions(path) {
 }
 
 export async function writeSessions(path, sessions) {
-  await writePrivateJson(path, fileSchema.parse({ version: 1, sessions }));
+  const value = fileSchema.parse({ version: 1, sessions });
+  if (Buffer.byteLength(`${JSON.stringify(value, null, 2)}\n`) > MAX_BYTES)
+    throw new Error(`Acceptance file would exceed 4 MiB. Archive ${path} before adding more evidence.`);
+  await writePrivateJson(path, value);
+}
+
+/** Lock only the read, edit, and replacement. Capturing provenance can run outside the lock. */
+async function editSessions(path, edit) {
+  await mkdir(dirname(path), { mode: 0o700, recursive: true });
+  const lock = `${path}.lock`;
+  const deadline = Date.now() + 5000;
+  while (true) {
+    try {
+      await mkdir(lock, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (Date.now() >= deadline)
+        throw new Error(`Acceptance file is locked at ${lock}. Wait for the other writer and try again.`);
+      await delay(50);
+    }
+  }
+  try {
+    const updated = edit(await readSessions(path));
+    await writeSessions(path, updated.sessions);
+    return updated;
+  } finally {
+    await rmdir(lock);
+  }
 }
 
 export function defaultGit(args, cwd = projectRoot) {
@@ -193,15 +232,28 @@ async function sha256File(path) {
   }
 }
 async function readOptional(path) {
+  let file;
   try {
-    return await readFile(path, 'utf8');
+    file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    return await readBounded(file, MAX_METADATA_BYTES, path);
   } catch (error) {
     if (error.code === 'ENOENT') return null;
     throw error;
+  } finally {
+    await file?.close();
   }
 }
 
-async function collectModProvenance(modsDir, archivePath, archive, commit, warnings) {
+async function readArchiveEntry(archivePath, name, maxBuffer) {
+  const { stdout } = await execFileAsync('unzip', ['-p', resolve(archivePath), name], {
+    encoding: 'buffer',
+    maxBuffer,
+    timeout: 10_000,
+  });
+  return stdout;
+}
+
+async function collectModProvenance(modsDir, archivePath, archive, warnings) {
   const jars = await Promise.all(
     modJarNames.map(async (name) => ({
       name,
@@ -210,23 +262,10 @@ async function collectModProvenance(modsDir, archivePath, archive, commit, warni
     })),
   );
   const result = { archiveSha256: null, jars };
-  if (!archive?.matches || archive.predatesBuild) return result;
-  const readEntry = async (name) => {
-    const { stdout } = await execFileAsync('unzip', ['-p', resolve(archivePath), name], {
-      encoding: 'buffer',
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 10_000,
-    });
-    return stdout;
-  };
+  if (!archive?.manifestMatches) return result;
   try {
-    const build = JSON.parse(await readEntry('BUILD.json'));
-    if (!commit || build?.sourceCommit !== commit || build.sourceModified !== false) {
-      warnings.push('The archive BUILD.json does not record the current clean commit.');
-      return result;
-    }
     for (const jar of jars) {
-      const bytes = await readEntry(`mods/${jar.name}`);
+      const bytes = await readArchiveEntry(archivePath, `mods/${jar.name}`, 32 * 1024 * 1024);
       jar.expectedSha256 = createHash('sha256').update(bytes).digest('hex');
     }
     if ((await sha256File(archivePath)) === archive.sha256) result.archiveSha256 = archive.sha256;
@@ -235,7 +274,7 @@ async function collectModProvenance(modsDir, archivePath, archive, commit, warni
     warnings.push(
       error.code === 'ENOENT'
         ? 'Could not run unzip or read the candidate archive. Check that unzip is on PATH and the archive exists.'
-        : 'Could not read BUILD.json and all packaged mod jars from the candidate archive.',
+        : 'Could not read all packaged mod jars from the candidate archive.',
     );
   }
   return result;
@@ -258,6 +297,7 @@ export async function collectProvenance({
   if (dirty === null) warnings.push('Could not read the worktree status.');
   else if (dirty) warnings.push('The worktree has uncommitted changes.');
   let build = null;
+  let buildManifest;
   const buildText = await readOptional(join(root, 'dist/BUILD.json'));
   if (buildText === null) warnings.push('dist/BUILD.json is missing; run npm run build:mod from a clean commit.');
   else {
@@ -267,8 +307,10 @@ export async function collectProvenance({
     } catch {
       data = null;
     }
-    if (!data || typeof data !== 'object') warnings.push('dist/BUILD.json is not valid JSON.');
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+      warnings.push('dist/BUILD.json is not valid JSON for a build manifest.');
     else {
+      buildManifest = data;
       const sourceCommit = typeof data.sourceCommit === 'string' ? data.sourceCommit.slice(0, 64) : null;
       const sourceModified = typeof data.sourceModified === 'boolean' ? data.sourceModified : null;
       build = {
@@ -289,11 +331,12 @@ export async function collectProvenance({
   try {
     const archiveSha256 = await sha256File(archivePath);
     const sums = await readOptional(join(root, 'dist/ARCHIVE_SHA256SUMS'));
-    const entry = sums
-      ?.split('\n')
-      .map((text) => text.trim().split(/\s+\*?/))
-      .find(([, name]) => name === ARCHIVE_NAME);
-    const recorded = entry && /^[0-9a-f]{64}$/.test(entry[0]) ? entry[0] : null;
+    const entries =
+      sums
+        ?.split('\n')
+        .map((text) => text.trim().split(/\s+\*?/))
+        .filter(([, name]) => name === ARCHIVE_NAME) ?? [];
+    const recorded = entries.length === 1 && sha256.safeParse(entries[0][0]).success ? entries[0][0] : null;
     // Packaging writes BUILD.json, then the archive, then ARCHIVE_SHA256SUMS. A BUILD.json newer than the checksum
     // file means packaging stopped part-way, so a matching older archive may not be the build BUILD.json describes.
     const modified = async (name) => (await stat(join(root, 'dist', name)).catch(() => null))?.mtimeMs ?? null;
@@ -304,20 +347,38 @@ export async function collectProvenance({
       recorded,
       matches: recorded === archiveSha256,
       predatesBuild: buildAt !== null && sumsAt !== null && buildAt > sumsAt,
+      manifestMatches: false,
     };
     if (archive.predatesBuild)
       warnings.push(
         `dist/BUILD.json is newer than dist/ARCHIVE_SHA256SUMS; packaging did not finish, so ${ARCHIVE_NAME} may be an older build.`,
       );
-    if (!recorded) warnings.push(`dist/ARCHIVE_SHA256SUMS has no checksum for ${ARCHIVE_NAME}.`);
+    if (entries.length > 1) warnings.push(`dist/ARCHIVE_SHA256SUMS repeats the checksum for ${ARCHIVE_NAME}.`);
+    else if (!recorded) warnings.push(`dist/ARCHIVE_SHA256SUMS has no checksum for ${ARCHIVE_NAME}.`);
     else if (!archive.matches) warnings.push(`dist/${ARCHIVE_NAME} does not match dist/ARCHIVE_SHA256SUMS.`);
+    if (archive.matches && !archive.predatesBuild && buildManifest) {
+      try {
+        const packed = JSON.parse(await readArchiveEntry(archivePath, 'BUILD.json', MAX_METADATA_BYTES));
+        if (!isDeepStrictEqual(packed, buildManifest))
+          warnings.push('The archive BUILD.json differs from dist/BUILD.json.');
+        else if ((await sha256File(archivePath)) !== archiveSha256)
+          warnings.push('The candidate archive changed while its BUILD.json was being checked.');
+        else archive.manifestMatches = true;
+      } catch (error) {
+        warnings.push(
+          error.code === 'ENOENT'
+            ? 'Could not run unzip or read the candidate archive. Check that unzip is on PATH and the archive exists.'
+            : 'Could not read BUILD.json from the candidate archive.',
+        );
+      }
+    }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     warnings.push(`dist/${ARCHIVE_NAME} is missing; no artifact checksum was recorded.`);
   }
   const provenance = { commit, dirty, node: String(node).slice(0, 64), build, archive };
   if (modsDir !== undefined) {
-    provenance.mods = await collectModProvenance(modsDir, archivePath, archive, commit, warnings);
+    provenance.mods = await collectModProvenance(modsDir, archivePath, archive, warnings);
     warnings.push(...launcherModProblems(provenance));
   }
   return { provenance, warnings };
@@ -458,6 +519,8 @@ export function provenanceProblems({ backend, provenance: p }) {
   if (!p.archive) problems.push('archive checksum missing');
   else if (!p.archive.matches) problems.push('archive checksum not verified against ARCHIVE_SHA256SUMS');
   else if (p.archive.predatesBuild) problems.push('archive predates BUILD.json; packaging did not finish');
+  else if (p.archive.manifestMatches === false)
+    problems.push('archive BUILD.json not verified against dist/BUILD.json');
   if (hasFabric(backend)) problems.push(...launcherModProblems(p));
   return problems;
 }
@@ -483,17 +546,26 @@ const summary = (session) => ({
   backend: session.backend,
   startedAt: session.startedAt,
   commit: session.provenance.commit,
+  archiveSha256: session.provenance.archive?.sha256 ?? null,
   result: session.finished?.result ?? 'unfinished',
   finishedAt: session.finished?.at ?? null,
   steps: latestSteps(session).size,
 });
 
 /** Pure: reports the latest evidence for each open gate and checks that eligible gates share one candidate. */
-export function acceptanceStatus(sessions) {
+export function acceptanceStatus(sessions, { commit, archiveSha256 } = {}) {
+  const candidateSelected = commit !== undefined || archiveSha256 !== undefined;
+  if (candidateSelected && (!revisionHash.safeParse(commit).success || !sha256.safeParse(archiveSha256).success))
+    throw new Error('Select a candidate with both --commit <git SHA> and --archive-sha256 <64-digit SHA-256>.');
+  const evidence = candidateSelected
+    ? sessions.filter(
+        (session) => session.provenance.commit === commit && session.provenance.archive?.sha256 === archiveSha256,
+      )
+    : sessions;
   const candidates = new Map();
   const gates = OPEN_GATES.map((gate) => {
     const backends = requiredBackends(gate).map((backend) => {
-      const finished = sessions
+      const finished = evidence
         .filter((session) => session.gate === gate.id && session.backend === backend && session.finished)
         .sort((a, b) => a.finished.at.localeCompare(b.finished.at));
       const latest = finished.at(-1);
@@ -501,7 +573,7 @@ export function acceptanceStatus(sessions) {
       return { backend, latest: latest ? summary(latest) : null, eligible: problems.length === 0, problems };
     });
     // Gates that need one session per backend only count when both came from the same candidate.
-    const latest = backends.map((entry) => sessions.find((session) => session.id === entry.latest?.id)).filter(Boolean);
+    const latest = backends.map((entry) => evidence.find((session) => session.id === entry.latest?.id)).filter(Boolean);
     const candidateKeys = new Set(
       latest.map((session) => `${session.provenance.commit}|${session.provenance.archive?.sha256 ?? ''}`),
     );
@@ -526,6 +598,7 @@ export function acceptanceStatus(sessions) {
   });
   const problems = candidates.size > 1 ? ['eligible gates come from different commits or archives'] : [];
   return {
+    ...(candidateSelected ? { selectedCandidate: { commit, archiveSha256 } } : {}),
     gates,
     candidates: [...candidates.values()],
     problems,
@@ -567,6 +640,7 @@ export function renderMarkdown(sessions) {
       `- Commit: \`${p.commit ?? 'unknown'}\` (${p.dirty === false ? 'clean worktree' : p.dirty ? 'dirty worktree' : 'worktree state unknown'}); Node ${p.node}`,
       `- BUILD.json: ${build}`,
       `- Artifact: ${archive}`,
+      ...(p.archive?.manifestMatches === true ? ['- Archive BUILD.json: matches dist/BUILD.json.'] : []),
       problems.length
         ? `- Provenance: **${UNVERIFIED}:** ${problems.join('; ')}.`
         : '- Provenance: clean commit, BUILD.json matches with sourceModified false, archive checksum verified.',
@@ -663,21 +737,21 @@ export function registerAcceptanceTools(
     .option('--mcp-client <text>', 'MCP client name and version')
     .option('--note <text>', 'free-form setup notes')
     .action(async (gateId, options) => {
-      const sessions = await readSessions(path);
-      if (sessions.length >= MAX_SESSIONS)
-        throw new Error(`At most ${MAX_SESSIONS} sessions can be recorded; archive ${path} first.`);
-      findGate(gateId);
-      const { provenance, warnings } = await collectProvenance({ root, git, node, modsDir: options.modsDir });
-      const session = createSession({
-        gate: gateId,
-        backend: options.backend,
-        options,
-        provenance,
-        warnings,
-        now: now(),
-      });
-      await writeSessions(path, [...sessions, session]);
       const gate = findGate(gateId);
+      const { provenance, warnings } = await collectProvenance({ root, git, node, modsDir: options.modsDir });
+      const { session } = await editSessions(path, (sessions) => {
+        if (sessions.length >= MAX_SESSIONS)
+          throw new Error(`At most ${MAX_SESSIONS} sessions can be recorded; archive ${path} first.`);
+        const session = createSession({
+          gate: gateId,
+          backend: options.backend,
+          options,
+          provenance,
+          warnings,
+          now: now(),
+        });
+        return { sessions: [...sessions, session], session };
+      });
       print({
         session,
         file: path,
@@ -691,11 +765,9 @@ export function registerAcceptanceTools(
     .description('Record a pass or fail observation for one numbered step.')
     .option('--note <text>', 'what was observed, such as an independent data get read')
     .action(async (reference, n, result, options) => {
-      const { sessions, session, entry } = recordStep(await readSessions(path), reference, n, result, {
-        note: options.note,
-        now: now(),
-      });
-      await writeSessions(path, sessions);
+      const { session, entry } = await editSessions(path, (sessions) =>
+        recordStep(sessions, reference, n, result, { note: options.note, now: now() }),
+      );
       print({
         session: session.id,
         gate: session.gate,
@@ -709,11 +781,9 @@ export function registerAcceptanceTools(
     .description('Finish a session as pass, fail, or blocked; fail and blocked need --note.')
     .option('--note <text>', 'result notes; required for fail or blocked')
     .action(async (reference, result, options) => {
-      const { sessions, session } = finishSession(await readSessions(path), reference, result, {
-        note: options.note,
-        now: now(),
-      });
-      await writeSessions(path, sessions);
+      const { session } = await editSessions(path, (sessions) =>
+        finishSession(sessions, reference, result, { note: options.note, now: now() }),
+      );
       const problems = eligibilityProblems(session);
       print({ session: summary(session), eligible: problems.length === 0, problems, note: ACCEPTANCE_NOTE });
     });
@@ -736,11 +806,14 @@ export function registerAcceptanceTools(
     .command('report')
     .description('Render sessions as Markdown for docs/DEVELOPMENT.md Validation, or as JSON.')
     .option('--gate <gate>', 'only sessions for one gate')
+    .option('--session <id>', 'report one session by id or unique prefix')
     .option('--format <format>', 'markdown or json', 'markdown')
     .action(async (options) => {
       if (!['markdown', 'json'].includes(options.format)) throw new Error('Format must be markdown or json.');
       if (options.gate) findGate(options.gate);
-      const sessions = (await readSessions(path)).filter((session) => !options.gate || session.gate === options.gate);
+      const recorded = await readSessions(path);
+      const selected = options.session ? [resolveSession(recorded, options.session)] : recorded;
+      const sessions = selected.filter((session) => !options.gate || session.gate === options.gate);
       if (options.format === 'json')
         print({
           sessions: sessions.map((session) => ({
@@ -755,6 +828,16 @@ export function registerAcceptanceTools(
   group
     .command('status')
     .description('Show the latest evidence for each open gate and whether eligible gates share one candidate.')
-    .action(async () => print(acceptanceStatus(await readSessions(path))));
+    .option('--commit <sha>', 'inspect one candidate, paired with --archive-sha256')
+    .option('--archive-sha256 <sha>', 'inspect one candidate, paired with --commit')
+    .option('--require-eligible', 'exit unsuccessfully if any open gate lacks eligible evidence')
+    .action(async (options) => {
+      const status = acceptanceStatus(await readSessions(path), options);
+      print(status);
+      if (options.requireEligible && status.eligible !== status.open)
+        throw new Error(
+          `Only ${status.eligible} of ${status.open} open gates have eligible evidence on one candidate.`,
+        );
+    });
   return group;
 }

@@ -131,6 +131,15 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
+**Acceptance tooling follow-up (21 November 2026).** All 11 new bot scenarios
+passed in Boat on vanilla Minecraft 1.21.1 with Mineflayer 4.39.0, Node 24.22.1,
+and OpenJDK 21.0.13.1 from a modified checkout. The eight new Fabric fixtures
+were exercised on the same vanilla server with an offline Mineflayer client.
+Independent server reads confirmed the storage and inventory setup, the
+prepared blocks, and the hunger and poison effects. The resulting retreat
+instructions start a wait job before asking the operator to apply poison.
+Packaged Fabric gameplay and authenticated handoff still require acceptance.
+
 **Model scenario smoke test (21 November 2026).** In Boat, the
 `withdraw-craft-model` scenario passed against vanilla Minecraft 1.21.1 with
 Mineflayer 4.39.0, Node 24.22.1, and OpenJDK 21.0.13.1. A loopback HTTP

@@ -146,6 +146,8 @@ function track(child) {
   return child;
 }
 
+export class ShutdownError extends Error {}
+
 /** Waits for a child to exit, escalating stop → SIGTERM → SIGKILL. */
 export async function settle(child, exited, steps) {
   for (const [action, ms] of steps) {
@@ -159,6 +161,8 @@ export async function settle(child, exited, steps) {
       timer.abort();
     }
   }
+  if (child.exitCode === null && child.signalCode === null)
+    throw new ShutdownError(`Process ${child.pid} did not exit after shutdown escalation.`);
 }
 
 /** Starts `java -jar server.jar nogui` with stdin as the console; output is mirrored to server.out. */
@@ -173,9 +177,11 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
   const log = createWriteStream(join(directory, 'server.out'), { flags: 'a' });
   const serverConsole = new ServerConsole({
     write: (text) => {
-      if (child.stdin.writable) child.stdin.write(text);
+      if (child.stdin.writable && !child.stdin.destroyed) child.stdin.write(text);
+      else serverConsole.end('server stdin is closed.');
     },
   });
+  child.stdin.on('error', (error) => serverConsole.end(`server stdin failed: ${error.message}`));
   const exited = new Promise((resolve) =>
     child.once('exit', (code, signal) => {
       serverConsole.end(`server exited (${signal || code})`);
@@ -194,11 +200,23 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
     child,
     exited,
     async stop() {
-      await settle(child, exited, [
-        [() => serverConsole.write('stop\n'), 60_000],
+      const steps = [
         [() => child.kill('SIGTERM'), 10_000],
         [() => child.kill('SIGKILL'), 5_000],
-      ]);
+      ];
+      if (child.stdin.writable && !child.stdin.destroyed) {
+        steps.unshift([
+          () => {
+            try {
+              serverConsole.write('stop\n');
+            } catch {
+              child.kill('SIGTERM');
+            }
+          },
+          60_000,
+        ]);
+      }
+      await settle(child, exited, steps);
     },
   };
 }
@@ -264,30 +282,36 @@ export async function startBot({
   };
   const deadline = Date.now() + timeoutMs;
   let lastError;
-  while (Date.now() < deadline) {
-    if (signal?.aborted) {
-      await bot.stop();
-      signal.throwIfAborted();
-    }
-    if (child.exitCode !== null || child.signalCode !== null)
-      throw new Error(`The bot exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
-    try {
-      const adapter = await connect(bridge);
-      try {
-        const state = await adapter.observe();
-        if (state.connected && state.player) return bot;
-      } finally {
-        await adapter.close();
+  try {
+    while (Date.now() < deadline) {
+      if (signal?.aborted) {
+        await bot.stop();
+        signal.throwIfAborted();
       }
-    } catch (error) {
-      lastError = error;
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`The bot exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
+      try {
+        const adapter = await connect(bridge);
+        try {
+          const state = await adapter.observe();
+          if (state.connected && state.player) return bot;
+        } finally {
+          await adapter.close();
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      await delay(500);
     }
-    await delay(500);
+    await bot.stop();
+    throw new Error(
+      `The bot bridge was not ready after ${timeoutMs / 1000} s: ${lastError?.message ?? 'no player observed'}.`,
+    );
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+      botOutput: output.join('').trim().slice(-3000),
+    });
   }
-  await bot.stop();
-  throw new Error(
-    `The bot bridge was not ready after ${timeoutMs / 1000} s: ${lastError?.message ?? 'no player observed'}.`,
-  );
 }
 
 /** Runs one repo CLI command (for example `stop`) against the bot's bridge. */

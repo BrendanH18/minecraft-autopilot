@@ -65,7 +65,8 @@ class CraftingRecipesTest {
                         "node",
                         "--input-type=module",
                         "--eval",
-                        "import { RECIPES } from '../src/recipes.js'; process.stdout.write(JSON.stringify(RECIPES));")
+                        "import { RECIPES, MAX_CRAFT_COUNT } from '../src/recipes.js'; "
+                                + "process.stdout.write(JSON.stringify({ RECIPES, MAX_CRAFT_COUNT }));")
                 .redirectErrorStream(true)
                 .start();
         String output;
@@ -74,7 +75,10 @@ class CraftingRecipesTest {
         }
         assertEquals(0, node.waitFor(), output);
 
-        JsonObject nodeRecipes = JsonParser.parseString(output).getAsJsonObject();
+        JsonObject nodeOutput = JsonParser.parseString(output).getAsJsonObject();
+        assertEquals(
+                CraftingRecipes.MAX_COUNT, nodeOutput.get("MAX_CRAFT_COUNT").getAsInt(), "craft action count limit");
+        JsonObject nodeRecipes = nodeOutput.getAsJsonObject("RECIPES");
         assertEquals(nodeRecipes.keySet(), Set.copyOf(CraftingRecipes.outputs()), "allowlisted outputs");
         Gson gson = new Gson();
         for (String name : CraftingRecipes.outputs()) {
