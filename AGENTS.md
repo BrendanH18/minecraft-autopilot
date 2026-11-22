@@ -83,10 +83,9 @@ is deleted when the command ends, and with `--keep` you rename it at once with
   palantir-java-format. `npm run lint:mod` checks it and `npm run format:mod`
   applies it, offline through `scripts/gradle.js`. Gradle's `check`, and so
   `build` and the CI `mod` job, fails on unformatted Java.
-- actionlint (version pinned in `.github/workflows/ci.yml`, configured in
-  `.github/actionlint.yaml`) checks the workflows in the CI `node` job; it is
-  not installed locally. Pin every action to a full commit SHA with a
-  `# vX.Y.Z` comment, and run jobs on Namespace runners.
+- actionlint (version pinned in `.github/workflows/ci.yml`) checks workflows in
+  the CI `node` job. Pin every action to a full commit SHA with a `# vX.Y.Z`
+  comment, and run jobs on GitHub-hosted standard runners (`ubuntu-24.04`).
 - The main ruleset requires the `node` and `mod` CI jobs to pass. A new CI
   job must be added to the ruleset's required checks to block merges.
 
