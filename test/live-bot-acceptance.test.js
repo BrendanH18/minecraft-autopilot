@@ -289,9 +289,9 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
 });
 
 test('options require an explicit selection and validate ids, ports, and names', () => {
-  assert.throws(() => parseOptions([]), /--scenario <id> \(repeatable\) or --all/);
+  assert.throws(() => parseOptions([]), /--scenario <id> \(repeatable\), --all, or --fast/);
   assert.throws(() => parseOptions(['--scenario', 'nope']), /Unknown scenario "nope"/);
-  assert.throws(() => parseOptions(['--all', '--scenario', 'blocked-lid']), /not both/);
+  assert.throws(() => parseOptions(['--all', '--scenario', 'blocked-lid']), /Choose only one/);
   assert.throws(() => parseOptions(['--all', '--port', '80']), /--port/);
   assert.throws(() => parseOptions(['--all', '--account', 'a b']), /--account/);
   const options = parseOptions(['--scenario', 'blocked-lid', '--scenario', 'recovery-stop', '--port', '25599']);
@@ -1099,6 +1099,30 @@ test('overlapping runs keep their server, bot state, and review evidence in sepa
     assert.equal(await readFile(entry.serverLog, 'utf8'), port);
     assert.equal(await readFile(join(dirname(entry.serverLog), 'world', 'port'), 'utf8'), port);
   }
+});
+
+test('--fast dry-run includes the offline storage and crafting scenarios and excludes pits and models', () => {
+  const plan = buildPlan(parseOptions(['--fast', '--dry-run', '--model', 'local-test-model']));
+  assert.deepEqual(
+    plan.scenarios.map(({ id }) => id),
+    [
+      'collect-and-store',
+      'stale-removal',
+      'blocked-lid',
+      'inspect-preserves-home',
+      'inspect-return-blocked',
+      'withdraw',
+      'withdraw-omitted',
+      'withdraw-no-candidate',
+      'withdraw-short-stock',
+      'withdraw-full-inventory',
+      'craft-bootstrap',
+      'craft-missing-ingredients',
+      'craft-full-inventory',
+    ],
+  );
+  assert.throws(() => parseOptions(['--fast', '--all']), /Choose only one/);
+  assert.throws(() => parseOptions(['--fast', '--scenario', 'withdraw']), /Choose only one/);
 });
 
 test('main prints the dry-run plan without starting anything and refuses without --accept-eula', async () => {

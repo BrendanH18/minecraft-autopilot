@@ -863,6 +863,7 @@ export const scenarios = [
   {
     id: 'recovery-timeout',
     lane: 0,
+    longRunning: true,
     title: 'Mining timeout in a real pit: bounded return, failure status, preserved inventory',
     release: [RELEASE.pit, RELEASE.partial],
     plan: pitPlan,
@@ -881,6 +882,7 @@ export const scenarios = [
   {
     id: 'recovery-cancel',
     lane: 1,
+    longRunning: true,
     title: 'Lease cancel during pit recovery stops immediately',
     release: [RELEASE.pit],
     plan: pitPlan,
@@ -898,6 +900,7 @@ export const scenarios = [
   {
     id: 'recovery-stop',
     lane: 2,
+    longRunning: true,
     title: 'Emergency stop from a second CLI process during pit recovery stops immediately',
     release: [RELEASE.pit],
     plan: pitPlan,
