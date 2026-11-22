@@ -45,6 +45,7 @@ export const REPLIES = {
   data: /has the following (?:block|entity) data:|^Modified (?:block|entity) data of|^Nothing changed/,
   list: /^There are \d+ of a max of \d+ players online/,
   gamemode: /^(?:Set .+ game mode to|Set own game mode to)/,
+  summon: /^Summoned new /,
   'save-all': /^Saved the game/,
   // Only the test form (`execute if block ...` without `run`), whose reply is the test outcome.
   execute: /^Test (?:passed|failed)/,
@@ -147,9 +148,10 @@ export class ServerConsole extends EventEmitter {
     const text = String(command).trim().replace(/^\//, '');
     if (!text || /[\r\n]/.test(text))
       return Promise.reject(new Error(`Invalid console command ${JSON.stringify(command)}.`));
-    const expected = ok ?? REPLIES[text.split(/\s+/)[0]];
-    if (!expected)
-      return Promise.reject(new Error(`No reply pattern is known for "${text.split(/\s+/)[0]}"; pass { ok }.`));
+    // Dimension-scoped commands reply with the same output as the nested command.
+    const verb = /^(?:execute in \S+ run )?(\S+)/.exec(text)[1];
+    const expected = ok ?? REPLIES[verb];
+    if (!expected) return Promise.reject(new Error(`No reply pattern is known for "${verb}"; pass { ok }.`));
     const run = async () => {
       // Subscribe before writing so a fast reply is never missed; accepted replies win over generic errors (kill → "No entity was found").
       const reply = this.waitFor(

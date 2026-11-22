@@ -14,10 +14,70 @@ import {
   startServer,
   WORLD_SETUP,
 } from './live-acceptance/processes.js';
-import { CRAFT_SEQUENCE, readCommands, scenarioPlan, scenarios, storePlan } from './live-acceptance/scenarios.js';
+import {
+  CRAFT_SEQUENCE,
+  readCommands,
+  scenarioPlan,
+  scenarios,
+  STAND,
+  storePlan,
+} from './live-acceptance/scenarios.js';
 
 const runtime = resolve(import.meta.dirname, '../.runtime/live-fabric-fixtures');
+
+function preparePlayer(player) {
+  return [`clear ${player}`, `effect clear ${player}`, `tp ${player} 96.5 ${STAND} 0.5`];
+}
+
+function takeoverPlan(player) {
+  return {
+    fixture: ['forceload add 80 -16 112 16', `fill 92 ${STAND} -1 92 ${STAND + 1} 4 minecraft:oak_log`],
+    prepare: [...preparePlayer(player), `effect give ${player} minecraft:mining_fatigue 900 0 true`],
+    verify: readCommands(player),
+    actions: [
+      'mc-agent collect oak_log 8',
+      'While mining, try F8, the inventory menu (then close it), or mc-agent stop from a second terminal. Use a fresh run for each.',
+      'For lease expiry use mc-agent goto 156 -60 0, run kill -9 <pid> on the controlling CLI mid-walk, and wait 10 seconds.',
+      'For expiry, mc-agent job must show manual control and a cancelled goto job with a lease expired message.',
+      'For takeover during inference, start a goal with mc-agent agent and a real local model, then press F8 before it answers.',
+      'Confirm manual control with mc-agent observe and repeat the independent reads five seconds apart.',
+    ],
+  };
+}
+
+function dimensionPlan(player) {
+  // The landing pad is above the Nether roof and away from terrain and mobs.
+  const nether = 'execute in minecraft:the_nether';
+  const husk = '@e[type=minecraft:husk,tag=fabric_fixture_hostile,limit=1]';
+  return {
+    fixture: [
+      'forceload add 80 -16 112 16',
+      `fill 92 ${STAND} -1 92 ${STAND + 1} 2 minecraft:cobblestone`,
+      'difficulty normal',
+      `fill 95 ${STAND} 8 97 ${STAND + 2} 10 minecraft:glass`,
+      `fill 96 ${STAND} 9 96 ${STAND + 1} 9 minecraft:air`,
+      `summon minecraft:husk 96.5 ${STAND} 9.5 {NoAI:1b,PersistenceRequired:1b,Tags:["fabric_fixture_hostile"]}`,
+      `${nether} run forceload add 0 0 4 4`,
+      `${nether} run fill 0 200 0 4 200 4 minecraft:stone`,
+    ],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:iron_pickaxe 1`],
+    verify: [...readCommands(player), `data get entity ${player} Dimension`, `data get entity ${husk} Pos`],
+    actions: [
+      'mc-agent collect cobblestone 4',
+      'Read the player inventory to confirm the cobblestone gain.',
+      'mc-agent threats --radius 16',
+      'Compare the observed husk and distance with player and husk positions from the server.',
+      'mc-agent goto 136 -60 0',
+      `While the player is walking, enter ${nether} run tp ${player} 2.5 201 2.5 in the fixture terminal.`,
+      'Check mc-agent job for manual control and a cancelled goto job with a dimension changed message.',
+      'Repeat the player position and dimension reads five seconds apart.',
+    ],
+  };
+}
+
 const fixtures = {
+  takeover: { build: takeoverPlan },
+  'cobblestone-hostiles-dimension': { build: dimensionPlan },
   pit: {
     botScenario: 'recovery-timeout',
     actions: [
@@ -109,7 +169,8 @@ export function parseOptions(argv) {
 }
 
 export function fixturePlan(id, player) {
-  const { storage, botScenario, actions, variations = [] } = fixtures[id];
+  const { build, storage, botScenario, actions, variations = [] } = fixtures[id];
+  if (build) return { id, variations, ...build(player) };
   const plan = storage
     ? storePlan({ bot: player, lane: 0 }, { storage, depositLogs: 192 })
     : scenarioPlan(
