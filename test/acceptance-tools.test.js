@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
+import { zip } from './acceptance-zip.js';
 import { projectRoot } from '../src/config.js';
 import { modBundleFiles } from '../src/bundle.js';
 import { ACCEPTANCE_GATES, OPEN_GATES, findGate, requiredBackends } from '../src/acceptance-gates.js';
@@ -16,6 +17,7 @@ import {
   finishSession,
   resolveSession,
   readSessions,
+  writeSessions,
   eligibilityProblems,
   provenanceProblems,
   acceptanceStatus,
@@ -68,7 +70,7 @@ async function distRoot(
   {
     build = { version: '0.1.0', minecraft: '1.21.1', sourceCommit: COMMIT, sourceModified: false },
     sums = 'match',
-    archive = Buffer.from('zip bytes'),
+    archive = zip([['BUILD.json', JSON.stringify(build)]]),
   } = {},
 ) {
   const root = await testDirectory(t, 'acceptance-root-');
@@ -166,10 +168,13 @@ test('provenance records nulls and warnings for missing dist, and verifies BUILD
     missing.warnings.some((text) => /BUILD\.json is missing/.test(text)) &&
       missing.warnings.some((text) => /no artifact checksum/.test(text)),
   );
-  const verified = await collectProvenance({ root: await distRoot(t), git: cleanGit(), node: 'v22.12.0' });
+  const root = await distRoot(t);
+  const verified = await collectProvenance({ root, git: cleanGit(), node: 'v22.12.0' });
   assert.deepEqual(verified.warnings, []);
-  assert.equal(verified.provenance.archive.sha256, createHash('sha256').update('zip bytes').digest('hex'));
+  const archive = await readFile(join(root, 'dist', ARCHIVE_NAME));
+  assert.equal(verified.provenance.archive.sha256, createHash('sha256').update(archive).digest('hex'));
   assert.equal(verified.provenance.archive.matches, true);
+  assert.equal(verified.provenance.archive.manifestMatches, true);
   assert.deepEqual(provenanceProblems({ provenance: verified.provenance }), []);
   const mismatched = await collectProvenance({
     root: await distRoot(t, { sums: 'other', build: { sourceCommit: 'f'.repeat(40), sourceModified: true } }),
@@ -242,6 +247,12 @@ test('start, step, finish, sessions, status, and report work end to end with pri
   assert.equal(gate.eligible, true);
   assert.equal(gate.backends[0].latest.id, started.session.id);
   assert.equal(status.eligible, 1);
+  assert.equal(gate.backends[0].latest.archiveSha256, started.session.provenance.archive.sha256);
+  const selected = await run('status', '--commit', COMMIT, '--archive-sha256', 'd'.repeat(64));
+  assert.deepEqual(selected.selectedCandidate, { commit: COMMIT, archiveSha256: 'd'.repeat(64) });
+  assert.equal(selected.eligible, 0);
+  await assert.rejects(run('status', '--commit', COMMIT), /both --commit/);
+  await assert.rejects(run('status', '--require-eligible'), /Only 1 of \d+ open gates/);
   assert.match(status.note, /never edits docs\/RELEASE\.md/);
   assert.match(status.note, /must review/);
   assert.equal((await run('sessions', '--gate', 'bot-mining-timeout')).sessions.length, 1);
@@ -258,10 +269,78 @@ test('start, step, finish, sessions, status, and report work end to end with pri
   assert.doesNotMatch(markdown, new RegExp(UNVERIFIED));
   const json = await run('report', '--format', 'json');
   assert.deepEqual(json.sessions[0].eligibilityProblems, []);
+  await run('start', 'bot-mining-timeout', '--backend', 'mineflayer');
+  const one = await run('report', '--session', prefix, '--format', 'json');
+  assert.deepEqual(
+    one.sessions.map(({ id }) => id),
+    [started.session.id],
+  );
   await assert.rejects(run('report', '--format', 'html'), /markdown or json/);
   const saved = await readSessions(acceptanceFile(directory));
   assert.equal(saved[0].steps.length, 5);
   assert.equal(saved[0].finished.result, 'pass');
+});
+
+test('a mismatched embedded build manifest makes bot evidence ineligible', async (t) => {
+  const archive = zip([['BUILD.json', JSON.stringify({ sourceCommit: 'b'.repeat(40), sourceModified: false })]]);
+  const { provenance, warnings } = await collectProvenance({ root: await distRoot(t, { archive }), git: cleanGit() });
+  assert.equal(provenance.archive.matches, true);
+  assert.equal(provenance.archive.manifestMatches, false);
+  assert.match(warnings.join('\n'), /archive BUILD\.json differs from dist\/BUILD\.json/);
+  assert.deepEqual(provenanceProblems({ backend: 'mineflayer', provenance }), [
+    'archive BUILD.json not verified against dist/BUILD.json',
+  ]);
+});
+
+test('duplicate archive checksum entries do not verify', async (t) => {
+  const root = await distRoot(t);
+  const path = join(root, 'dist/ARCHIVE_SHA256SUMS');
+  const text = await readFile(path, 'utf8');
+  await writeFile(path, text + text);
+  const { provenance, warnings } = await collectProvenance({ root, git: cleanGit() });
+  assert.equal(provenance.archive.matches, false);
+  assert.match(warnings.join('\n'), /repeats the checksum/);
+});
+
+test('provenance rejects oversized and non-file metadata before reading it', async (t) => {
+  const root = await distRoot(t);
+  await writeFile(join(root, 'dist/BUILD.json'), 'x'.repeat(64 * 1024 + 1));
+  await assert.rejects(collectProvenance({ root, git: cleanGit() }), /BUILD\.json is larger than 64 KiB/);
+  const another = await distRoot(t, { build: null });
+  await mkdir(join(another, 'dist/BUILD.json'));
+  await assert.rejects(collectProvenance({ root: another, git: cleanGit() }), /BUILD\.json is not a regular file/);
+});
+
+test('concurrent acceptance commands retain both sessions and both independent observations', async (t) => {
+  const directory = await testDirectory(t, 'acceptance-concurrent-');
+  const options = { directory, root: await distRoot(t), git: cleanGit() };
+  const runs = [cli(options).run, cli(options).run];
+  const [{ session }, other] = await Promise.all(
+    runs.map((run) => run('start', 'bot-mining-timeout', '--backend', 'mineflayer')),
+  );
+  await Promise.all(runs.map((run, index) => run('step', session.id, String(index + 1), 'pass')));
+  const saved = await readSessions(acceptanceFile(directory));
+  assert.deepEqual(new Set(saved.map(({ id }) => id)), new Set([session.id, other.session.id]));
+  assert.deepEqual(
+    saved
+      .find(({ id }) => id === session.id)
+      .steps.map(({ step }) => step)
+      .sort(),
+    [1, 2],
+  );
+});
+
+test('an oversized acceptance write preserves the previous readable record', async (t) => {
+  const path = acceptanceFile(await testDirectory(t, 'acceptance-large-'));
+  await writeSessions(path, []);
+  const session = createSession({ gate: 'bot-mining-timeout', backend: 'mineflayer', provenance: VERIFIED });
+  const entry = { step: 1, result: 'pass', note: '測'.repeat(2000), at: session.startedAt };
+  const record = { ...session, steps: Array(500).fill(entry) };
+  await assert.rejects(
+    writeSessions(path, [record, { ...record, id: '00000000-0000-4000-8000-000000000001' }]),
+    /exceed 4 MiB/,
+  );
+  assert.deepEqual(await readSessions(path), []);
 });
 
 test('a dirty worktree or missing dist makes the report and status refuse verified-candidate wording', async (t) => {

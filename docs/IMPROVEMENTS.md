@@ -2,6 +2,28 @@
 
 Each batch below inventories focused additions and how they were validated.
 
+## 1,000 release and planner improvements
+
+The batch counts each distinct runnable worked example once. Its inputs and
+expected result come from the corresponding planner’s independent test
+fixtures. Use `mc-agent study examples` for the machine-readable inventory
+of those planner keys and `mc-agent study example GROUP COMMAND` to run one.
+
+| Range | Work | Count |
+| --- | --- | ---: |
+| 1–250 | [Bot acceptance and resource planner examples](improvement-batch-bot.md) | 250 |
+| 251–500 | [Release evidence, Fabric fixtures, and analysis planner examples](improvement-batch-evidence.md) | 250 |
+| 501–750 | [Fabric reliability and spatial planner examples](improvement-batch-fabric.md) | 250 |
+| 751–1,000 | CLI startup and build planner examples described below | 250 |
+| | **Total** | **1,000** |
+
+Item 751 defers loading offline planner modules for core CLI commands,
+retaining the full command tree for root help and unknown-command suggestions.
+Items 752–1,000 expose 249 worked examples. They cover the scaffold, beacon,
+tunnel ventilation, canal lock, sponge, ice road, furnace, brewing, orchard,
+and greenhouse planners. The first nine groups contribute 25 each. The
+greenhouse group contributes 24.
+
 ## Batch 4: 100 planning and reporting additions
 
 Four CLI groups each add 25 documented commands (100 total):

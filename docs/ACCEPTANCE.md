@@ -14,8 +14,8 @@ It records human observations. It does not run gameplay, contact Minecraft or a 
 | `acceptance step <session> <n> pass\|fail [--note ..]` | Record an observation for step `n`. Re-recording keeps the earlier observation. |
 | `acceptance finish <session> pass\|fail\|blocked [--note ..]` | Finish a session. `fail` and `blocked` need `--note`. `pass` is refused while a step's latest observation failed. |
 | `acceptance sessions [--gate <gate>]` | List recorded sessions. |
-| `acceptance report [--gate <gate>] [--format markdown\|json]` | Print Markdown for the [DEVELOPMENT.md](DEVELOPMENT.md#validation) Validation section, or JSON. |
-| `acceptance status` | Show the latest finished session for each open gate and backend, and whether the eligible gates share one candidate. |
+| `acceptance report [--gate <gate>] [--session <id>] [--format markdown\|json]` | Print Markdown for the [DEVELOPMENT.md](DEVELOPMENT.md#validation) Validation section, or JSON. A session id or unique prefix selects one record. |
+| `acceptance status [--commit <sha> --archive-sha256 <sha>] [--require-eligible]` | Show the latest finished session for each open gate and backend. Supply both hashes to inspect one candidate. The exit status is unsuccessful with `--require-eligible` unless every open gate has eligible evidence on one candidate. |
 
 Sessions can be named by their full id or an unambiguous prefix of at least six characters.
 
@@ -49,11 +49,11 @@ Record independent evidence in step notes, such as a server `data get` read or a
 - The ISO start time, gate, backend, and the configuration flags.
 - `git rev-parse HEAD` and whether `git status --porcelain` shows changes.
 - `dist/BUILD.json`, whether its `sourceCommit` matches the commit, and whether `sourceModified` is `false`.
-- The SHA-256 of `dist/minecraft-agent-0.1.0.zip` and whether it matches `dist/ARCHIVE_SHA256SUMS`.
+- The SHA-256 of `dist/minecraft-agent-0.1.0.zip`, whether it matches the unique entry in `dist/ARCHIVE_SHA256SUMS`, and whether the packaged build manifest matches the loose `dist/BUILD.json`.
 - With `--mods-dir`, the SHA-256 of each packaged jar found in that folder and the expected hash from the archive.
 - The Node version.
 
-A missing `dist/` is recorded as `null` with a warning. Use the `mods` folder of the launcher profile used for the session. `--mods-dir` uses `unzip` on PATH to read the candidate archive. The hash check records the files present when the session starts. Confirm the launcher profile and client in your observations.
+A missing `dist/` is recorded as `null` with a warning. Acceptance uses `unzip` on PATH to read the candidate archive. Use the `mods` folder of the launcher profile used for the session. The hash check records the files present when the session starts. Confirm the launcher profile and client in your observations.
 
 ## Eligibility
 
@@ -63,7 +63,7 @@ A gate's evidence is **eligible** when, for each backend it needs, the latest fi
 - used the gate's backend (never `demo`);
 - ran on a known commit with a clean worktree;
 - has a `dist/BUILD.json` that matches that commit and records `sourceModified: false`;
-- has an archive checksum that matches `ARCHIVE_SHA256SUMS`;
+- has an archive checksum that matches `ARCHIVE_SHA256SUMS` and, in new sessions, a packaged manifest that matches `dist/BUILD.json`;
 - for `fabric` or `both`, has all packaged jars present with hashes matching the archive.
 
 A later failed or blocked session replaces earlier eligible evidence. Existing Fabric and authenticated handoff sessions remain readable and need a new session with matching jar hashes to qualify.
@@ -72,6 +72,6 @@ A later failed or blocked session replaces earlier eligible evidence. Existing F
 
 ## Storage and limits
 
-Sessions are stored in `.runtime/acceptance-sessions.json` (or `$MC_AGENT_HOME`). The file is owner-only (0600 in a 0700 directory) and written atomically. A corrupt file is reported and never overwritten. At most 1,000 sessions are kept.
+Sessions are stored in `.runtime/acceptance-sessions.json` (or `$MC_AGENT_HOME`). The file is owner-only (0600 in a 0700 directory). Commands serialize edits with an adjacent `acceptance-sessions.json.lock` directory and replace the file atomically. After a process is killed mid-write, remove the empty lock directory with `rmdir` once you have confirmed no acceptance write is running. A corrupt file is reported and never overwritten. Archive the file before it reaches 1,000 sessions or 4 MiB.
 
 The gate catalog in `src/acceptance-gates.js` mirrors RELEASE.md, and a test fails when they diverge. Closed gates are listed with the date of their historical evidence. The tool cannot mark a gate closed.

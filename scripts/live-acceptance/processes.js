@@ -146,6 +146,8 @@ function track(child) {
   return child;
 }
 
+export class ShutdownError extends Error {}
+
 /** Waits for a child to exit, escalating stop → SIGTERM → SIGKILL. */
 export async function settle(child, exited, steps) {
   for (const [action, ms] of steps) {
@@ -159,6 +161,8 @@ export async function settle(child, exited, steps) {
       timer.abort();
     }
   }
+  if (child.exitCode === null && child.signalCode === null)
+    throw new ShutdownError(`Process ${child.pid} did not exit after shutdown escalation.`);
 }
 
 /** Starts `java -jar server.jar nogui` with stdin as the console; output is mirrored to server.out. */

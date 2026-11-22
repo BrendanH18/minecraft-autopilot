@@ -153,12 +153,25 @@ export class ServerConsole extends EventEmitter {
     const expected = ok ?? REPLIES[verb];
     if (!expected) return Promise.reject(new Error(`No reply pattern is known for "${verb}"; pass { ok }.`));
     const run = async () => {
+      signal?.throwIfAborted();
+      if (this.ended) throw new Error(`Server output ended before sending "${text}": ${this.ended}`);
       // Subscribe before writing so a fast reply is never missed; accepted replies win over generic errors (kill → "No entity was found").
+      const writeFailed = new AbortController();
       const reply = this.waitFor(
         (message) => expected.test(message) || COMMAND_ERRORS.some((pattern) => pattern.test(message)),
-        { timeoutMs, signal, label: `a reply to "${text}"` },
+        {
+          timeoutMs,
+          signal: signal ? AbortSignal.any([signal, writeFailed.signal]) : writeFailed.signal,
+          label: `a reply to "${text}"`,
+        },
       );
-      this.write(`${text}\n`);
+      try {
+        this.write(`${text}\n`);
+      } catch (error) {
+        writeFailed.abort(error);
+        await reply.catch(() => {});
+        throw error;
+      }
       const message = await reply;
       if (!expected.test(message)) throw new CommandError(`"${text}" failed: ${message}`);
       return message;

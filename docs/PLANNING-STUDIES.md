@@ -50,6 +50,22 @@ the way out and back. Recipe reports use the standard comparison format and
 include the recipe's purpose. The exported request contains only the inputs
 expected by `study compare`.
 
+## Worked examples
+
+Use `study examples` to list the worked examples, or pass a group name to
+list its examples. Each entry runs one input through its planner and reports
+the result alongside the independently calculated expected output.
+
+```sh
+mc-agent study examples beacon-plan
+mc-agent study example beacon-plan tier-materials
+```
+
+The beacon example uses a three-block top edge and four tiers. Its expected
+layer counts are 9, 25, 49, and 81, for a total of 164 blocks. Copy the
+report's `args` array into a `study batch` request as one row under `cases`
+to adapt it to your own project.
+
 ## Requests and reports
 
 All nine commands use this form:

@@ -38,6 +38,14 @@ test('Fabric fixture dry run lists all setups and uses the named player without 
       'deposit-barrel',
       'deposit-full-chest',
       'deposit-double-chest',
+      'eat-interruption',
+      'low-health-retreat',
+      'collection-return',
+      'collect-full-inventory',
+      'withdraw-multi-stack',
+      'craft-interruption',
+      'death-navigation',
+      'disconnect-mining',
     ],
   );
   assert.match(plan, /data get entity FabricTester Inventory/);
@@ -95,4 +103,49 @@ test('live fixture setup requires a known scenario and a named Minecraft player'
 test('relative Java paths survive the switch to the server directory', () => {
   assert.equal(parseOptions(['--dry-run', '--java', './jdk/bin/java']).java, resolve('jdk/bin/java'));
   assert.equal(parseOptions(['--dry-run', '--java', 'java21']).java, 'java21');
+});
+
+test('the eating and retreat fixtures expose independent vitals and use repeatable starting conditions', () => {
+  const player = 'FixtureUser';
+  const eating = fixturePlan('eat-interruption', player);
+  assert.deepEqual(eating.vitalTarget, { path: 'foodLevel', effect: 'hunger', amplifier: 100, target: 10 });
+  assert.ok(eating.fixture.includes('difficulty normal'));
+  assert.ok(eating.prepare.includes(`give ${player} minecraft:bread 8`));
+  assert.ok(eating.verify.includes(`data get entity ${player} foodLevel`));
+  const retreat = fixturePlan('low-health-retreat', player);
+  assert.ok(retreat.fixture.includes('gamerule naturalRegeneration false'));
+  assert.deepEqual(retreat.vitalTarget, { path: 'Health', effect: 'poison', amplifier: 1, target: 8 });
+  assert.ok(retreat.verify.includes(`data get entity ${player} Health`));
+  assert.ok(retreat.actions.includes('mc-agent set-home'));
+});
+
+test('collection fixtures arrange a partial return and leave exactly one main inventory slot before interruption', () => {
+  const player = 'FixtureUser';
+  const partial = fixturePlan('collection-return', player);
+  assert.ok(partial.fixture.includes('fill 80 -60 0 81 -60 0 minecraft:sand'));
+  assert.ok(partial.actions.includes('mc-agent collect sand 5'));
+  const full = fixturePlan('collect-full-inventory', player);
+  assert.ok(full.prepare.includes(`give ${player} minecraft:iron_axe 1`));
+  assert.ok(full.prepare.includes(`give ${player} minecraft:cobblestone 2176`));
+  assert.ok(full.actions.some((action) => action.includes(`give ${player} minecraft:dirt 64`)));
+});
+
+test('transfer and crafting interruption fixtures seed several units and print checks for their containers', () => {
+  const player = 'FixtureUser';
+  const withdrawal = fixturePlan('withdraw-multi-stack', player);
+  assert.equal(withdrawal.fixture.at(-1).match(/count:64/g).length, 3);
+  assert.equal(withdrawal.verify.filter((command) => command.startsWith('data get block')).length, 2);
+  const crafting = fixturePlan('craft-interruption', player);
+  assert.ok(crafting.prepare.includes(`give ${player} minecraft:oak_planks 32`));
+  assert.ok(crafting.verify.includes('execute if block 98 -60 0 minecraft:crafting_table'));
+});
+
+test('death and disconnect fixture instructions leave the server running for independent follow-up reads', () => {
+  const player = 'FixtureUser';
+  const death = fixturePlan('death-navigation', player);
+  assert.ok(death.fixture.includes('gamerule keepInventory true'));
+  assert.ok(death.actions.some((action) => action.includes(`kill ${player}`)));
+  const disconnect = fixturePlan('disconnect-mining', player);
+  assert.ok(disconnect.actions.some((action) => action.includes(`kick ${player}`)));
+  assert.ok(disconnect.verify.includes(`data get entity ${player} Pos`));
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { basename, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
@@ -75,6 +76,119 @@ function dimensionPlan(player) {
   };
 }
 
+function eatingPlan(player) {
+  return {
+    fixture: ['difficulty normal', 'gamerule naturalRegeneration false'],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:bread 8`],
+    vitalTarget: { path: 'foodLevel', effect: 'hunger', amplifier: 100, target: 10 },
+    verify: [...readCommands(player), `data get entity ${player} foodLevel`, `data get entity ${player} Health`],
+    actions: [
+      'mc-agent eat',
+      'During the eating animation, press F8, open the pause menu, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+      'Repeat the food level and inventory reads five seconds apart once control is manual.',
+    ],
+  };
+}
+
+function lowHealthPlan(player) {
+  return {
+    fixture: ['difficulty normal', 'gamerule naturalRegeneration false', 'forceload add 80 -16 128 16'],
+    prepare: preparePlayer(player),
+    vitalTarget: { path: 'Health', effect: 'poison', amplifier: 1, target: 8 },
+    verify: [...readCommands(player), `data get entity ${player} Health`],
+    actions: [
+      'Check that the baseline Health is at most 8.',
+      'mc-agent set-home',
+      `In the fixture terminal, enter tp ${player} 120.5 ${STAND} 0.5`,
+      `mc-agent goto 128 ${STAND} 0`,
+      'Check for a retreat toward the saved home. In separate runs, press F8 or run mc-agent stop during retreat.',
+      'Check mc-agent job and repeat the position reads five seconds apart after interruption.',
+    ],
+  };
+}
+
+function collectionReturnPlan(player) {
+  return {
+    fixture: ['forceload add 64 -16 112 16', `fill 80 ${STAND} 0 81 ${STAND} 0 minecraft:sand`],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:iron_shovel 1`],
+    verify: [...readCommands(player), ...[80, 81].map((x) => `execute if block ${x} ${STAND} 0 minecraft:sand`)],
+    actions: [
+      'mc-agent collect sand 5',
+      'Once the job reports returning to where collection started, press F8, open the pause menu, or run mc-agent stop in a second terminal. Use a fresh run for each.',
+      'Compare inventory and position after the transition and five seconds later.',
+    ],
+  };
+}
+
+function fullInventoryCollectionPlan(player) {
+  const plan = takeoverPlan(player);
+  return {
+    ...plan,
+    prepare: [...plan.prepare, `give ${player} minecraft:iron_axe 1`, `give ${player} minecraft:cobblestone 2176`],
+    actions: [
+      'Through an MCP client, take control and start minecraft_action with {"type":"collect","block":"oak_log","count":8}.',
+      `During mining, enter give ${player} minecraft:dirt 64 in the fixture terminal to fill the final inventory slot.`,
+      'Check the inventory-full failure and bounded return, then verify that the original MCP session still accepts actions.',
+    ],
+  };
+}
+
+function withdrawTransferPlan(player) {
+  const { fixture, points, reads } = storePlan({ bot: player, lane: 0 }, { storage: 'double' });
+  const { x, y, z } = points.chest;
+  const logs = [0, 1, 2].map((slot) => `{Slot:${slot}b,id:"minecraft:oak_log",count:64}`);
+  return {
+    fixture: [...fixture, `data merge block ${x} ${y} ${z} {Items:[${logs.join(',')}]}`],
+    prepare: preparePlayer(player),
+    verify: [...readCommands(player, points.chest), ...reads],
+    actions: [
+      'mc-agent withdraw oak_log',
+      'While stacks are moving, press F8, close the storage screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+      'Repeat both chest half reads and the player inventory read five seconds apart.',
+    ],
+  };
+}
+
+function craftInterruptionPlan(player) {
+  return {
+    fixture: ['forceload add 80 -16 112 16', `setblock 98 ${STAND} 0 minecraft:crafting_table`],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:oak_planks 32`],
+    verify: [...readCommands(player), `execute if block 98 ${STAND} 0 minecraft:crafting_table`],
+    actions: [
+      'mc-agent craft chest 4',
+      'While crafting, press F8, close the crafting table screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+      'Repeat the player inventory read five seconds apart and compare plank and chest counts.',
+    ],
+  };
+}
+
+function deathPlan(player) {
+  return {
+    fixture: ['gamerule keepInventory true', 'forceload add 80 -16 144 16'],
+    prepare: preparePlayer(player),
+    verify: [...readCommands(player), `data get entity ${player} Health`],
+    actions: [
+      `mc-agent goto 136 ${STAND} 0`,
+      `While the character is walking, enter kill ${player} in the fixture terminal.`,
+      'Check that mc-agent job reports manual control and the navigation job cancelled due to death.',
+      'Respawn manually and verify that the old job stays cancelled. Repeat position reads five seconds apart.',
+    ],
+  };
+}
+
+function disconnectPlan(player) {
+  const plan = takeoverPlan(player);
+  return {
+    ...plan,
+    actions: [
+      'mc-agent collect oak_log 8',
+      `While mining, enter kick ${player} Fixture disconnect in the fixture terminal.`,
+      'Check manual control and the disconnected job at the title screen.',
+      'Rejoin the same server, check that the old job does not resume, then compare position and inventory reads five seconds apart.',
+    ],
+  };
+}
+
 const fixtures = {
   takeover: { build: takeoverPlan },
   'cobblestone-hostiles-dimension': { build: dimensionPlan },
@@ -125,6 +239,14 @@ const fixtures = {
     storage: 'double',
     actions: ['mc-agent deposit oak_log', 'Read both halves after the transfer or a takeover.'],
   },
+  'eat-interruption': { build: eatingPlan },
+  'low-health-retreat': { build: lowHealthPlan },
+  'collection-return': { build: collectionReturnPlan },
+  'collect-full-inventory': { build: fullInventoryCollectionPlan },
+  'withdraw-multi-stack': { build: withdrawTransferPlan },
+  'craft-interruption': { build: craftInterruptionPlan },
+  'death-navigation': { build: deathPlan },
+  'disconnect-mining': { build: disconnectPlan },
 };
 const fixtureIds = Object.keys(fixtures);
 const usage = `Usage:
@@ -188,12 +310,23 @@ export function fixturePlan(id, player) {
   };
 }
 
-function formatFixture({ id, fixture, prepare, actions: commands, verify, variations }) {
+function vitalCommands(player, { effect, amplifier }) {
+  return [
+    `effect give ${player} minecraft:${effect} 20 ${amplifier} true`,
+    `effect clear ${player} minecraft:${effect}`,
+  ];
+}
+
+function formatFixture({ id, fixture, prepare, actions: commands, verify, variations, vitalTarget }, player) {
   const section = (title, lines) => [title, ...lines.map((line) => `  ${line}`)];
+  const [apply, clear] = vitalTarget ? vitalCommands(player, vitalTarget) : [];
   return [
     `[${id}]`,
     ...section('World fixture (server console)', fixture),
     ...section("Player setup after joining (server console; clears this player's inventory)", prepare),
+    ...(vitalTarget
+      ? [`  ${apply}`, `  Wait for ${vitalTarget.path} to reach ${vitalTarget.target}, then enter ${clear}`]
+      : []),
     ...section('Manual actions (CLI terminal)', commands),
     ...section('Independent reads (server console; repeat after the action or interruption)', verify),
     ...(variations.length
@@ -203,6 +336,21 @@ function formatFixture({ id, fixture, prepare, actions: commands, verify, variat
 }
 
 const itemRead = /^data get block (-?\d+) (-?\d+) (-?\d+) Items$/;
+async function lowerVital(console, player, vitalTarget, signal) {
+  const { path, target } = vitalTarget;
+  const [apply, clear] = vitalCommands(player, vitalTarget);
+  await console.command(apply, { signal });
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if ((await console.entityData(player, path, { signal })) <= target) {
+      await console.command(clear, { signal });
+      return;
+    }
+    await delay(250, undefined, { signal });
+  }
+  throw new Error(`${path} did not fall to ${target} during player setup.`);
+}
+
 async function startFixture(options, plan) {
   preflight(options);
   if (!(await portIsFree(options.port)))
@@ -234,6 +382,7 @@ async function startFixture(options, plan) {
       timeoutMs: 300_000,
     });
     for (const command of plan.prepare) await server.console.command(command, { signal });
+    if (plan.vitalTarget) await lowerVital(server.console, options.player, plan.vitalTarget, signal);
     console.log('Independent baseline reads');
     for (const command of plan.verify) {
       const coords = itemRead.exec(command);
@@ -247,7 +396,7 @@ async function startFixture(options, plan) {
       console.log(`  ${command}\n    ${value}`);
     }
     console.log(
-      `\n${formatFixture(plan)}\nFixture ready. Enter server console commands here. Ctrl+C, end of input, or stop ends the session.`,
+      `\n${formatFixture(plan, options.player)}\nFixture ready. Enter server console commands here. Ctrl+C, end of input, or stop ends the session.`,
     );
     server.console.on('line', (line) => console.log(line));
     input.on('line', (line) => {
@@ -281,7 +430,7 @@ async function main() {
     } else if (options.dryRun) {
       const ids = options.scenario ? [options.scenario] : fixtureIds;
       console.log(
-        `Fabric fixture dry run for ${options.player}\nWorld settings:\n  ${WORLD_SETUP.join('\n  ')}\n\n${ids.map((id) => formatFixture(fixturePlan(id, options.player))).join('\n\n')}`,
+        `Fabric fixture dry run for ${options.player}\nWorld settings:\n  ${WORLD_SETUP.join('\n  ')}\n\n${ids.map((id) => formatFixture(fixturePlan(id, options.player), options.player)).join('\n\n')}`,
       );
     } else {
       console.log('Disposable offline server on loopback. Setup clears the named player’s inventory in this world.');

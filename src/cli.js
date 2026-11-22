@@ -112,8 +112,6 @@ import { registerVitalsSeriesTools } from './vitals-series-tools.js';
 import { registerRoutineMetricsTools } from './routine-metrics-tools.js';
 import { registerEventQueryTools } from './event-query-tools.js';
 import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
-import { registerPlanningTools, registerPlanningExtensions, registerBuildPlanningTools } from './planning-tools.js';
-import { registerPlanningStudies } from './planning-studies.js';
 import { registerAcceptanceTools } from './acceptance-tools.js';
 
 const program = new Command();
@@ -1087,13 +1085,29 @@ registerVitalsSeriesTools(program, { print });
 registerRoutineMetricsTools(program, { print });
 registerEventQueryTools(program, { print });
 registerSnapshotQueryTools(program, { print });
-registerPlanningTools(program, { print });
-registerPlanningExtensions(program, { print });
-registerBuildPlanningTools(program, { print });
-registerPlanningStudies(program, { print });
-registerAcceptanceTools(program, { print });
+
+function firstCommand(args) {
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === '--bridge') index++;
+    else if (argument !== '--json' && !argument.startsWith('--bridge=')) return argument;
+  }
+}
 
 try {
+  const commandName = firstCommand(process.argv.slice(2));
+  // Root help and unknown-command suggestions still use the full command tree.
+  if (
+    commandName !== 'acceptance' &&
+    !program.commands.some((command) => command.name() === commandName || command.aliases().includes(commandName))
+  ) {
+    const [planning, studies] = await Promise.all([import('./planning-tools.js'), import('./planning-studies.js')]);
+    planning.registerPlanningTools(program, { print });
+    planning.registerPlanningExtensions(program, { print });
+    planning.registerBuildPlanningTools(program, { print });
+    studies.registerPlanningStudies(program, { print });
+  }
+  registerAcceptanceTools(program, { print });
   await program.parseAsync();
 } catch (error) {
   console.error(program.opts().json ? JSON.stringify({ error: error.message }) : `Error: ${error.message}`);
