@@ -1,0 +1,49 @@
+name: Bot acceptance
+
+on:
+  schedule:
+    - cron: '43 6 * * 1'
+  workflow_dispatch:
+  # Exercise workflow changes before merging.
+  pull_request:
+    paths:
+      - '.github/workflows/bot-acceptance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bot-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Prepare the vanilla server jar through Loom
+        run: |
+          node scripts/setup-mod.js --allow-downloads
+          node scripts/gradle.js help --allow-downloads
+      - name: Run offline bot scenarios
+        id: acceptance
+        run: npm run acceptance:bot -- --accept-eula --fast
+      - name: Upload acceptance evidence
+        if: ${{ !cancelled() && steps.acceptance.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bot-acceptance
+          path: |
+            .runtime/live-acceptance/run-*/results.json
+            .runtime/live-acceptance/run-*/server/server.out
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

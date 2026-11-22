@@ -37,8 +37,9 @@ import {
 export { SEED, WORLD_SETUP };
 const REVIEW_NOTE =
   'Machine-checked observations only. These results become acceptance evidence for RELEASE.md only after a person reviews them, including server.out.';
-const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all) [--accept-eula] [--server-jar <path>] [--dry-run]
+const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast) [--accept-eula] [--server-jar <path>] [--dry-run]
   [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
+--fast runs offline scenarios without the long pit recovery cases.
 Scenarios: ${scenarioIds.join(', ')}`;
 
 export function parseOptions(argv) {
@@ -48,6 +49,7 @@ export function parseOptions(argv) {
     options: {
       scenario: { type: 'string', multiple: true },
       all: { type: 'boolean' },
+      fast: { type: 'boolean' },
       'server-jar': { type: 'string' },
       'dry-run': { type: 'boolean' },
       'keep-server': { type: 'boolean' },
@@ -68,12 +70,17 @@ export function parseOptions(argv) {
   const account = values.account ?? 'LiveBot';
   if (!/^[A-Za-z0-9_]{3,16}$/.test(account))
     throw new Error('--account must be a 3–16 character offline username (letters, digits, _).');
-  if (values.all && values.scenario) throw new Error('Use --scenario or --all, not both.');
+  if ([values.scenario, values.all, values.fast].filter(Boolean).length > 1)
+    throw new Error('Choose only one of --scenario, --all, and --fast.');
   for (const id of values.scenario ?? [])
     if (!scenarioIds.includes(id))
       throw new Error(`Unknown scenario ${JSON.stringify(id)}. Choose from: ${scenarioIds.join(', ')}.`);
-  if (!values.help && !values.all && !values.scenario && !values['dry-run'])
-    throw new Error(`Choose --scenario <id> (repeatable) or --all.\n${USAGE}`);
+  if (!values.help && !values.all && !values.fast && !values.scenario && !values['dry-run'])
+    throw new Error(`Choose --scenario <id> (repeatable), --all, or --fast.\n${USAGE}`);
+  const selected = scenarios.filter((scenario) => {
+    if (values.fast) return !scenario.longRunning && !scenario.requiresModel;
+    return !values.scenario || values.scenario.includes(scenario.id);
+  });
   return {
     help: !!values.help,
     dryRun: !!values['dry-run'],
@@ -87,7 +94,7 @@ export function parseOptions(argv) {
     ollama: values.ollama ?? 'http://127.0.0.1:11434',
     noThinking: !!values['no-thinking'],
     out: values.out ? resolve(values.out) : null,
-    scenarios: values.scenario ? scenarios.filter((scenario) => values.scenario.includes(scenario.id)) : scenarios,
+    scenarios: selected,
   };
 }
 

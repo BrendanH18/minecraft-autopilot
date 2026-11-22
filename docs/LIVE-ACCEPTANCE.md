@@ -19,19 +19,35 @@ The runner never downloads anything. It refuses with a pointer to DEVELOPMENT.md
 
 ```sh
 node scripts/live-bot-acceptance.js --dry-run --all            # print every command and check; starts nothing
+node scripts/live-bot-acceptance.js --dry-run --fast
 node scripts/live-bot-acceptance.js --accept-eula --scenario collect-and-store
+node scripts/live-bot-acceptance.js --accept-eula --fast
 node scripts/live-bot-acceptance.js --accept-eula --all
 node scripts/live-bot-acceptance.js --accept-eula --scenario stale-removal-model --model YOUR_LOCAL_MODEL [--no-thinking]
 ```
 
-Options: `--scenario ID` (repeatable) or `--all`; `--port N`; `--out FILE` (defaults to `results.json` in the run directory); `--account NAME` (offline username, default `LiveBot`); `--java PATH`; `--model NAME` and `--ollama URL` for model scenarios; `--keep-server`. Use distinct ports and, if supplying `--out`, distinct output files for concurrent runs.
+Choose one of `--scenario ID` (repeatable), `--all`, or `--fast`. The fast preset
+runs offline collection, storage, withdrawal, and crafting scenarios. It
+omits the three pit recovery scenarios and scenarios that require a real model.
+
+Other options include `--port N`, `--out FILE` (default `results.json` in the run
+directory), `--account NAME` (offline username, default `LiveBot`), `--java PATH`,
+`--model NAME` and `--ollama URL` for model scenarios, and `--keep-server`. Use
+distinct ports and, if supplying `--out`, distinct output files for concurrent
+runs.
 
 Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks),
 which also copies the results back:
-`scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --all`.
+`scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --fast`.
 A full offline `--all` run took about 15 minutes in Boat. The three pit
 scenarios each wait out the bot's 180-second mining deadline. See the
 [observed results](DEVELOPMENT.md#validation).
+
+The [Bot acceptance workflow](../.github/workflows/bot-acceptance.yml) runs
+`--fast` weekly on a GitHub-hosted `ubuntu-24.04` runner. To run it on demand, select **Bot
+acceptance** in GitHub Actions and choose **Run workflow**. Download the
+`bot-acceptance` artifact to review `results.json` and `server.out`. The artifact
+is kept for seven days, including when a scenario fails and produces evidence.
 
 ## What a run does
 
