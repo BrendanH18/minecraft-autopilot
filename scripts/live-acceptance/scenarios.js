@@ -795,6 +795,56 @@ function craftRefusalScenario({ id, lane, title, count, cobblestone, message }) 
   };
 }
 
+function withdrawCraftPlan(args) {
+  const plan = withdrawPlan(args);
+  return {
+    ...plan,
+    fixture: [...plan.fixture, `setblock ${at(plan.origin, -2, STAND, 0)} minecraft:crafting_table`],
+    prepare: [...plan.prepare, `give ${args.bot} minecraft:stick 2`],
+  };
+}
+
+async function runWithdrawCraftModel(ctx, { points: { chest }, stock }) {
+  const readState = async () => ({
+    chest: itemTotals(await ctx.server.items(chest)),
+    inventory: itemTotals(await ctx.server.inventory()),
+  });
+  const before = await ctx.step('independent baseline (chest Items, Inventory)', readState);
+  ctx.note('baseline', before);
+  ctx.check(
+    'server chest and inventory match the fixture',
+    sameTotals(before.chest, stock) && sameTotals(before.inventory, { 'minecraft:stick': 2 }),
+    { before, stock },
+  );
+  const model = ctx.options.model;
+  const result = await ctx.step(`agent with real model ${model}`, () =>
+    ctx.agent({
+      goal: 'Withdraw exactly three cobblestone from the nearby chest. Use it and your two sticks at the nearby crafting table to craft one stone pickaxe. Then report done.',
+      criteria: { craft: { item: 'stone_pickaxe', count: 1 } },
+      model,
+    }),
+  );
+  ctx.note('agent', {
+    status: result.status,
+    steps: result.steps,
+    verification: result.verification ?? null,
+    actionCounts: result.actionCounts,
+  });
+  const after = await ctx.step('independent final state (chest Items, Inventory)', readState);
+  ctx.note('final', after);
+  ctx.check('agent reports criteria_met', result.status === 'criteria_met', { status: result.status });
+  const expectedChest = { ...stock, 'minecraft:cobblestone': stock['minecraft:cobblestone'] - 3 };
+  ctx.check('server chest lost exactly three cobblestone and nothing else', sameTotals(after.chest, expectedChest), {
+    expected: expectedChest,
+    actual: after.chest,
+  });
+  const expectedInventory = { 'minecraft:stone_pickaxe': 1 };
+  ctx.check('server inventory holds only the crafted stone pickaxe', sameTotals(after.inventory, expectedInventory), {
+    expected: expectedInventory,
+    actual: after.inventory,
+  });
+}
+
 /** Shared by the two return-home inspection scenarios. variant: preserve | blocked. */
 async function runInspectHome(ctx, plan, variant) {
   const { chest, start } = plan.points;
@@ -1130,6 +1180,21 @@ export const scenarios = [
     cobblestone: 35 * 64,
     message: 'Inventory full; crafted 0 of 4 oak_planks.',
   }),
+  {
+    id: 'withdraw-craft-model',
+    lane: 17,
+    requiresModel: true,
+    title: 'Real local model: withdraw cobblestone and craft a stone pickaxe',
+    release: [RELEASE.withdraw, RELEASE.craft],
+    plan: withdrawCraftPlan,
+    run: runWithdrawCraftModel,
+    actions: ['agent with the --model given (real Ollama): withdraw 3 cobblestone → craft 1 stone_pickaxe → done'],
+    expect: [
+      'agent reports criteria_met for craft stone_pickaxe:1',
+      'server chest loses exactly 3 cobblestone and retains every oak log',
+      'server inventory holds only 1 stone pickaxe',
+    ],
+  },
 ];
 
 export const scenarioIds = scenarios.map((scenario) => scenario.id);
