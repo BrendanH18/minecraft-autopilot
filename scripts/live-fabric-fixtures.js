@@ -91,15 +91,15 @@ function eatingPlan(player) {
 }
 
 function lowHealthPlan(player) {
+  const [poison, clearPoison] = vitalCommands(player, { effect: 'poison', amplifier: 1 });
   return {
     fixture: ['difficulty normal', 'gamerule naturalRegeneration false', 'forceload add 80 -16 128 16'],
     prepare: preparePlayer(player),
-    vitalTarget: { path: 'Health', effect: 'poison', amplifier: 1, target: 8 },
     verify: [...readCommands(player), `data get entity ${player} Health`],
     actions: [
-      'Check that the baseline Health is at most 8.',
       'mc-agent set-home',
       `In the fixture terminal, enter tp ${player} 120.5 ${STAND} 0.5`,
+      `Enter ${poison} in the fixture terminal. Read Health until it is at most 8, then enter ${clearPoison}.`,
       `mc-agent goto 128 ${STAND} 0`,
       'Check for a retreat toward the saved home. In separate runs, press F8 or run mc-agent stop during retreat.',
       'Check mc-agent job and repeat the position reads five seconds apart after interruption.',
@@ -124,10 +124,16 @@ function fullInventoryCollectionPlan(player) {
   const plan = takeoverPlan(player);
   return {
     ...plan,
-    prepare: [...plan.prepare, `give ${player} minecraft:iron_axe 1`, `give ${player} minecraft:cobblestone 2176`],
+    prepare: [
+      ...preparePlayer(player),
+      `effect give ${player} minecraft:mining_fatigue 900 1 true`,
+      `give ${player} minecraft:iron_axe 1`,
+      `give ${player} minecraft:cobblestone 2176`,
+    ],
     actions: [
-      'Through an MCP client, take control and start minecraft_action with {"type":"collect","block":"oak_log","count":8}.',
-      `During mining, enter give ${player} minecraft:dirt 64 in the fixture terminal to fill the final inventory slot.`,
+      'Call minecraft_take_control, then call minecraft_action with {"action":{"type":"collect","block":"oak_log","count":8}}.',
+      `While the job is running and before the first log drops, enter give ${player} minecraft:dirt 64 in the fixture terminal.`,
+      'Read the inventory and confirm it contains all 64 dirt items before evaluating the result.',
       'Check the inventory-full failure and bounded return, then verify that the original MCP session still accepts actions.',
     ],
   };

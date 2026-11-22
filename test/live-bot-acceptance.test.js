@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
@@ -28,6 +29,7 @@ import {
   serverProperties,
   ShutdownError,
   settle,
+  startServer,
 } from '../scripts/live-acceptance/processes.js';
 import {
   parseOptions,
@@ -173,7 +175,7 @@ test('commands are serialized, matched to their reply, and tolerate log noise', 
   assert.match(await clear, /^Removed 4 item/);
 });
 
-test('command errors and timeouts reject without blocking later commands', async () => {
+test('command errors leave the console usable, but a missing reply invalidates the queue', async () => {
   const { serverConsole, written } = fakeConsole();
   const bad = serverConsole.command('data get entity LiveBot Pos');
   await new Promise(setImmediate);
@@ -182,17 +184,36 @@ test('command errors and timeouts reject without blocking later commands', async
     bad,
     (error) => error instanceof CommandError && /failed: No entity was found/.test(error.message),
   );
-  await assert.rejects(
-    serverConsole.command('time set 1000', { timeoutMs: 20 }),
-    /Timed out after 20 ms waiting for a reply to "time set 1000"/,
-  );
   const next = serverConsole.command('weather clear');
   await new Promise(setImmediate);
   serverConsole.push(`${LOG_PREFIX}Set the weather to clear\n`);
   assert.equal(await next, 'Set the weather to clear');
+  const timeout = serverConsole.command('time set 1000', { timeoutMs: 20 });
+  const afterTimeout = serverConsole.command('time set 2000');
+  await Promise.all([
+    assert.rejects(timeout, /Timed out after 20 ms waiting for a reply to "time set 1000"/),
+    assert.rejects(afterTimeout, /ended before sending.*Timed out/),
+  ]);
   await assert.rejects(serverConsole.command('say hello'), /No reply pattern is known for "say"/);
   await assert.rejects(serverConsole.command('say a\nstop'), /Invalid console command/);
   assert.ok(!written.some((text) => text.startsWith('say') || text.includes('stop')));
+});
+
+test('aborting an issued command rejects promptly and drains its reply before writing cleanup', async () => {
+  const { serverConsole, written } = fakeConsole();
+  const controller = new AbortController();
+  const first = serverConsole.command('clear LiveBot', { signal: controller.signal });
+  await new Promise(setImmediate);
+  controller.abort(new Error('fixture interrupted'));
+  await assert.rejects(first, /fixture interrupted/);
+  const cleanup = serverConsole.command('clear LiveBot minecraft:dirt');
+  await new Promise(setImmediate);
+  assert.deepEqual(written, ['clear LiveBot\n']);
+  serverConsole.push(`${LOG_PREFIX}Removed 4 item(s) from player LiveBot\n`);
+  await new Promise(setImmediate);
+  assert.deepEqual(written, ['clear LiveBot\n', 'clear LiveBot minecraft:dirt\n']);
+  serverConsole.push(`${LOG_PREFIX}No items were found on player LiveBot\n`);
+  assert.match(await cleanup, /^No items/);
 });
 
 test('aborted and closed-console commands are never written', async () => {
@@ -201,10 +222,10 @@ test('aborted and closed-console commands are never written', async () => {
   const controller = new AbortController();
   const queued = serverConsole.command('weather clear', { signal: controller.signal });
   controller.abort(new Error('fixture interrupted'));
+  await assert.rejects(queued, /fixture interrupted/);
   await new Promise(setImmediate);
   serverConsole.push(`${LOG_PREFIX}Set the time to 1000\n`);
   await first;
-  await assert.rejects(queued, /fixture interrupted/);
   serverConsole.end('server stopped');
   await assert.rejects(serverConsole.command('weather clear'), /ended before sending.*server stopped/);
   assert.deepEqual(written, ['time set 1000\n']);
@@ -1114,6 +1135,41 @@ test('an interrupt during a scenario cleans up, skips the rest, and still stops 
   assert.equal(deps.calls.serverStops, 1);
 });
 
+test('an interrupt during retained-fixture cleanup still removes the fixture and fails the run', async () => {
+  const world = fakeWorld({ start: { x: 96.5, y: -60, z: 0.5 } });
+  const controller = new AbortController();
+  const write = world.console.write;
+  world.console.write = (text) => {
+    if (text === `clear ${BOT}\n`) controller.abort(new Error('Interrupted during cleanup.'));
+    write(text);
+  };
+  const scenario = {
+    id: 'stub-cleanup',
+    lane: 0,
+    title: 'stub',
+    release: ['x'],
+    actions: ['a'],
+    expect: ['e'],
+    plan: () => ({
+      points: { start: { x: 96.5, y: -60, z: 0.5 } },
+      fixture: ['fill 90 -60 -5 100 -55 5 stone'],
+      prepare: [`tp ${BOT} 96.5 -60 0.5`],
+      cleanup: [`clear ${BOT}`, 'fill 90 -60 -5 100 -55 5 air'],
+    }),
+    run: async (ctx) => ctx.check('passed before cleanup', true),
+  };
+  const deps = fakeDeps(world);
+  const results = await runAcceptance(
+    { ...parseOptions(['--all', '--accept-eula', '--keep-server']), scenarios: [scenario], out: '/fake/r.json' },
+    deps,
+    controller.signal,
+  );
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.match(results.error, /Interrupted during cleanup/);
+  assert.ok(world.written.includes('fill 90 -60 -5 100 -55 5 air'));
+  assert.equal(deps.calls.serverStops, 1);
+});
+
 test('scenario diagnostics cannot overwrite check outcomes and keep bounded strings as details', async () => {
   const original = byId('craft-no-table');
   const world = fakeWorld({ start: { x: laneOrigin(original.lane).x + 0.5, y: -60, z: 0.5 } });
@@ -1352,4 +1408,34 @@ test('shutdown escalation rejects if the child never exits', async () => {
   const child = { pid: 123, exitCode: null, signalCode: null };
   const exited = new Promise(() => {});
   await assert.rejects(settle(child, exited, [[() => {}, 1]]), /Process 123 did not exit/);
+});
+
+test('asynchronous server stdin errors fail pending commands and allow signal shutdown', async () => {
+  await mkdir(RUNTIME, { recursive: true });
+  const directory = await mkdtemp(join(RUNTIME, 'server-pipe-'));
+  try {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdin.writable = true;
+    child.stdin.write = () => {
+      setImmediate(() => {
+        child.stdin.writable = false;
+        child.stdin.emit('error', new Error('EPIPE'));
+      });
+    };
+    child.kill = (signal) => {
+      child.signalCode = signal;
+      child.emit('exit', null, signal);
+    };
+    const server = startServer({ directory, spawnImpl: () => child });
+    await assert.rejects(server.console.command('time set 1000'), /server stdin failed: EPIPE/);
+    await server.stop();
+    assert.equal(child.signalCode, 'SIGTERM');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

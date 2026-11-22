@@ -504,17 +504,23 @@ public final class AgentController {
 
     private void endEating() {
         if (!eating) return;
-        client.options.useKey.setPressed(false);
-        if (client.player != null
-                && client.player == controlledPlayer
-                && client.world == controlledWorld
-                && client.interactionManager != null) {
-            client.interactionManager.stopUsingItem(client.player);
-            if (previousSlot >= 0) client.player.getInventory().selectedSlot = previousSlot;
+        try {
+            client.options.useKey.setPressed(false);
+            if (client.player != null
+                    && client.player == controlledPlayer
+                    && client.world == controlledWorld
+                    && client.interactionManager != null) {
+                try {
+                    client.interactionManager.stopUsingItem(client.player);
+                } finally {
+                    if (previousSlot >= 0) client.player.getInventory().selectedSlot = previousSlot;
+                }
+            }
+        } finally {
+            eating = false;
+            foodSlot = -1;
+            previousSlot = -1;
         }
-        eating = false;
-        foodSlot = -1;
-        previousSlot = -1;
     }
 
     private void resumeMotion() {
@@ -601,12 +607,21 @@ public final class AgentController {
     }
 
     private void cancel(String message) {
-        stopMotion();
-        endEating();
-        storage.cancel();
-        resumeAfterEating = false;
-        recovering = false;
-        if (running()) finishWithoutStopping("cancelled", message);
+        try {
+            stopMotion();
+        } finally {
+            try {
+                endEating();
+            } finally {
+                try {
+                    storage.cancel();
+                } finally {
+                    resumeAfterEating = false;
+                    recovering = false;
+                    if (running()) finishWithoutStopping("cancelled", message);
+                }
+            }
+        }
     }
 
     boolean hasControl() {

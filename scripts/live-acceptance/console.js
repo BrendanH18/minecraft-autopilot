@@ -161,7 +161,7 @@ export class ServerConsole extends EventEmitter {
         (message) => expected.test(message) || COMMAND_ERRORS.some((pattern) => pattern.test(message)),
         {
           timeoutMs,
-          signal: signal ? AbortSignal.any([signal, writeFailed.signal]) : writeFailed.signal,
+          signal: writeFailed.signal,
           label: `a reply to "${text}"`,
         },
       );
@@ -172,13 +172,37 @@ export class ServerConsole extends EventEmitter {
         await reply.catch(() => {});
         throw error;
       }
-      const message = await reply;
+      let message;
+      try {
+        message = await reply;
+      } catch (error) {
+        // Without a reply we cannot attribute the next matching line to a new command.
+        this.end(error.message);
+        throw error;
+      }
       if (!expected.test(message)) throw new CommandError(`"${text}" failed: ${message}`);
       return message;
     };
     const result = this.queue.then(run, run);
     this.queue = result.catch(() => {});
-    return result;
+    if (!signal) return result;
+    // Abort the caller immediately, but keep the console serialized until the issued reply is drained.
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      const clear = () => signal.removeEventListener('abort', abort);
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+      result.then(
+        (value) => {
+          clear();
+          resolve(value);
+        },
+        (error) => {
+          clear();
+          reject(error);
+        },
+      );
+    });
   }
 
   /** `data get block X Y Z PATH`; a missing Items path is an empty container. */

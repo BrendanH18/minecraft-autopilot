@@ -380,14 +380,16 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         await ctx.bridge.emergencyStop();
       });
     await clean('close bridge connections', () => ctx.close());
-    const cleanup =
-      options.keepServer && !signal.aborted
-        ? plan.cleanup.filter((command) => /^(?:clear|effect) /.test(command))
-        : plan.cleanup;
-    for (const command of cleanup)
-      await clean(command, async () => {
+    const runCleanup = (command) =>
+      clean(command, async () => {
         await serverConsole.command(command);
       });
+    const keepFixture = options.keepServer && !signal.aborted;
+    const deferred = [];
+    for (const command of plan.cleanup) {
+      if (keepFixture && !/^(?:clear|effect) /.test(command)) deferred.push(command);
+      else await runCleanup(command);
+    }
     if (bot) {
       await clean('stop bot process', async () => {
         const wait = new AbortController();
@@ -405,6 +407,11 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
           wait.abort();
         }
       });
+    }
+    if (signal.aborted) {
+      for (const command of deferred) await runCleanup(command);
+      record.status = 'fail';
+      record.reason = `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
     }
     const failures = record.cleanup.filter((entry) => !entry.ok);
     if (failures.length) {
@@ -510,6 +517,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     error: null,
   };
   let server = null;
+  let inspecting = false;
   try {
     await deps.prepareServerDirectory({
       directory: where.server,
@@ -529,10 +537,14 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       const record = await runScenario(scenario, { options, deps, serverConsole: server.console, signal, where });
       results.scenarios.push(record);
       deps.warn(`[${scenario.id}] ${record.status}${record.reason ? `: ${record.reason}` : ''}`);
+      signal.throwIfAborted();
       if (record.cleanup.some(({ command, ok }) => command === 'stop bot process' && !ok))
         throw new Error(`Could not stop the bot after ${scenario.id}. Remaining scenarios were skipped.`);
     }
-    if (options.keepServer && !signal.aborted) await deps.keepAlive(server, signal);
+    if (options.keepServer) {
+      inspecting = true;
+      await deps.keepAlive(server, signal);
+    }
   } catch (error) {
     results.error = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     const remaining = options.scenarios.slice(results.scenarios.length);
@@ -542,6 +554,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       await server.stop().catch((error) => {
         results.error ??= `Server stop failed: ${error.message}`;
       });
+    if (signal.aborted && !inspecting) results.error ??= `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
     results.finishedAt = new Date(deps.now()).toISOString();
     results.summary = summarize(results);
     await deps.writeResults(where.out, results);

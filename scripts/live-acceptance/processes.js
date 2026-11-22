@@ -177,9 +177,11 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
   const log = createWriteStream(join(directory, 'server.out'), { flags: 'a' });
   const serverConsole = new ServerConsole({
     write: (text) => {
-      if (child.stdin.writable) child.stdin.write(text);
+      if (child.stdin.writable && !child.stdin.destroyed) child.stdin.write(text);
+      else serverConsole.end('server stdin is closed.');
     },
   });
+  child.stdin.on('error', (error) => serverConsole.end(`server stdin failed: ${error.message}`));
   const exited = new Promise((resolve) =>
     child.once('exit', (code, signal) => {
       serverConsole.end(`server exited (${signal || code})`);
@@ -198,11 +200,23 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
     child,
     exited,
     async stop() {
-      await settle(child, exited, [
-        [() => serverConsole.write('stop\n'), 60_000],
+      const steps = [
         [() => child.kill('SIGTERM'), 10_000],
         [() => child.kill('SIGKILL'), 5_000],
-      ]);
+      ];
+      if (child.stdin.writable && !child.stdin.destroyed) {
+        steps.unshift([
+          () => {
+            try {
+              serverConsole.write('stop\n');
+            } catch {
+              child.kill('SIGTERM');
+            }
+          },
+          60_000,
+        ]);
+      }
+      await settle(child, exited, steps);
     },
   };
 }

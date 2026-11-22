@@ -179,7 +179,7 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
 | `withdraw`, `withdraw-omitted`, `withdraw-no-candidate`, `withdraw-short-stock`, `withdraw-full-inventory` | The bot runner's stocks, distances, and player inventories, with independent chest and player reads. |
 | `craft-bootstrap`, `craft-missing-ingredients`, `craft-full-inventory` | Start with the bot runner's supplies. Bootstrap also reads the possible crafting-table placement blocks before and after crafting. |
 | `eat-interruption` | Bread and measured hunger reduced to about ten, with food level and inventory reads for F8, menu, or stop during the eating animation. |
-| `low-health-retreat` | Eight health and disabled regeneration, with steps to save home, move away, and observe or interrupt a retreat. |
+| `low-health-retreat` | Disabled regeneration, with steps to save home while healthy, move away, and apply poison before observing or interrupting a retreat. |
 | `collection-return` | Two sand blocks and a shovel for a partial collection and interruption on the way back. |
 | `collect-full-inventory` | An axe, 34 stacks, and enough time to fill the last slot during mining and verify the bounded return. |
 | `withdraw-multi-stack` | A double chest stocked with three stacks and independent reads for both halves after interruption. |

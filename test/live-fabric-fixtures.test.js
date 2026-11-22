@@ -114,9 +114,11 @@ test('the eating and retreat fixtures expose independent vitals and use repeatab
   assert.ok(eating.verify.includes(`data get entity ${player} foodLevel`));
   const retreat = fixturePlan('low-health-retreat', player);
   assert.ok(retreat.fixture.includes('gamerule naturalRegeneration false'));
-  assert.deepEqual(retreat.vitalTarget, { path: 'Health', effect: 'poison', amplifier: 1, target: 8 });
+  assert.equal(retreat.vitalTarget, undefined);
   assert.ok(retreat.verify.includes(`data get entity ${player} Health`));
-  assert.ok(retreat.actions.includes('mc-agent set-home'));
+  assert.equal(retreat.actions[0], 'mc-agent set-home');
+  assert.match(retreat.actions[1], /enter tp/);
+  assert.match(retreat.actions[2], /poison.*Health.*at most 8.*clear.*poison/);
 });
 
 test('collection fixtures arrange a partial return and leave exactly one main inventory slot before interruption', () => {
@@ -127,6 +129,9 @@ test('collection fixtures arrange a partial return and leave exactly one main in
   const full = fixturePlan('collect-full-inventory', player);
   assert.ok(full.prepare.includes(`give ${player} minecraft:iron_axe 1`));
   assert.ok(full.prepare.includes(`give ${player} minecraft:cobblestone 2176`));
+  assert.ok(full.prepare.includes(`effect give ${player} minecraft:mining_fatigue 900 1 true`));
+  const payload = full.actions[0].slice(full.actions[0].indexOf('{'), -1);
+  assert.deepEqual(JSON.parse(payload), { action: { type: 'collect', block: 'oak_log', count: 8 } });
   assert.ok(full.actions.some((action) => action.includes(`give ${player} minecraft:dirt 64`)));
 });
 

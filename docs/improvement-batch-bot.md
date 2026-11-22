@@ -3,8 +3,8 @@
 ## Acceptance runner
 
 1. Export a complete selected fixture plan with `--dry-run --json` for tooling that prepares or audits live runs.
-2. Prevent queued server console writes once the command has been aborted or the console has ended.
-3. Cancel the pending reply listener immediately when a server console write throws, leaving the queue ready for the next command.
+2. Prevent queued console writes after cancellation and drain the replies of commands already sent before writing cleanup commands.
+3. Handle synchronous and asynchronous server stdin errors so the runner can finish shutdown and record results.
 4. Preserve each acceptance check's name and verdict when its diagnostic data uses the same fields.
 5. Store a large check diagnostic as one bounded string so the artifact remains readable.
 6. Fail scenarios whose cleanup fails and include the specific failed cleanup steps in the result.
