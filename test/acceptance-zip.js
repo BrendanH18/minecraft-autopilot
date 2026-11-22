@@ -1,4 +1,7 @@
 import { crc32 } from 'node:zlib';
+import { spawnSync } from 'node:child_process';
+
+export const archiveTest = { skip: spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status !== 0 && 'requires unzip' };
 
 // Write a ZIP with stored entries so the fixture needs only the reader used by acceptance.
 export function zip(entries) {

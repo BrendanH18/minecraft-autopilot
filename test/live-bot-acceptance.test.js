@@ -29,6 +29,7 @@ import {
   serverProperties,
   ShutdownError,
   settle,
+  startBot,
   startServer,
 } from '../scripts/live-acceptance/processes.js';
 import {
@@ -1251,6 +1252,38 @@ test('a bot that never became ready or exited also prevents the next fixture fro
   assert.equal(results.scenarios[0].status, 'fail');
   assert.equal(results.scenarios[1].status, 'skipped');
   assert.match(results.error, /Could not stop the bot/);
+});
+
+test('a startup timeout records the last available bot output', async (t) => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  const home = await createRunDirectory(RUNTIME);
+  t.after(() => rm(home, { recursive: true, force: true }));
+  deps.startBot = (options) =>
+    startBot({
+      ...options,
+      home,
+      timeoutMs: 100,
+      connect: async () => {
+        throw new Error('bridge unavailable');
+      },
+      spawnImpl: () => {
+        const child = new EventEmitter();
+        child.exitCode = null;
+        child.signalCode = null;
+        child.stdout = new EventEmitter();
+        child.kill = (signal) => {
+          child.signalCode = signal;
+          child.emit('exit', null, signal);
+        };
+        setImmediate(() => child.stdout.emit('data', 'bot startup diagnostic\n'));
+        return child;
+      },
+    });
+  const options = parseOptions(['--scenario', 'craft-rounds-up', '--accept-eula']);
+  const results = await runAcceptance(options, deps);
+  assert.match(results.scenarios[0].reason, /bridge was not ready/);
+  assert.equal(results.scenarios[0].observations.botOutput, 'bot startup diagnostic');
 });
 
 test('overlapping runs keep their server, bot state, and review evidence in separate directories', async (t) => {

@@ -282,30 +282,36 @@ export async function startBot({
   };
   const deadline = Date.now() + timeoutMs;
   let lastError;
-  while (Date.now() < deadline) {
-    if (signal?.aborted) {
-      await bot.stop();
-      signal.throwIfAborted();
-    }
-    if (child.exitCode !== null || child.signalCode !== null)
-      throw new Error(`The bot exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
-    try {
-      const adapter = await connect(bridge);
-      try {
-        const state = await adapter.observe();
-        if (state.connected && state.player) return bot;
-      } finally {
-        await adapter.close();
+  try {
+    while (Date.now() < deadline) {
+      if (signal?.aborted) {
+        await bot.stop();
+        signal.throwIfAborted();
       }
-    } catch (error) {
-      lastError = error;
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`The bot exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
+      try {
+        const adapter = await connect(bridge);
+        try {
+          const state = await adapter.observe();
+          if (state.connected && state.player) return bot;
+        } finally {
+          await adapter.close();
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      await delay(500);
     }
-    await delay(500);
+    await bot.stop();
+    throw new Error(
+      `The bot bridge was not ready after ${timeoutMs / 1000} s: ${lastError?.message ?? 'no player observed'}.`,
+    );
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+      botOutput: output.join('').trim().slice(-3000),
+    });
   }
-  await bot.stop();
-  throw new Error(
-    `The bot bridge was not ready after ${timeoutMs / 1000} s: ${lastError?.message ?? 'no player observed'}.`,
-  );
 }
 
 /** Runs one repo CLI command (for example `stop`) against the bot's bridge. */

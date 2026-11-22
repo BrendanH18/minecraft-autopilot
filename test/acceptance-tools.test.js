@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
-import { zip } from './acceptance-zip.js';
+import { archiveTest, zip } from './acceptance-zip.js';
 import { projectRoot } from '../src/config.js';
 import { modBundleFiles } from '../src/bundle.js';
 import { ACCEPTANCE_GATES, OPEN_GATES, findGate, requiredBackends } from '../src/acceptance-gates.js';
@@ -159,7 +159,15 @@ test('list and show expose open and closed gates through Commander', async (t) =
   await assert.rejects(run('show', 'missing-gate'), /Unknown acceptance gate/);
 });
 
-test('provenance records nulls and warnings for missing dist, and verifies BUILD.json and the archive', async (t) => {
+test('provenance verifies the archive manifest with unzip', archiveTest, async (t) => {
+  const root = await distRoot(t);
+  const verified = await collectProvenance({ root, git: cleanGit(), node: 'v22.12.0' });
+  assert.deepEqual(verified.warnings, []);
+  assert.equal(verified.provenance.archive.manifestMatches, true);
+  assert.deepEqual(provenanceProblems({ provenance: verified.provenance }), []);
+});
+
+test('provenance records missing dist and checksum information independently of unzip', async (t) => {
   const empty = await testDirectory(t, 'acceptance-empty-');
   const missing = await collectProvenance({ root: empty, git: cleanGit(), node: 'v22.12.0' });
   assert.equal(missing.provenance.build, null);
@@ -170,12 +178,9 @@ test('provenance records nulls and warnings for missing dist, and verifies BUILD
   );
   const root = await distRoot(t);
   const verified = await collectProvenance({ root, git: cleanGit(), node: 'v22.12.0' });
-  assert.deepEqual(verified.warnings, []);
   const archive = await readFile(join(root, 'dist', ARCHIVE_NAME));
   assert.equal(verified.provenance.archive.sha256, createHash('sha256').update(archive).digest('hex'));
   assert.equal(verified.provenance.archive.matches, true);
-  assert.equal(verified.provenance.archive.manifestMatches, true);
-  assert.deepEqual(provenanceProblems({ provenance: verified.provenance }), []);
   const mismatched = await collectProvenance({
     root: await distRoot(t, { sums: 'other', build: { sourceCommit: 'f'.repeat(40), sourceModified: true } }),
     git: cleanGit(COMMIT, ' M src/cli.js\n'),
@@ -213,7 +218,7 @@ test('provenance records nulls and warnings for missing dist, and verifies BUILD
   );
 });
 
-test('start, step, finish, sessions, status, and report work end to end with private files', async (t) => {
+test('start, step, finish, sessions, status, and report work end to end with private files', archiveTest, async (t) => {
   const directory = join(await testDirectory(t, 'acceptance-'), 'data');
   const { run, output } = cli({ directory, root: await distRoot(t), git: cleanGit(), now: clock(), node: 'v22.12.0' });
   const started = await run(
@@ -281,7 +286,7 @@ test('start, step, finish, sessions, status, and report work end to end with pri
   assert.equal(saved[0].finished.result, 'pass');
 });
 
-test('a mismatched embedded build manifest makes bot evidence ineligible', async (t) => {
+test('a mismatched embedded build manifest makes bot evidence ineligible', archiveTest, async (t) => {
   const archive = zip([['BUILD.json', JSON.stringify({ sourceCommit: 'b'.repeat(40), sourceModified: false })]]);
   const { provenance, warnings } = await collectProvenance({ root: await distRoot(t, { archive }), git: cleanGit() });
   assert.equal(provenance.archive.matches, true);

@@ -364,6 +364,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   } catch (error) {
     record.status = 'fail';
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
+    if (error.botOutput) ctx.note('botOutput', error.botOutput);
     if (error instanceof ShutdownError)
       record.cleanup.push({ command: 'stop bot process', ok: false, error: error.message });
   } finally {

@@ -2,17 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
-import { zip } from './acceptance-zip.js';
+import { archiveTest, zip } from './acceptance-zip.js';
 import { modBundleFiles } from '../src/bundle.js';
 import { ARCHIVE_NAME, acceptanceFile, registerAcceptanceTools } from '../src/acceptance-tools.js';
 
 const commit = 'a'.repeat(40);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const archiveTest = { skip: spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status !== 0 && 'requires unzip' };
 
 async function fixture(t, { archiveCommit = commit } = {}) {
   const root = await testDirectory(t, 'acceptance-mods-');
@@ -115,7 +113,7 @@ test('legacy records without mod hashes still load and the Fabric gate explains 
   const onDisk = JSON.parse(await readFile(acceptanceFile(directory), 'utf8'));
   assert.equal(onDisk.version, 1);
   assert.equal(onDisk.sessions[0].provenance.mods, undefined);
-  // A session written by older software also omitted the new warning.
+  delete onDisk.sessions[0].provenance.archive.manifestMatches;
   onDisk.sessions[0].warnings = [];
   await writeFile(acceptanceFile(directory), JSON.stringify(onDisk));
   const status = await run('status');
