@@ -80,8 +80,10 @@ test('review-bot rejects dirty, different-commit and malformed files without cou
     run(5, [{ ...passing[0], checks: [{ pass: false }] }]),
     run(6, [modelPass], { model: 'local-model' }),
     run(7, [modelPass], { model: 'different-model' }),
+    { ...run(8, passing), minecraft: {} },
+    run(9, [...passing, { id: 'withdraww', status: 'skipped' }]),
   ]);
-  await assert.rejects(parse, /7 bot result file\(s\) rejected/);
+  await assert.rejects(parse, /9 bot result file\(s\) rejected/);
   const [report] = reports;
   assert.match(report.rejected[0].reason, /clean worktree/);
   assert.match(report.rejected[1].reason, /does not match/);
@@ -89,6 +91,12 @@ test('review-bot rejects dirty, different-commit and malformed files without cou
   assert.match(report.rejected[4].reason, /at least one check/);
   assert.match(report.rejected[5].reason, /all checks must pass/);
   assert.match(report.rejected[6].reason, /did not record the configured real model/);
+  assert.match(report.rejected[7].reason, /serverLog/);
+  assert.match(report.rejected[8].reason, /Unknown bot scenario: withdraww/);
+  assert.deepEqual(
+    report.runs.map(({ file }) => file),
+    [files[6]],
+  );
   const gate = report.gates.find(({ gate }) => gate === 'bot-withdraw-craft');
   assert.equal(gate.offline.find(({ id }) => id === 'withdraw').status, 'missing');
   assert.equal(gate.realModel[0].status, 'pass');

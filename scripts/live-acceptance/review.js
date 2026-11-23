@@ -8,13 +8,13 @@ const gateGroups = [
   ['collect-and-store-verification', [RELEASE.store]],
   ['bot-withdraw-craft', [RELEASE.withdraw, RELEASE.craft]],
 ];
-const modelScenarios = new Set(scenarios.filter(({ requiresModel }) => requiresModel).map(({ id }) => id));
+const scenarioById = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
 
 const resultSchema = z.object({
   schema: z.literal('minecraft-agent/live-bot-acceptance/1'),
   environment: z.object({ commit: z.string().nullable(), dirty: z.boolean().nullable() }),
   finishedAt: z.iso.datetime(),
-  minecraft: z.object({ serverLog: z.string().optional() }),
+  minecraft: z.object({ serverLog: z.string().trim().min(1) }),
   options: z.object({ model: z.string().nullish() }),
   scenarios: z.array(
     z.object({
@@ -47,13 +47,15 @@ export async function reviewBotEvidence(files, commit) {
 
       const { finishedAt, error, minecraft, options } = result;
       for (const { id, status, observations, checks } of result.scenarios) {
+        const scenario = scenarioById.get(id);
+        if (!scenario) throw new Error(`Unknown bot scenario: ${id}.`);
         if (status !== 'pass') continue;
         if (!checks?.length || checks.some(({ pass }) => !pass))
           throw new Error(`Passing scenario ${id} needs at least one check and all checks must pass.`);
-        if (modelScenarios.has(id) && (!options.model?.trim() || observations?.model !== options.model))
+        if (scenario.requiresModel && (!options.model?.trim() || observations?.model !== options.model))
           throw new Error(`Passing scenario ${id} did not record the configured real model.`);
       }
-      runs.push({ file, finishedAt, serverLog: minecraft.serverLog ?? null, error: error ?? null });
+      runs.push({ file, finishedAt, serverLog: minecraft.serverLog, error: error ?? null });
       for (const { id, status, reason, observations } of result.scenarios) {
         const outcomes = status === 'skipped' ? latestSkip : latestAttempt;
         const previous = outcomes.get(id);
