@@ -186,10 +186,11 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
   const exited = new Promise((resolve) =>
     child.once('exit', (code, signal) => {
       serverConsole.end(`server exited (${signal || code})`);
-      log.end();
       resolve({ code, signal });
     }),
   );
+  // The process can exit before stdout and stderr have delivered their final chunks.
+  child.once('close', () => log.end());
   child.once('error', (error) => serverConsole.end(`server failed to start: ${error.message}`));
   for (const stream of [child.stdout, child.stderr])
     stream.on('data', (chunk) => {

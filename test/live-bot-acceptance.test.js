@@ -1498,11 +1498,16 @@ test('asynchronous server stdin errors fail pending commands and allow signal sh
     child.kill = (signal) => {
       child.signalCode = signal;
       child.emit('exit', null, signal);
+      setImmediate(() => {
+        child.stdout.emit('data', 'last server output after exit\n');
+        child.emit('close', null, signal);
+      });
     };
     const server = startServer({ directory, spawnImpl: () => child });
     await assert.rejects(server.console.command('time set 1000'), /server stdin failed: EPIPE/);
     await server.stop();
     assert.equal(child.signalCode, 'SIGTERM');
+    assert.equal(await readFile(join(directory, 'server.out'), 'utf8'), 'last server output after exit\n');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
