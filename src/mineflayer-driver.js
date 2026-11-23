@@ -749,6 +749,7 @@ export class MineflayerDriver {
         const failed = new Set();
         // Blocks whose path took too long to plan; retried with the full planning budget once quicker ones run out.
         const slow = new Set();
+        const exhausted = new Error('No reachable matching blocks remain in loaded chunks.');
         let collectionError;
         // Only the mining phase expires here. The session signal still cancels both mining and recovery immediately.
         const miningDeadline = AbortSignal.timeout(collectionTimeoutMs);
@@ -762,7 +763,7 @@ export class MineflayerDriver {
             positions.sort((a, b) => a.distanceTo(this.bot.entity.position) - b.distanceTo(this.bot.entity.position));
             const candidates = positions.filter((pos) => !failed.has(pos.toString()));
             const position = candidates.find((pos) => !slow.has(pos.toString())) || candidates[0];
-            if (!position) throw new Error('No reachable matching blocks remain in loaded chunks.');
+            if (!position) throw exhausted;
             const patient = slow.has(position.toString());
             // A single block can stall the pathfinder for a minute or more; skip it and try another.
             const step = AbortSignal.any([miningSignal, AbortSignal.timeout(20_000)]);
@@ -802,7 +803,8 @@ export class MineflayerDriver {
             `${collectionError ? 'Collection failed' : 'Collected requested items'}; returning to where collection started.`,
           );
         const returned = await this.returnFromCollection(start, signal);
-        if (collectionError)
+        // The server may credit the last mined drop while the bot is returning.
+        if (collectionError && (collectionError !== exhausted || count() < target))
           throw new Error(
             `${collectionError.message} Inventory: ${count()}/${target}. ${returned ? 'Returned to the starting point.' : 'Could not return to the starting point.'}`,
           );

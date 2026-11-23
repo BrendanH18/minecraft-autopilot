@@ -12,6 +12,7 @@ The November audit identified recovery and verification gaps. The following sour
 
 - Fabric backs off automatic eating for ten seconds after failed consumption. Action and retreat deadlines are checked before eating, so failed food use cannot indefinitely defer recovery.
 - Bot mining has a separate deadline and up to sixty seconds for a return attempt. Takeover, cancellation, expiry, death, and survival interruption still stop collection without starting recovery.
+- If the bot runs out of matching blocks, a pickup during the return can still satisfy the collection quota. A failed return remains a failed action.
 - Combined collection/deposit criteria for the same item check the net increase across inventory and storage, so storing the collected quota does not require gathering a duplicate quota.
 - Deposit verification never uses cached contents for success. On every backend, each container's baseline is the live contents the task's first deposit read there, and the final check reopens only the task's containers. Failed inspection cannot pass using cached contents. Ordinary observations remain last-observed snapshots.
 - Fabric timing policy is extracted into a helper tested without Minecraft. Controller/game integration still needs live tests; helper tests do not establish full backend parity.
