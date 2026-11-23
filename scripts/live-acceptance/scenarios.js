@@ -151,7 +151,8 @@ function platformPlan({ bot, lane }) {
 function cobblestonePlan({ bot, lane }) {
   const o = laneOrigin(lane);
   const start = center(point(o, 0, STAND, 0));
-  const cobblestoneRow = `${at(o, -4, STAND, -1)} ${at(o, -4, STAND, 2)}`;
+  // Drops can land out of pickup range; keep a reserve so this gate can also exercise navigation.
+  const cobblestoneRow = `${at(o, -4, STAND, -1)} ${at(o, -4, STAND, 6)}`;
   const husks = [
     { tag: 'bot_fixture_near', z: 9 },
     { tag: 'bot_fixture_far', z: 22 },
@@ -393,9 +394,10 @@ async function runCobblestone(ctx, plan) {
     itemTotals(await ctx.server.inventory()),
   );
   const observedInventory = bridgeItemTotals((await ctx.bridge.observe()).inventory);
+  const held = inventory[COBBLESTONE] ?? 0;
   ctx.check(
-    'collection completes and server inventory contains four cobblestone and the pickaxe',
-    collected.status === 'completed' && sameTotals(inventory, { [PICKAXE]: 1, [COBBLESTONE]: 4 }),
+    'collection completes and server inventory contains at least four cobblestone and the pickaxe',
+    collected.status === 'completed' && held >= 4 && sameTotals(inventory, { [PICKAXE]: 1, [COBBLESTONE]: held }),
     { job: collected, inventory },
   );
   ctx.check('bridge inventory agrees with the server', sameTotals(inventory, observedInventory), {
@@ -1639,7 +1641,7 @@ export const scenarios = [
     ],
     expect: [
       'bridge shows the nearby husk and omits the one beyond 16 blocks',
-      'server inventory holds four cobblestone and the pickaxe',
+      'server inventory holds at least four cobblestone and the pickaxe',
       'the same goto is cancelled because the dimension changed; bridge is manual and settled',
       'server and bridge show a stationary player on the Nether landing pad',
     ],
