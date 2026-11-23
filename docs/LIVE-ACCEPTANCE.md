@@ -47,7 +47,11 @@ scenarios each wait out the bot's 180-second mining deadline. See the
 [observed results](DEVELOPMENT.md#validation).
 
 The [Bot acceptance workflow](../.github/workflows/bot-acceptance.yml) runs
-`--fast` weekly on a GitHub-hosted `ubuntu-24.04` runner. To run it on demand, select **Bot
+`--fast` weekly on a GitHub-hosted `ubuntu-24.04` runner, and on pull requests
+that change `src/`, the scenario runner (`scripts/live-bot-acceptance.js`,
+`scripts/live-acceptance/`), the server jar setup (including the `mod/` Gradle files), the npm dependencies or the
+workflow itself. `--fast` leaves out the three long-running `recovery-*`
+scenarios. To run it on demand, select **Bot
 acceptance** in GitHub Actions and choose **Run workflow**. Download the
 `bot-acceptance` artifact to review `results.json` and `server.out`. The artifact
 is kept for seven days, including when a scenario fails and produces evidence.

@@ -4,10 +4,22 @@ on:
   schedule:
     - cron: '43 6 * * 1'
   workflow_dispatch:
-  # Exercise workflow changes before merging.
+  # Run on pull requests that change the bot, the scenario runner, the server
+  # jar setup or this workflow. The bot process runs src/cli.js, which reaches
+  # nearly all of src/.
   pull_request:
     paths:
       - '.github/workflows/bot-acceptance.yml'
+      - 'src/**'
+      - 'scripts/live-bot-acceptance.js'
+      - 'scripts/live-acceptance/**'
+      - 'scripts/setup-mod.js'
+      - 'scripts/gradle.js'
+      - 'mod/*.gradle'
+      - 'mod/gradle.properties'
+      - 'mod/gradle/wrapper/gradle-wrapper.properties'
+      - 'package.json'
+      - 'package-lock.json'
 
 permissions:
   contents: read

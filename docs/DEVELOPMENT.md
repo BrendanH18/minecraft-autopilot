@@ -61,7 +61,10 @@ list with no command is for reproducing a CI failure. See
 [AGENTS.md](../AGENTS.md) for the cheap choices on each side.
 
 Each worktree gets one long-lived sandbox, so a series of checks spends one of
-the account's daily sandbox starts instead of one per check. The first check
+the account's daily sandbox starts instead of one per check (owner decision,
+2026-11-21). The account's daily starts (see `boat limits`) are shared by all
+the owner's projects, and a `boat run` per check would spend one start and
+reinstall everything each time. The first check
 creates it from the saved snapshot `minecraft-autopilot-warm`, or from a bare
 machine when there is none, names it
 `minecraft-autopilot-check-<worktree>-<path hash>-<key>` (the account is shared by every
