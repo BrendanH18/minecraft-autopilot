@@ -316,6 +316,7 @@ export const ACCEPTANCE_GATES = deep([
       PACKAGED,
       'One session per backend on the same candidate: the packaged Fabric mod, and the bot.',
       'A pickaxe, a nearby hostile mob, and a way to change dimension.',
+      'For the bot, run `npm run acceptance:bot -- --accept-eula --scenario cobblestone-hostiles-dimension`.',
     ],
     steps: [
       'Collect cobblestone with a pickaxe.',

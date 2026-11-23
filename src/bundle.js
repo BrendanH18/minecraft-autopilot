@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { readFile, readdir, lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
+export const ARCHIVE_NAME = 'minecraft-agent-0.1.0.zip';
 export const modBundleFiles = [
   { name: 'minecraft-agent-0.1.0.jar' },
   {
@@ -14,12 +17,15 @@ export const modBundleFiles = [
   },
 ];
 
+const execFileAsync = promisify(execFile);
+
+async function regularFile(path) {
+  if (!(await lstat(path)).isFile()) throw new Error(`Bundle entry must be a regular file: ${path}`);
+  return readFile(path);
+}
+
 /** Validate a complete bundle and pinned third-party bytes before distributing it. */
 export async function verifyModBundle(directory, expectedFiles = modBundleFiles) {
-  const regularFile = async (path) => {
-    if (!(await lstat(path)).isFile()) throw new Error(`Bundle entry must be a regular file: ${path}`);
-    return readFile(path);
-  };
   for (const name of ['INSTALL.md', 'LICENSE']) {
     if (!(await regularFile(join(directory, name))).toString('utf8').trim())
       throw new Error(`Bundle ${name} is empty.`);
@@ -46,4 +52,40 @@ export async function verifyModBundle(directory, expectedFiles = modBundleFiles)
     if (file.sha256 && digest !== file.sha256) throw new Error(`Pinned dependency checksum mismatch: ${file.name}`);
   }
   return { verified: true, files: names };
+}
+
+/** Check that the published ZIP contains exactly the files verified in the loose bundle. */
+export async function verifyModArchive(directory, expectedFiles = modBundleFiles) {
+  const bundle = await verifyModBundle(directory, expectedFiles);
+  const archivePath = resolve(directory, ARCHIVE_NAME);
+  const checksum = async () =>
+    createHash('sha256')
+      .update(await regularFile(archivePath))
+      .digest('hex');
+  const archiveSha256 = await checksum();
+  const recorded = (await regularFile(join(directory, 'ARCHIVE_SHA256SUMS'))).toString('utf8').trim();
+  if (recorded !== `${archiveSha256}  ${ARCHIVE_NAME}`) throw new Error('Archive checksum mismatch.');
+
+  const { stdout: listing } = await execFileAsync('unzip', ['-Z1', archivePath], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024,
+    timeout: 10_000,
+  });
+  const names = ['BUILD.json', 'INSTALL.md', 'LICENSE', 'SHA256SUMS', ...bundle.files.map((name) => `mods/${name}`)];
+  const entries = listing.trimEnd().split('\n');
+  const expected = new Set(entries.includes('mods/') ? [...names, 'mods/'] : names);
+  if (entries.length !== expected.size || !entries.every((name) => expected.delete(name))) {
+    throw new Error('Archive must contain exactly the expected bundle entries.');
+  }
+  for (const name of names) {
+    const loose = await regularFile(join(directory, name));
+    const { stdout: packed } = await execFileAsync('unzip', ['-p', archivePath, name], {
+      encoding: 'buffer',
+      maxBuffer: Math.max(loose.length, 64 * 1024),
+      timeout: 10_000,
+    });
+    if (!packed.equals(loose)) throw new Error(`Archive entry differs from loose bundle: ${name}`);
+  }
+  if ((await checksum()) !== archiveSha256) throw new Error('Archive changed during verification.');
+  return { ...bundle, archive: ARCHIVE_NAME, archiveSha256 };
 }

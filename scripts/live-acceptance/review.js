@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { MINECRAFT_VERSION } from './processes.js';
 import { RELEASE, scenarios } from './scenarios.js';
 
 const gateGroups = [
@@ -7,14 +9,21 @@ const gateGroups = [
   ['bot-mining-timeout', [RELEASE.pit]],
   ['collect-and-store-verification', [RELEASE.store]],
   ['bot-withdraw-craft', [RELEASE.withdraw, RELEASE.craft]],
+  ['cobblestone-hostiles-dimension', [RELEASE.cobblestone]],
 ];
 const scenarioById = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
+const sha256 = /^[0-9a-f]{64}$/;
+const sourceSchema = z.object({ commit: z.string().nullable(), dirty: z.boolean().nullable() });
 
 const resultSchema = z.object({
   schema: z.literal('minecraft-agent/live-bot-acceptance/1'),
-  environment: z.object({ commit: z.string().nullable(), dirty: z.boolean().nullable() }),
+  environment: sourceSchema.extend({ sourceAtFinish: sourceSchema.optional() }),
   finishedAt: z.iso.datetime(),
-  minecraft: z.object({ serverLog: z.string().trim().min(1) }),
+  minecraft: z.object({
+    serverLog: z.string().trim().min(1),
+    serverVersion: z.string().nullish(),
+    jarSha256: z.string().nullish(),
+  }),
   options: z.object({ model: z.string().nullish() }),
   scenarios: z.array(
     z.object({
@@ -28,12 +37,29 @@ const resultSchema = z.object({
   error: z.string().nullish(),
 });
 
+async function findServerLog(file, recorded) {
+  const candidates = [resolve(recorded)];
+  // The workflow and Boat both preserve this layout when copying evidence from the runner.
+  if (basename(file) === 'results.json') candidates.unshift(resolve(dirname(file), 'server/server.out'));
+  for (const path of candidates) {
+    if ((await stat(path).catch(() => null))?.isFile()) return path;
+  }
+  return null;
+}
+
+function countOutcomes(outcomes) {
+  const counts = { pass: 0, fail: 0, skipped: 0, missing: 0 };
+  for (const { status } of outcomes) counts[status]++;
+  return counts;
+}
+
 /** Review candidate provenance and scenario coverage without changing acceptance sessions. */
 export async function reviewBotEvidence(files, commit) {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)) throw new Error('Use a full git commit SHA with --commit.');
 
   const runs = [];
   const rejected = [];
+  const serverJarSha256s = new Set();
   const latestAttempt = new Map();
   const latestSkip = new Map();
   for (const file of files) {
@@ -42,10 +68,20 @@ export async function reviewBotEvidence(files, commit) {
       if (result.environment.commit !== commit)
         throw new Error(`Recorded commit ${result.environment.commit ?? 'unknown'} does not match the candidate.`);
       if (result.environment.dirty !== false) throw new Error('The run did not record a clean worktree.');
+      const { sourceAtFinish } = result.environment;
+      if (sourceAtFinish && (sourceAtFinish.commit !== commit || sourceAtFinish.dirty !== false))
+        throw new Error('The run did not finish on the same clean candidate commit.');
       if (new Set(result.scenarios.map(({ id }) => id)).size !== result.scenarios.length)
         throw new Error('The run contains duplicate scenario IDs.');
 
       const { finishedAt, error, minecraft, options } = result;
+      const { serverLog, serverVersion, jarSha256 } = minecraft;
+      const hasPass = result.scenarios.some(({ status }) => status === 'pass');
+      if (hasPass && serverVersion !== MINECRAFT_VERSION)
+        throw new Error(
+          `Passing results need a Minecraft ${MINECRAFT_VERSION} server; recorded ${serverVersion ?? 'unknown'}.`,
+        );
+      if (hasPass && !sha256.test(jarSha256 ?? '')) throw new Error('Passing results need a server jar SHA-256.');
       for (const { id, status, observations, checks } of result.scenarios) {
         const scenario = scenarioById.get(id);
         if (!scenario) throw new Error(`Unknown bot scenario: ${id}.`);
@@ -55,7 +91,17 @@ export async function reviewBotEvidence(files, commit) {
         if (scenario.requiresModel && (!options.model?.trim() || observations?.model !== options.model))
           throw new Error(`Passing scenario ${id} did not record the configured real model.`);
       }
-      runs.push({ file, finishedAt, serverLog: minecraft.serverLog, error: error ?? null });
+      runs.push({
+        file,
+        finishedAt,
+        serverLog,
+        serverLogPath: await findServerLog(file, serverLog),
+        serverVersion: serverVersion ?? null,
+        serverJarSha256: jarSha256 ?? null,
+        sourceAtFinish: sourceAtFinish ?? null,
+        error: error ?? null,
+      });
+      if (hasPass) serverJarSha256s.add(jarSha256);
       for (const { id, status, reason, observations } of result.scenarios) {
         const outcomes = status === 'skipped' ? latestSkip : latestAttempt;
         const previous = outcomes.get(id);
@@ -85,12 +131,16 @@ export async function reviewBotEvidence(files, commit) {
     commit,
     runs,
     rejected,
+    serverJarSha256s: [...serverJarSha256s].sort(),
     gates: gateGroups.map(([gate, release]) => {
       const covered = scenarios.filter((scenario) => scenario.release?.some((entry) => release.includes(entry)));
+      const offline = covered.filter((scenario) => !scenario.requiresModel).map(outcome);
+      const realModel = covered.filter((scenario) => scenario.requiresModel).map(outcome);
       return {
         gate,
-        offline: covered.filter((scenario) => !scenario.requiresModel).map(outcome),
-        realModel: covered.filter((scenario) => scenario.requiresModel).map(outcome),
+        offline,
+        realModel,
+        summary: { offline: countOutcomes(offline), realModel: countOutcomes(realModel) },
       };
     }),
     supplemental: scenarios.filter((scenario) => !scenario.release?.length).map(outcome),

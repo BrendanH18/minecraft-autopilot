@@ -6,7 +6,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual, promisify } from 'node:util';
-import { modBundleFiles } from './bundle.js';
+import { ARCHIVE_NAME, modBundleFiles } from './bundle.js';
 import { dataDirectory, projectRoot, writePrivateJson } from './config.js';
 import {
   ACCEPTANCE_GATES,
@@ -18,7 +18,7 @@ import {
 } from './acceptance-gates.js';
 
 export const ACCEPTANCE_FILE = 'acceptance-sessions.json';
-export const ARCHIVE_NAME = 'minecraft-agent-0.1.0.zip';
+export { ARCHIVE_NAME };
 export const MAX_SESSIONS = 1000;
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_METADATA_BYTES = 64 * 1024;
@@ -293,8 +293,8 @@ export async function collectProvenance({
   const buildPath = join(bundleDir, 'BUILD.json');
   const sumsPath = join(bundleDir, 'ARCHIVE_SHA256SUMS');
   const warnings = [];
-  const revision = git(['rev-parse', 'HEAD']),
-    changes = git(['status', '--porcelain', '--untracked-files=normal']);
+  const revision = git(['rev-parse', 'HEAD'], root),
+    changes = git(['status', '--porcelain', '--untracked-files=normal'], root);
   const commit =
     revision.status === 0 && /^[0-9a-f]{40,64}$/.test(revision.stdout.trim()) ? revision.stdout.trim() : null;
   const dirty = changes.status === 0 ? Boolean(changes.stdout.trim()) : null;
@@ -722,6 +722,8 @@ export function registerAcceptanceTools(
     .description(
       'Record live release-gate acceptance sessions with commit and artifact provenance; never edits RELEASE.md.',
     );
+  const readCandidate = (options) =>
+    collectProvenance({ root, git, node, modsDir: options.modsDir, candidateDir: options.candidateDir });
   group
     .command('list')
     .description('List live release gates from docs/RELEASE.md, open and closed.')
@@ -732,6 +734,20 @@ export function registerAcceptanceTools(
     .command('show <gate>')
     .description('Show a gate with prerequisites, numbered steps, and evidence to record.')
     .action((id) => print({ gate: findGate(id), note: ACCEPTANCE_NOTE }));
+  group
+    .command('preflight')
+    .description('Verify source, archive, and launcher mod provenance without opening a session.')
+    .requiredOption('--backend <backend>', `backend under test: ${GATE_BACKENDS.join(', ')}`)
+    .option('--candidate-dir <path>', 'read the bundle and its metadata from this directory (default: dist)')
+    .option('--mods-dir <path>', 'hash packaged jars in the launcher profile mods directory (uses unzip)')
+    .action(async (options) => {
+      const { backend } = options;
+      if (!GATE_BACKENDS.includes(backend)) throw new Error(`Use a live backend: ${GATE_BACKENDS.join(', ')}.`);
+      const { provenance, warnings } = await readCandidate(options);
+      const problems = provenanceProblems({ backend, provenance });
+      print({ backend, verified: problems.length === 0, provenance, problems, warnings });
+      if (problems.length) throw new Error('Candidate verification failed.');
+    });
   group
     .command('start <gate>')
     .description('Start a session and record source, archive, and optional launcher mod provenance.')
@@ -746,13 +762,7 @@ export function registerAcceptanceTools(
     .option('--note <text>', 'free-form setup notes')
     .action(async (gateId, options) => {
       const gate = findGate(gateId);
-      const { provenance, warnings } = await collectProvenance({
-        root,
-        git,
-        node,
-        modsDir: options.modsDir,
-        candidateDir: options.candidateDir,
-      });
+      const { provenance, warnings } = await readCandidate(options);
       const session = createSession({
         gate: gateId,
         backend: options.backend,

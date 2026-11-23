@@ -38,7 +38,7 @@ Earlier offline gameplay results are recorded in [DEVELOPMENT.md](DEVELOPMENT.md
 
 ## Build and distribute
 
-Use Node.js 22.12+ and a full Java 21 JDK on PATH. Follow the development guide's explicit download setup if dependencies are not cached. Then run:
+Use Node.js 22.12+, a full Java 21 JDK, and `unzip` on PATH. Follow the development guide's explicit download setup if dependencies are not cached. Then run:
 
 ```sh
 npm run check

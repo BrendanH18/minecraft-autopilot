@@ -44,6 +44,8 @@ Throughout: the weekly `acceptance:bot` workflow stays green, user-reported v0.1
 
 The goal for the month is a reviewed v0.1.0 candidate. Agents do the headless work in Boat; a person runs the packaged Fabric sessions on the Mac; the account owner runs the authenticated handoff. If a person or the account owner is unavailable, the release waits; nothing ships on partial evidence.
 
+Use [candidate preflight](ACCEPTANCE.md#workflow) to check the archive and installed jars before opening a live session. The [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) prepares the storage, recovery, and expiry cases for the keyboard sessions. The bot runner now covers the bot half of the cobblestone, hostile observation, and dimension-change gate on the candidate under review.
+
 ### Week 1 (23–29 November): harden and prepare (headless, Boat)
 
 | Item | Done when |

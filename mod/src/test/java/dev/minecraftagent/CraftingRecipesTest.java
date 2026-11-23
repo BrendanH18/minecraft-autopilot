@@ -61,21 +61,10 @@ class CraftingRecipesTest {
 
     @Test
     void allowlistMatchesNodeRecipes() throws IOException, InterruptedException {
-        Process node = new ProcessBuilder(
-                        "node",
-                        "--input-type=module",
-                        "--eval",
-                        "import { RECIPES, MAX_CRAFT_COUNT } from '../src/recipes.js'; "
-                                + "process.stdout.write(JSON.stringify({ RECIPES, MAX_CRAFT_COUNT }));")
-                .redirectErrorStream(true)
-                .start();
-        String output;
-        try (var stdout = node.getInputStream()) {
-            output = new String(stdout.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        assertEquals(0, node.waitFor(), output);
-
-        JsonObject nodeOutput = JsonParser.parseString(output).getAsJsonObject();
+        JsonObject nodeOutput = runNode("""
+                import { RECIPES, MAX_CRAFT_COUNT } from '../src/recipes.js';
+                process.stdout.write(JSON.stringify({ RECIPES, MAX_CRAFT_COUNT }));
+                """);
         assertEquals(
                 CraftingRecipes.MAX_COUNT, nodeOutput.get("MAX_CRAFT_COUNT").getAsInt(), "craft action count limit");
         JsonObject nodeRecipes = nodeOutput.getAsJsonObject("RECIPES");
@@ -86,6 +75,81 @@ class CraftingRecipesTest {
             fabricRecipe.remove("pattern"); // Only Fabric needs the grid layout.
             assertEquals(nodeRecipes.get(name), fabricRecipe, name);
         }
+    }
+
+    @Test
+    void craftingCountsAndIngredientPlansMatchNode() throws IOException, InterruptedException {
+        JsonObject nodeOutput = runNode("""
+                import { RECIPES, MAX_CRAFT_COUNT, craftsFor, planCraft } from '../src/recipes.js';
+                const requested = 5;
+                const results = {};
+                for (const [name, recipe] of Object.entries(RECIPES)) {
+                  const counts = Array.from({ length: MAX_CRAFT_COUNT }, (_, index) => craftsFor(recipe, index + 1));
+                  const crafts = craftsFor(recipe, requested);
+                  const exact = recipe.ingredients.map(({ items, count }) => ({ name: items[0], count: count * crafts }));
+                  const short = exact.map((stack, index) => ({ ...stack, count: stack.count - (index === 0 ? 1 : 0) }));
+                  const inventories = { empty: [], exact, short };
+                  if (recipe.ingredients.some(({ items }) => items.length > 1)) {
+                    inventories.mixed = recipe.ingredients.flatMap(({ items }, index) => {
+                      const stack = exact[index];
+                      return items.length === 1 ? [stack] : [
+                        { ...stack, count: stack.count - 1 },
+                        { name: items.at(-1), count: stack.count },
+                      ];
+                    });
+                  }
+                  const probes = Object.entries(inventories).map(([scenario, inventory]) => {
+                    const plan = planCraft(recipe, crafts, inventory);
+                    const items = plan.ok ? Object.fromEntries(plan.consume.map(({ name, count }) => [name, count])) : plan.missing;
+                    return { scenario, inventory, ok: plan.ok, items };
+                  });
+                  results[name] = { counts, probes };
+                }
+                process.stdout.write(JSON.stringify({ requested, results }));
+                """);
+
+        Gson gson = new Gson();
+        int requested = nodeOutput.get("requested").getAsInt();
+        JsonObject nodeRecipes = nodeOutput.getAsJsonObject("results");
+        for (String output : CraftingRecipes.outputs()) {
+            CraftingRecipes.Recipe recipe = CraftingRecipes.get(output);
+            JsonObject nodeRecipe = nodeRecipes.getAsJsonObject(output);
+            var counts = nodeRecipe.getAsJsonArray("counts");
+            assertEquals(CraftingRecipes.MAX_COUNT, counts.size());
+            for (int count = 1; count <= CraftingRecipes.MAX_COUNT; count++)
+                assertEquals(
+                        counts.get(count - 1).getAsInt(),
+                        CraftingRecipes.craftsFor(recipe, count),
+                        output + " x" + count);
+
+            int crafts = CraftingRecipes.craftsFor(recipe, requested);
+            for (var element : nodeRecipe.getAsJsonArray("probes")) {
+                var probe = element.getAsJsonObject();
+                String scenario = output + " with " + probe.get("scenario").getAsString() + " inventory";
+                Map<String, Integer> inventory = new LinkedHashMap<>();
+                for (var stackElement : probe.getAsJsonArray("inventory")) {
+                    var stack = stackElement.getAsJsonObject();
+                    inventory.merge(
+                            stack.get("name").getAsString(), stack.get("count").getAsInt(), Integer::sum);
+                }
+                CraftingRecipes.Plan plan = CraftingRecipes.plan(recipe, crafts, inventory);
+                assertEquals(probe.get("ok").getAsBoolean(), plan.ok(), scenario);
+                assertEquals(
+                        probe.get("items"), gson.toJsonTree(plan.ok() ? plan.consume() : plan.missing()), scenario);
+            }
+        }
+    }
+
+    private static JsonObject runNode(String script) throws IOException, InterruptedException {
+        Process node = new ProcessBuilder("node", "--input-type=module", "--eval", script)
+                .redirectErrorStream(true)
+                .start();
+        String output;
+        try (var stdout = node.getInputStream()) {
+            output = new String(stdout.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertEquals(0, node.waitFor(), output);
+        return JsonParser.parseString(output).getAsJsonObject();
     }
 
     @Test

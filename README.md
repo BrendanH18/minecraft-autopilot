@@ -65,7 +65,7 @@ Only use automation on servers where it is allowed. A single-player world cannot
 
 ### Install the Fabric mod
 
-Building needs a full **Java 21 JDK** (`java`, `javac`, and `jar` on PATH). The first build downloads the pinned dependencies once, and only because you ask it to:
+Building needs a full **Java 21 JDK** (`java`, `javac`, and `jar` on PATH). Verifying the archive also needs `unzip`. The first build downloads the pinned dependencies when you pass `--allow-downloads`:
 
 ```sh
 npm run setup:mod -- --allow-downloads

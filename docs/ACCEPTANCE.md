@@ -10,6 +10,7 @@ It records human observations. It does not run gameplay, contact Minecraft or a 
 | --- | --- |
 | `acceptance list [--open] [--backend <fabric\|mineflayer\|both>]` | List open and closed gates. A fabric or mineflayer filter includes gates that need both. |
 | `acceptance show <gate>` | Show prerequisites, numbered steps, and the evidence to record. |
+| `acceptance preflight --backend <fabric\|mineflayer\|both> [--candidate-dir <path>] [--mods-dir <path>]` | Print candidate and launcher provenance, and exit unsuccessfully if verification fails. Saves no session. |
 | `acceptance start <gate> --backend <fabric\|mineflayer\|both\|demo> [--candidate-dir <path>] [--require-candidate] [--mods-dir <path>] [--launcher ..] [--server ..] [--model ..] [--mcp-client ..] [--note ..]` | Start a session and capture provenance. Use `--require-candidate` to check provenance before recording a live session and `--mods-dir` for packaged Fabric and authenticated handoff. |
 | `acceptance step <session> <n> pass\|fail [--note ..]` | Record an observation for step `n`. Re-recording keeps the earlier observation. |
 | `acceptance finish <session> pass\|fail\|blocked [--note ..]` | Finish a session. `fail` and `blocked` need `--note`. `pass` is refused while a step's latest observation failed. |
@@ -24,16 +25,18 @@ Use backend `both` only for the authenticated handoff, which exercises the clien
 
 ## Workflow
 
-Build the candidate once from a clean commit.
+Build and verify the candidate once from a clean commit. Verification checks the ZIP against the loose bundle and its pinned dependencies.
 
 ```sh
 npm run build:mod
+npm run verify:mod
 ```
 
 Copy the three jars from that archive into the launcher profile's `mods` folder before starting the session.
 
 ```sh
 npm start -- acceptance show fabric-f8-takeover
+npm start -- acceptance preflight --backend fabric --mods-dir "/path/to/launcher-profile/mods"
 npm start -- acceptance start fabric-f8-takeover --backend fabric \
   --require-candidate \
   --mods-dir "/path/to/launcher-profile/mods" \

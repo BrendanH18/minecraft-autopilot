@@ -39,13 +39,21 @@ test('Fabric fixture dry run lists all setups and uses the named player without 
       'deposit-chest',
       'deposit-barrel',
       'deposit-full-chest',
+      'deposit-blocked-chest',
       'deposit-double-chest',
+      'deposit-expiry',
+      'inspect-scoped-storage',
       'eat-interruption',
+      'eat-timeout',
       'low-health-retreat',
+      'eat-retreat-timeout',
       'collection-return',
+      'collection-unreachable-return',
       'collect-full-inventory',
       'withdraw-multi-stack',
+      'withdraw-expiry',
       'craft-interruption',
+      'craft-expiry',
       'death-navigation',
       'disconnect-mining',
     ],
@@ -147,6 +155,79 @@ test('transfer and crafting interruption fixtures seed several units and print c
   const crafting = fixturePlan('craft-interruption', player);
   assert.ok(crafting.prepare.includes(`give ${player} minecraft:oak_planks 32`));
   assert.ok(crafting.verify.includes('execute if block 98 -60 0 minecraft:crafting_table'));
+});
+
+test('storage failure fixtures independently verify the blocked lid and refreshed target', () => {
+  const player = 'FixtureUser';
+  const blocked = fixturePlan('deposit-blocked-chest', player);
+  assert.ok(blocked.fixture.includes('setblock 98 -59 0 stone'));
+  assert.ok(blocked.verify.includes('execute if block 98 -59 0 minecraft:stone'));
+  assert.ok(blocked.verify.includes('data get block 98 -60 0 Items'));
+  assert.ok(blocked.verify.includes(`data get entity ${player} Inventory`));
+
+  const scoped = fixturePlan('inspect-scoped-storage', player);
+  assert.ok(scoped.fixture.includes('setblock 94 -60 0 minecraft:barrel[facing=up]'));
+  assert.match(scoped.actions[2], /data modify block 94 -60 0 Items\[0\]\.count set value 2/);
+  assert.match(scoped.actions[2], /setblock 98 -59 0 minecraft:stone/);
+  assert.deepEqual(
+    scoped.actions.filter((action) => action.startsWith('mc-agent inspect-storage')),
+    ['mc-agent inspect-storage --container 94,-60,0', 'mc-agent inspect-storage --container 98,-60,0'],
+  );
+  assert.deepEqual(
+    scoped.verify.filter((command) => command.startsWith('data get block')),
+    ['data get block 98 -60 0 Items', 'data get block 94 -60 0 Items'],
+  );
+});
+
+test('failed eating and retreat plans keep consumption longer than the timeout and read independent vitals', () => {
+  const player = 'FixtureUser';
+  const eating = fixturePlan('eat-timeout', player);
+  const retreat = fixturePlan('eat-retreat-timeout', player);
+  const bread = `give ${player} minecraft:bread[food={nutrition:5,saturation:6,eat_seconds:30}] 8`;
+  for (const plan of [eating, retreat]) {
+    assert.ok(plan.prepare.includes(bread));
+    assert.ok(plan.verify.includes(`data get entity ${player} foodLevel`));
+    assert.ok(plan.verify.includes(`data get entity ${player} Inventory`));
+    assert.ok(plan.verify.includes(`data get entity ${player} Health`));
+    assert.equal(plan.vitalTarget.target, 10);
+  }
+  assert.match(eating.actions.join('\n'), /at least 10 seconds after the failure/);
+  assert.match(retreat.actions.join('\n'), /tp FixtureUser 120\.5 -60 0\.5, then fill .* minecraft:bedrock hollow/);
+  assert.match(retreat.actions.join('\n'), /Survival retreat timed out \(about 60 seconds/);
+});
+
+test('unreachable collection return preserves independent evidence of partial collection', () => {
+  const player = 'FixtureUser';
+  const plan = fixturePlan('collection-unreachable-return', player);
+  assert.ok(plan.fixture.includes('setblock 64 -60 0 minecraft:sand'));
+  assert.match(plan.actions[1], /x below 93.*fill 94 -61 -2 98 -57 2 minecraft:bedrock hollow/);
+  assert.ok(plan.verify.includes('execute if block 64 -60 0 minecraft:sand'));
+  assert.ok(plan.verify.includes('execute if block 94 -60 0 minecraft:bedrock'));
+  assert.ok(plan.verify.includes(`data get entity ${player} Inventory`));
+  assert.ok(plan.verify.includes(`data get entity ${player} Pos`));
+});
+
+test('expiry fixtures extend each action across the lease window and include post-resume reads', () => {
+  const player = 'FixtureUser';
+  const deposit = fixturePlan('deposit-expiry', player);
+  const withdraw = fixturePlan('withdraw-expiry', player);
+  const craft = fixturePlan('craft-expiry', player);
+  assert.ok(deposit.prepare.includes(`give ${player} minecraft:oak_log 2304`));
+  assert.deepEqual(
+    withdraw.fixture
+      .filter((command) => command.startsWith('data merge block'))
+      .map((command) => command.match(/count:64/g).length),
+    [27, 9],
+  );
+  assert.ok(craft.prepare.includes(`give ${player} minecraft:oak_planks 512`));
+  assert.equal(craft.actions[1], 'mc-agent craft chest 64');
+  for (const plan of [deposit, withdraw])
+    assert.equal(plan.verify.filter((command) => command.startsWith('data get block')).length, 2);
+  for (const plan of [deposit, withdraw, craft]) {
+    assert.match(plan.actions.join('\n'), /tick rate 5/);
+    assert.match(plan.actions.join('\n'), /Ctrl\+Z.*Wait 10 seconds/);
+    assert.match(plan.actions.join('\n'), /fg and repeat the reads five seconds later/);
+  }
 });
 
 test('the model fixture stocks enough cobblestone for crafting and a retained withdrawal gain', () => {

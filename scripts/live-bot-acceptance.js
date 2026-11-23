@@ -487,7 +487,6 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
   const javaInfo = deps.preflight({ acceptEula: options.acceptEula, jar: options.jar, java: options.java });
   if (!(await deps.portIsFree(options.port)))
     throw new Error(`Port ${options.port} on 127.0.0.1 is in use. Stop the other server or pass --port.`);
-  const jarSha256 = await deps.sha256File(options.jar);
   const where = paths(options, await deps.createRunDirectory());
   const results = {
     schema: 'minecraft-agent/live-bot-acceptance/1',
@@ -501,7 +500,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       serverVersion: null,
       serverLog: where.serverLog,
       jar: options.jar,
-      jarSha256,
+      jarSha256: null,
       seed: SEED,
       levelType: 'minecraft:flat',
     },
@@ -527,6 +526,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       seed: SEED,
       acceptEula: options.acceptEula,
     });
+    results.minecraft.jarSha256 = await deps.sha256File(join(where.server, 'server.jar'));
     server = deps.startServer({ directory: where.server, java: options.java });
     await server.console.ready({ signal });
     results.minecraft.serverVersion = server.console.version;
@@ -556,6 +556,8 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
         results.error ??= `Server stop failed: ${error.message}`;
       });
     if (signal.aborted && !inspecting) results.error ??= `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
+    const { commit, dirty } = deps.environment({ java: options.java });
+    results.environment.sourceAtFinish = { commit, dirty };
     results.finishedAt = new Date(deps.now()).toISOString();
     results.summary = summarize(results);
     await deps.writeResults(where.out, results);
