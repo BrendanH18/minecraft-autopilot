@@ -123,6 +123,24 @@ Cleanup failures fail the affected scenario. If the runner cannot stop the bot, 
 
 ## Reviewing a run
 
+Use the archive's `sourceCommit` from `dist/BUILD.json` to review one or more
+runner results together:
+
+```sh
+npm start -- acceptance review-bot --commit "$candidate_commit" offline/results.json model/results.json
+```
+
+The JSON report shows `pass`, `fail`, `skipped`, or `missing` for each runner
+scenario, with separate offline and real-model coverage. Each outcome points to
+its results file, and the runs list includes the server log path recorded on
+the machine that ran it. The most recently finished run that attempted a
+scenario takes precedence. A skip is shown if no run attempted that scenario.
+Unreadable, malformed, dirty, and different-commit files are listed under
+`rejected`, and the command exits unsuccessfully if any file was rejected.
+Passing scenarios must contain passing checks and, for real-model scenarios,
+identify the configured model. The report covers the runner's share of the bot
+gates and leaves session recording and sign-off to the reviewer.
+
 For each scenario, confirm in the results and `server.out` that the fixture built as intended (no command errors), the bot was in the expected place, and the checks reflect the RELEASE.md wording, not only that they passed. In particular: the pit run really timed out (not "No reachable matching blocks remain"), the cancel landed during the return trip, and storage changes happened before the final inspection. Then record the commit, jar checksum, server/bot/model configuration, scenario, and result in DEVELOPMENT.md before ticking a box.
 
 ## Known limitations

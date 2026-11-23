@@ -15,6 +15,7 @@ It records human observations. It does not run gameplay, contact Minecraft or a 
 | `acceptance finish <session> pass\|fail\|blocked [--note ..]` | Finish a session. `fail` and `blocked` need `--note`. `pass` is refused while a step's latest observation failed. |
 | `acceptance sessions [--gate <gate>]` | List recorded sessions. |
 | `acceptance report [--gate <gate>] [--session <id>] [--format markdown\|json]` | Print Markdown for the [DEVELOPMENT.md](DEVELOPMENT.md#validation) Validation section, or JSON. A session id or unique prefix selects one record. |
+| `acceptance review-bot --commit <sha> <results.json> [<results.json> ...]` | Group live bot coverage by gate for a clean candidate commit. See [reviewing a bot run](LIVE-ACCEPTANCE.md#reviewing-a-run). |
 | `acceptance status [--commit <sha> --archive-sha256 <sha>] [--require-eligible]` | Show the latest finished session for each open gate and backend. Supply both hashes to inspect one candidate. The exit status is unsuccessful with `--require-eligible` unless every open gate has eligible evidence on one candidate. |
 
 Sessions can be named by their full id or an unambiguous prefix of at least six characters.

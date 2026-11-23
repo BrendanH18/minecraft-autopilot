@@ -826,6 +826,16 @@ export function registerAcceptanceTools(
       else write(renderMarkdown(sessions));
     });
   group
+    .command('review-bot <results...>')
+    .description('Review bot runner results grouped by release gate for one clean source commit.')
+    .requiredOption('--commit <sha>', 'full source commit SHA of the release candidate')
+    .action(async (files, { commit }) => {
+      const { reviewBotEvidence } = await import('../scripts/live-acceptance/review.js');
+      const report = await reviewBotEvidence(files, commit);
+      print(report);
+      if (report.rejected.length) throw new Error(`${report.rejected.length} bot result file(s) rejected.`);
+    });
+  group
     .command('status')
     .description('Show the latest evidence for each open gate and whether eligible gates share one candidate.')
     .option('--commit <sha>', 'inspect one candidate, paired with --archive-sha256')
