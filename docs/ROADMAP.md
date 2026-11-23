@@ -47,6 +47,8 @@ The goal for the month is a reviewed v0.1.0 candidate. Agents do the headless wo
 
 Use [candidate preflight](ACCEPTANCE.md#workflow) to check the archive and installed jars before opening a live session. The [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) prepares the storage, recovery, and expiry cases for the keyboard sessions. The bot runner now covers the bot half of the cobblestone, hostile observation, and dimension-change gate on the candidate under review.
 
+Strict acceptance start verifies the installable ZIP and its pinned dependencies, and sessions keep the checklist used during the run. The next release decisions still depend on packaged Fabric, real-model and MCP evidence, and the account owner's authenticated handoff recorded against one clean candidate.
+
 ### Week 1 (23–29 November): harden and prepare (headless, Boat)
 
 | Item | Done when |
@@ -82,7 +84,7 @@ Use [candidate preflight](ACCEPTANCE.md#workflow) to check the archive and insta
 | Freeze the candidate, rerun `acceptance:bot --all` and the affected Fabric checks, and run remote CI. | `dist/BUILD.json` shows `sourceModified: false`, the archive verifies, and `node` and `mod` pass. Every RELEASE.md box is ticked by a person against that candidate. | Agent, Boat and CI; person for sign-off. |
 | Tag and publish `v0.1.0` as an experimental preview, or record what blocks it. | The release notes list the tested configurations and known issues. Otherwise this roadmap names the open gates and the next session. | Person. |
 
-Lower-priority headless work if agents are idle: load offline tool groups lazily so `stop`, `observe`, and `mcp` import no `planning-*.js` module. That must not delay any item above.
+`stop`, `observe`, and `mcp` now skip offline planners and acceptance tooling. Moving planners out of the core CLI remains a month 2 decision.
 
 ### Not in month 1
 

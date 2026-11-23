@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { fixturePlan, parseOptions } from '../scripts/live-fabric-fixtures.js';
+import { fixturePlan, parseOptions, readFixtureCheckpoint } from '../scripts/live-fabric-fixtures.js';
 
 test('Fabric fixture dry run lists all setups and uses the named player without Java or a jar', () => {
   const plan = execFileSync(
@@ -71,6 +71,65 @@ test('the takeover fixture gives time to interrupt mining and prints independent
   assert.deepEqual(plan.verify, ['data get entity FixtureUser Inventory', 'data get entity FixtureUser Pos']);
   assert.ok(plan.actions.includes('mc-agent collect oak_log 8'));
   assert.match(plan.actions.join('\n'), /kill -9 <pid>.*\n.*cancelled goto job with a lease expired message/);
+});
+
+test('a checkpoint preserves read order and captures empty containers, rejected reads, and block test results', async () => {
+  const signal = new AbortController().signal;
+  const position = 'data get entity FixtureUser Pos';
+  const unloaded = 'data get entity FixtureUser Health';
+  const block = 'execute if block 98 -60 0 minecraft:chest';
+  const items = 'data get block 98 -60 0 Items';
+  const issued = [];
+  const serverConsole = {
+    async command(command, options) {
+      assert.equal(options.signal, signal);
+      issued.push(command);
+      if (command === unloaded) throw new Error('No entity was found');
+      return command === block ? 'Test failed' : 'FixtureUser has the following entity data: [96.5d, -60.0d, 0.5d]';
+    },
+    async blockData(x, y, z, path, options) {
+      assert.equal(options.signal, signal);
+      issued.push(`data get block ${x} ${y} ${z} ${path}`);
+      return [];
+    },
+  };
+  let tick = 0;
+  const commands = [position, items, unloaded, block];
+  const record = await readFixtureCheckpoint(serverConsole, commands, {
+    label: 'after-stop',
+    signal,
+    now: () => tick++ * 1000,
+  });
+  assert.deepEqual(issued, commands);
+  assert.deepEqual(record, {
+    label: 'after-stop',
+    startedAt: '1970-01-01T00:00:00.000Z',
+    finishedAt: '1970-01-01T00:00:01.000Z',
+    reads: [
+      { command: position, value: 'FixtureUser has the following entity data: [96.5d, -60.0d, 0.5d]' },
+      { command: items, value: [] },
+      { command: unloaded, error: 'No entity was found' },
+      { command: block, value: 'Test failed' },
+    ],
+  });
+});
+
+test('an interrupted checkpoint sends no further reads', async () => {
+  const controller = new AbortController();
+  const issued = [];
+  const commands = ['data get entity FixtureUser Pos', 'data get entity FixtureUser Inventory'];
+  const serverConsole = {
+    async command(command) {
+      issued.push(command);
+      controller.abort(new Error('Fixture session ended.'));
+      return 'First read';
+    },
+  };
+  await assert.rejects(
+    readFixtureCheckpoint(serverConsole, commands, { label: 'interrupted', signal: controller.signal }),
+    /Fixture session ended/,
+  );
+  assert.deepEqual(issued, commands.slice(0, 1));
 });
 
 test('the dimension change targets the prepared floor and the named player', () => {

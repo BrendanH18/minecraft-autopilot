@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   parseSnbt,
   parseDataReply,
@@ -359,6 +359,9 @@ test('options require an explicit selection and validate ids, ports, and names',
   assert.throws(() => parseOptions(['--all', '--scenario', 'blocked-lid']), /Choose only one/);
   assert.throws(() => parseOptions(['--all', '--port', '80']), /--port/);
   assert.throws(() => parseOptions(['--all', '--account', 'a b']), /--account/);
+  assert.throws(() => parseOptions(['--all', '--model', '  ']), /--model must name an installed/);
+  assert.equal(parseOptions(['--all', '--model', ' local-model ']).model, 'local-model');
+  assert.equal(parseOptions(['--all', '--java', './jdk/bin/java']).java, resolve('jdk/bin/java'));
   const options = parseOptions(['--scenario', 'blocked-lid', '--scenario', 'recovery-stop', '--port', '25599']);
   assert.deepEqual(
     options.scenarios.map((scenario) => scenario.id),
@@ -934,28 +937,47 @@ test('craft refusal fails acceptance if ingredients disappear despite the expect
   }
 });
 
-test('withdraw-craft-model checks the agent result against both independent server reads', async () => {
+test('withdraw-craft-model requires both criteria, matching server reads, and manual control', async () => {
   const scenario = byId('withdraw-craft-model');
   const start = { x: laneOrigin(scenario.lane).x + 0.5, y: -60, z: 0.5 };
   const model = 'test-model';
-  for (const [status, oakLogs, leftoverSticks, failure] of [
-    ['criteria_met', 20, 0, null],
-    ['criteria_unmet', 20, 0, /agent reports criteria_met/],
-    ['criteria_met', 19, 0, /server chest lost exactly three cobblestone/],
-    ['criteria_met', 20, 1, /server inventory holds only the crafted stone pickaxe/],
+  for (const [changes, failure] of [
+    [{}, null],
+    [{ status: 'criteria_unmet' }, /agent reports criteria_met/],
+    [{ withdrawMet: false }, /agent verified withdraw independently/],
+    [{ craftMet: false }, /agent verified craft independently/],
+    [{ oakLogs: 19 }, /server chest lost exactly four cobblestone/],
+    [{ leftoverStone: 0 }, /server inventory holds the crafted pickaxe and one cobblestone/],
+    [{ mode: 'agent' }, /agent handed back manual control/],
+    [{ stopping: true }, /agent handed back manual control/],
   ]) {
+    const {
+      status = 'criteria_met',
+      withdrawMet = true,
+      craftMet = true,
+      oakLogs = 20,
+      leftoverStone = 1,
+      mode = 'manual',
+      stopping = false,
+    } = changes;
     const world = fakeWorld({ start });
     const deps = fakeDeps(world, {
       runAgent: async (_adapter, goal, options) => {
-        assert.match(goal, /Withdraw exactly three cobblestone.*craft one stone pickaxe/);
+        assert.match(goal, /Withdraw exactly four cobblestone.*Craft one stone pickaxe/);
         assert.equal(options.model, model);
         assert.equal(options.fetchImpl, undefined);
-        assert.deepEqual(options.criteria, { craft: { item: 'stone_pickaxe', count: 1 } });
-        world.chest.find((item) => item.id === 'minecraft:cobblestone').count = 2;
+        assert.deepEqual(options.criteria, {
+          withdraw: { item: 'cobblestone', count: 1 },
+          craft: { item: 'stone_pickaxe', count: 1 },
+        });
+        world.chest.find((item) => item.id === 'minecraft:cobblestone').count = 1;
         world.chest.find((item) => item.id === 'minecraft:oak_log').count = oakLogs;
         world.inventory = [{ id: 'minecraft:stone_pickaxe', count: 1 }];
-        if (leftoverSticks) world.inventory.push({ id: 'minecraft:stick', count: leftoverSticks });
-        return { status };
+        if (leftoverStone) world.inventory.push({ id: 'minecraft:cobblestone', count: leftoverStone });
+        world.mode = mode;
+        world.stopping = stopping;
+        world.job = { status: 'completed' };
+        return { status, verification: { checks: { withdraw: { met: withdrawMet }, craft: { met: craftMet } } } };
       },
     });
     const record = await runScenario(scenario, env(world, deps, { model }));
@@ -1474,6 +1496,38 @@ test('a failed server shutdown never hashes a partial log', async () => {
   assert.deepEqual(hashed, ['/fake/run/server/server.jar']);
   assert.equal(result.minecraft.serverLogSha256, null);
   assert.equal(result.error, 'Server stop failed: still running');
+});
+
+test('an unavailable server log fails the acceptance run after shutdown', async () => {
+  const deps = fakeDeps(fakeWorld());
+  deps.sha256File = async (path) => {
+    if (path.endsWith('server.out')) throw new Error('unreadable log');
+    return 'a'.repeat(64);
+  };
+  const options = parseOptions(['--scenario', 'stale-removal-model', '--accept-eula']);
+  const result = await runAcceptance(options, deps);
+  assert.equal(deps.calls.serverStops, 1);
+  assert.equal(result.minecraft.serverLogSha256, null);
+  assert.equal(result.error, 'Server log checksum failed: unreadable log');
+});
+
+test('startup verifies the reported Minecraft version before applying world setup', async () => {
+  for (const version of [null, '1.21.4']) {
+    const world = fakeWorld();
+    const deps = fakeDeps(world);
+    const { startServer } = deps;
+    deps.startServer = () => {
+      const server = startServer();
+      server.console.version = version;
+      return server;
+    };
+    const options = parseOptions(['--scenario', 'withdraw', '--accept-eula']);
+    const result = await runAcceptance(options, deps);
+    assert.equal(result.error, `Expected Minecraft 1.21.1, found ${version ?? 'an unknown version'}.`);
+    assert.equal(result.scenarios[0].status, 'skipped');
+    assert.deepEqual(world.written, []);
+    assert.equal(deps.calls.serverStops, 1);
+  }
 });
 
 test('settle cancels its escalation timer once the child exits', async () => {

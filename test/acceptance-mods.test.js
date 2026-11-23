@@ -5,27 +5,23 @@ import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
-import { archiveTest, zip } from './acceptance-zip.js';
+import { archiveTest, candidateZip, expectedFiles, jarContents } from './acceptance-zip.js';
 import { modBundleFiles } from '../src/bundle.js';
 import { ARCHIVE_NAME, acceptanceFile, registerAcceptanceTools } from '../src/acceptance-tools.js';
 
 const commit = 'a'.repeat(40);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-async function fixture(t, { archiveCommit = commit, changes = '' } = {}) {
+async function fixture(t, { archiveCommit = commit, changes = '', omit, usePinnedDependencies = false } = {}) {
   const root = await testDirectory(t, 'acceptance-mods-');
   const modsDir = join(root, 'launcher profile/mods');
   const directory = join(root, 'agent-home');
   const dist = join(root, 'dist');
   await mkdir(modsDir, { recursive: true });
   await mkdir(join(dist, 'mods'), { recursive: true });
-  const build = (sourceCommit) => JSON.stringify({ version: '0.1.0', sourceCommit, sourceModified: false });
-  const jarContents = modBundleFiles.map(({ name }) => [name, `bundle entry: ${name}`]);
-  const archive = zip([
-    ['BUILD.json', build(archiveCommit)],
-    ...jarContents.map(([name, bytes]) => [`mods/${name}`, bytes]),
-  ]);
-  await writeFile(join(dist, 'BUILD.json'), build(commit));
+  const build = (sourceCommit) => ({ version: '0.1.0', sourceCommit, sourceModified: false });
+  const archive = candidateZip(build(archiveCommit), { omit });
+  await writeFile(join(dist, 'BUILD.json'), JSON.stringify(build(commit)));
   await writeFile(join(dist, ARCHIVE_NAME), archive);
   await writeFile(join(dist, 'ARCHIVE_SHA256SUMS'), `${digest(archive)}  ${ARCHIVE_NAME}\n`);
   for (const [name, bytes] of jarContents) await writeFile(join(modsDir, name), bytes);
@@ -42,6 +38,7 @@ async function fixture(t, { archiveCommit = commit, changes = '' } = {}) {
     },
     root,
     directory,
+    expectedFiles: usePinnedDependencies ? modBundleFiles : expectedFiles,
     git: ([command]) => ({ status: 0, stdout: command === 'rev-parse' ? commit : changes }),
   });
   const run = async (...args) => {
@@ -82,24 +79,42 @@ test('matching launcher jars make a completed Fabric gate eligible', archiveTest
 
 test('preflight requires an installable archive and leaves the sessions file untouched', archiveTest, async (t) => {
   const { directory, modsDir, run, archiveSha256, output } = await fixture(t);
-  await assert.rejects(run('preflight', '--backend', 'mineflayer'), /Candidate verification failed/);
-  assert.equal(output().verified, false);
-  assert.equal(output().provenance.archive.sha256, archiveSha256);
-  assert.match(output().problems[0], /exactly the expected bundle entries/);
-
+  const bot = await run('preflight', '--backend', 'mineflayer');
+  assert.equal(bot.verified, true);
+  assert.equal(bot.provenance.archive.sha256, archiveSha256);
+  assert.equal(bot.provenance.archive.bundleVerified, true);
   for (const backend of ['fabric', 'both']) {
     await assert.rejects(run('preflight', '--backend', backend), /Candidate verification failed/);
     assert.match(output().problems[0], /launcher mod jars were not checked/);
-    await assert.rejects(
-      run('preflight', '--backend', backend, '--mods-dir', modsDir),
-      /Candidate verification failed/,
-    );
-    assert.equal(output().provenance.mods.archiveSha256, archiveSha256);
-    assert.match(output().problems[0], /exactly the expected bundle entries/);
+    const fabric = await run('preflight', '--backend', backend, '--mods-dir', modsDir);
+    assert.equal(fabric.verified, true);
+    assert.equal(fabric.provenance.mods.archiveSha256, archiveSha256);
   }
   await assert.rejects(run('preflight', '--backend', 'demo'), /Use a live backend/);
   await assert.rejects(readFile(acceptanceFile(directory)), { code: 'ENOENT' });
 });
+
+test(
+  'invalid bundle contents fail preflight, strict start, and recorded evidence eligibility',
+  archiveTest,
+  async (t) => {
+    for (const [options, error] of [
+      [{ omit: 'LICENSE' }, /exactly the expected bundle entries/],
+      [{ usePinnedDependencies: true }, /Pinned dependency checksum mismatch/],
+    ]) {
+      const { directory, modsDir, run, start, finish, output } = await fixture(t, options);
+      await assert.rejects(run('preflight', '--backend', 'mineflayer'), /Candidate verification failed/);
+      assert.equal(output().provenance.archive.manifestMatches, true);
+      assert.equal(output().provenance.archive.bundleVerified, false);
+      assert.match(output().warnings.join('\n'), error);
+      await assert.rejects(start('--require-candidate', '--mods-dir', modsDir), error);
+      await assert.rejects(readFile(acceptanceFile(directory)), { code: 'ENOENT' });
+      const { eligible, problems } = await finish(await start('--mods-dir', modsDir));
+      assert.equal(eligible, false);
+      assert.deepEqual(problems, ['installable archive integrity was not verified']);
+    }
+  },
+);
 
 test(
   'strict start accepts a transferred candidate with matching content and changed timestamps',
@@ -197,10 +212,12 @@ test('legacy records without mod hashes still load and the Fabric gate explains 
   assert.equal(onDisk.version, 1);
   assert.equal(onDisk.sessions[0].provenance.mods, undefined);
   delete onDisk.sessions[0].provenance.archive.manifestMatches;
+  delete onDisk.sessions[0].provenance.archive.bundleVerified;
   onDisk.sessions[0].warnings = [];
   await writeFile(acceptanceFile(directory), JSON.stringify(onDisk));
   const status = await run('status');
   assert.deepEqual(status.gates.find(({ id }) => id === 'fabric-packaged-install').backends[0].problems, [
+    'installable archive integrity was not verified',
     'launcher mod jars were not checked; start with --mods-dir',
   ]);
 });

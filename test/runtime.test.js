@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { dataDirectory, projectRoot } from '../src/config.js';
 import { cleanupRuntime } from '../src/runtime.js';
@@ -49,7 +50,6 @@ test('cleanup preserves sign-in tokens, homes, and unrelated files unless explic
 
 test('server --version selects the Minecraft version instead of printing the CLI version', async (t) => {
   const directory = await testDirectory(t, 'cli-version-');
-  const { execFile } = await import('node:child_process');
   const cli = join(projectRoot, 'src/cli.js');
   const result = await new Promise((resolve) =>
     execFile(
@@ -78,4 +78,33 @@ test('server --version selects the Minecraft version instead of printing the CLI
   assert.match(result.stderr, /Connecting to 127\.0\.0\.1:1/);
   assert.match(result.stderr, /ECONNREFUSED/);
   assert.equal(result.error?.killed, false, 'a refused connection should exit promptly');
+});
+
+test('a stop arriving while the demo bridge starts removes late startup files', async (t) => {
+  const directory = await testDirectory(t, 'demo-stop-');
+  const discoveryPath = join(directory, 'bridge.json');
+  // Deliver the signal while startBridge still owns the listener and has not returned it to the CLI.
+  const preload = `
+    import fs from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    const rename = fs.rename;
+    fs.rename = async (from, to) => {
+      await rename(from, to);
+      if (to === ${JSON.stringify(discoveryPath)}) process.emit('SIGTERM');
+    };
+    syncBuiltinESMExports();
+  `;
+  const cli = join(projectRoot, 'src/cli.js');
+  const result = await new Promise((resolve) =>
+    execFile(
+      process.execPath,
+      ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, cli, '--bridge', discoveryPath, 'demo'],
+      { timeout: 5_000 },
+      (error, stdout, stderr) => resolve({ error, stdout, stderr }),
+    ),
+  );
+  assert.equal(result.error?.killed, false, result.stderr);
+  assert.match(result.stderr, /Stopped by user/);
+  await assert.rejects(access(discoveryPath), { code: 'ENOENT' });
+  await assert.rejects(access(`${discoveryPath}.lock`), { code: 'ENOENT' });
 });

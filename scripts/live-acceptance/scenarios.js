@@ -1140,14 +1140,16 @@ async function runWithdrawCraftModel(ctx, { points: { chest }, stock }) {
     { before, stock },
   );
   const model = ctx.options.model;
+  const criteria = { withdraw: { item: 'cobblestone', count: 1 }, craft: { item: 'stone_pickaxe', count: 1 } };
   const result = await ctx.step(`agent with real model ${model}`, () =>
     ctx.agent({
-      goal: 'Withdraw exactly three cobblestone from the nearby chest. Use it and your two sticks at the nearby crafting table to craft one stone pickaxe. Then report done.',
-      criteria: { craft: { item: 'stone_pickaxe', count: 1 } },
+      goal: 'Withdraw exactly four cobblestone from the nearby chest. Craft one stone pickaxe with three of them and your two sticks at the nearby crafting table. Keep the fourth cobblestone and report done.',
+      criteria,
       model,
     }),
   );
   ctx.note('agent', {
+    criteria,
     status: result.status,
     steps: result.steps,
     verification: result.verification ?? null,
@@ -1156,15 +1158,28 @@ async function runWithdrawCraftModel(ctx, { points: { chest }, stock }) {
   const after = await ctx.step('independent final state (chest Items, Inventory)', readState);
   ctx.note('final', after);
   ctx.check('agent reports criteria_met', result.status === 'criteria_met', { status: result.status });
-  const expectedChest = { ...stock, 'minecraft:cobblestone': stock['minecraft:cobblestone'] - 3 };
-  ctx.check('server chest lost exactly three cobblestone and nothing else', sameTotals(after.chest, expectedChest), {
+  for (const criterion of Object.keys(criteria)) {
+    const check = result.verification?.checks?.[criterion];
+    ctx.check(`agent verified ${criterion} independently`, check?.met === true, { check });
+  }
+  const expectedChest = { ...stock, 'minecraft:cobblestone': stock['minecraft:cobblestone'] - 4 };
+  ctx.check('server chest lost exactly four cobblestone and nothing else', sameTotals(after.chest, expectedChest), {
     expected: expectedChest,
     actual: after.chest,
   });
-  const expectedInventory = { 'minecraft:stone_pickaxe': 1 };
-  ctx.check('server inventory holds only the crafted stone pickaxe', sameTotals(after.inventory, expectedInventory), {
-    expected: expectedInventory,
-    actual: after.inventory,
+  const expectedInventory = { 'minecraft:stone_pickaxe': 1, 'minecraft:cobblestone': 1 };
+  ctx.check(
+    'server inventory holds the crafted pickaxe and one cobblestone',
+    sameTotals(after.inventory, expectedInventory),
+    { expected: expectedInventory, actual: after.inventory },
+  );
+  const { mode, job, stopping } = await ctx.step('observe control from a separate bridge session', () =>
+    ctx.bridge.observe(),
+  );
+  ctx.check('agent handed back manual control', mode === 'manual' && job?.status !== 'running' && !stopping, {
+    mode,
+    job,
+    stopping,
   });
 }
 
@@ -1511,11 +1526,12 @@ export const scenarios = [
     release: [RELEASE.withdraw, RELEASE.craft],
     plan: withdrawCraftPlan,
     run: runWithdrawCraftModel,
-    actions: ['agent with the --model given (real Ollama): withdraw 3 cobblestone → craft 1 stone_pickaxe → done'],
+    actions: ['agent with the --model given (real Ollama): withdraw 4 cobblestone → craft 1 stone_pickaxe → done'],
     expect: [
-      'agent reports criteria_met for craft stone_pickaxe:1',
-      'server chest loses exactly 3 cobblestone and retains every oak log',
-      'server inventory holds only 1 stone pickaxe',
+      'agent reports criteria_met for withdraw cobblestone:1 and craft stone_pickaxe:1',
+      'server chest loses exactly 4 cobblestone and retains every oak log',
+      'server inventory holds 1 stone pickaxe and 1 cobblestone',
+      'a separate observation shows manual control',
     ],
   },
   depositScenario({

@@ -5,7 +5,7 @@
  * independent `data get` reads, and writes a JSON results file. Results need human review before they count.
  */
 import { parseArgs } from 'node:util';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createInterface } from 'node:readline';
@@ -72,6 +72,9 @@ export function parseOptions(argv) {
   const account = values.account ?? 'LiveBot';
   if (!/^[A-Za-z0-9_]{3,16}$/.test(account))
     throw new Error('--account must be a 3–16 character offline username (letters, digits, _).');
+  const java = values.java ?? 'java';
+  const model = values.model?.trim();
+  if (values.model !== undefined && !model) throw new Error('--model must name an installed Ollama model.');
   if (values.json && !values['dry-run']) throw new Error('--json requires --dry-run.');
   if ([values.scenario, values.all, values.fast].filter(Boolean).length > 1)
     throw new Error('Choose only one of --scenario, --all, and --fast.');
@@ -93,8 +96,8 @@ export function parseOptions(argv) {
     port,
     account,
     jar: resolve(values['server-jar'] ?? DEFAULT_JAR),
-    java: values.java ?? 'java',
-    model: values.model ?? null,
+    java: basename(java) === java ? java : resolve(java),
+    model: model ?? null,
     ollama: values.ollama ?? 'http://127.0.0.1:11434',
     noThinking: !!values['no-thinking'],
     out: values.out ? resolve(values.out) : null,
@@ -531,8 +534,10 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     server = deps.startServer({ directory: where.server, java: options.java });
     await server.console.ready({ signal });
     results.minecraft.serverVersion = server.console.version;
-    if (server.console.version && server.console.version !== MINECRAFT_VERSION)
-      throw new Error(`The jar is Minecraft ${server.console.version}; the bot targets ${MINECRAFT_VERSION}.`);
+    if (server.console.version !== MINECRAFT_VERSION)
+      throw new Error(
+        `Expected Minecraft ${MINECRAFT_VERSION}, found ${server.console.version ?? 'an unknown version'}.`,
+      );
     for (const command of WORLD_SETUP) await server.console.command(command, { signal });
     for (const scenario of options.scenarios) {
       deps.warn(`[${scenario.id}] ${scenario.title}`);
@@ -555,7 +560,10 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     if (server) {
       try {
         await server.stop();
-        results.minecraft.serverLogSha256 = await deps.sha256File(where.serverLog).catch(() => null);
+        results.minecraft.serverLogSha256 = await deps.sha256File(where.serverLog).catch((error) => {
+          results.error ??= `Server log checksum failed: ${error.message}`;
+          return null;
+        });
       } catch (error) {
         results.error ??= `Server stop failed: ${error.message}`;
       }

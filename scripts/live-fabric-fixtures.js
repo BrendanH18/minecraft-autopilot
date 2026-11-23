@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { writePrivateJson } from '../src/config.js';
 import {
   createRunDirectory,
   DEFAULT_JAR,
@@ -12,6 +13,7 @@ import {
   preflight,
   prepareServerDirectory,
   SEED,
+  sha256File,
   startServer,
   WORLD_SETUP,
 } from './live-acceptance/processes.js';
@@ -510,6 +512,26 @@ function formatFixture({ id, fixture, prepare, actions: commands, verify, variat
 }
 
 const itemRead = /^data get block (-?\d+) (-?\d+) (-?\d+) Items$/;
+
+export async function readFixtureCheckpoint(serverConsole, commands, { label, signal, now = Date.now }) {
+  const startedAt = new Date(now()).toISOString();
+  const reads = [];
+  for (const command of commands) {
+    signal.throwIfAborted();
+    try {
+      const coords = itemRead.exec(command);
+      const value = coords
+        ? await serverConsole.blockData(Number(coords[1]), Number(coords[2]), Number(coords[3]), 'Items', { signal })
+        : await serverConsole.command(command, { signal });
+      reads.push({ command, value });
+    } catch (error) {
+      signal.throwIfAborted();
+      reads.push({ command, error: error.message });
+    }
+  }
+  return { label, startedAt, finishedAt: new Date(now()).toISOString(), reads };
+}
+
 async function lowerVital(console, player, vitalTarget, signal) {
   const { path, target } = vitalTarget;
   const [apply, clear] = vitalCommands(player, vitalTarget);
@@ -529,9 +551,14 @@ async function startFixture(options, plan) {
   preflight(options);
   if (!(await portIsFree(options.port)))
     throw new Error(`Port ${options.port} on 127.0.0.1 is in use. Pass --port to select another port.`);
-  const directory = join(await createRunDirectory(runtime), 'server');
+  const run = await createRunDirectory(runtime);
+  const directory = join(run, 'server');
   await prepareServerDirectory({ ...options, directory, seed: SEED });
-  console.log(`Server log: ${join(directory, 'server.out')}`);
+  const serverLog = join(directory, 'server.out');
+  const jarSha256 = await sha256File(join(directory, 'server.jar'));
+  const evidencePath = join(run, 'checkpoints.json');
+  console.log(`Server log: ${serverLog}`);
+  console.log(`Independent checkpoints: ${evidencePath}`);
   const server = startServer({ directory, java: options.java });
   const input = createInterface({ input: process.stdin });
   const controller = new AbortController();
@@ -540,6 +567,7 @@ async function startFixture(options, plan) {
   input.once('close', stop);
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  let pending = Promise.resolve();
   try {
     await server.console.ready({ signal });
     if (server.console.version !== MINECRAFT_VERSION) {
@@ -557,24 +585,44 @@ async function startFixture(options, plan) {
     });
     for (const command of plan.prepare) await server.console.command(command, { signal });
     if (plan.vitalTarget) await lowerVital(server.console, options.player, plan.vitalTarget, signal);
-    console.log('Independent baseline reads');
-    for (const command of plan.verify) {
-      const coords = itemRead.exec(command);
-      const value = coords
-        ? JSON.stringify(
-            await server.console.blockData(Number(coords[1]), Number(coords[2]), Number(coords[3]), 'Items', {
-              signal,
-            }),
-          )
-        : await server.console.command(command, { signal });
-      console.log(`  ${command}\n    ${value}`);
-    }
+    const evidence = {
+      schema: 'minecraft-agent/live-fabric-fixture/1',
+      fixture: plan.id,
+      player: options.player,
+      port: options.port,
+      minecraft: { serverVersion: server.console.version, jarSha256, serverLog, seed: SEED },
+      checkpoints: [],
+    };
+    const capture = async (label) => {
+      const checkpoint = await readFixtureCheckpoint(server.console, plan.verify, { label, signal });
+      evidence.checkpoints.push(checkpoint);
+      await writePrivateJson(evidencePath, evidence);
+      console.log(`Independent reads (${label})`);
+      for (const { command, value, error } of checkpoint.reads) {
+        const detail = error ? `Error: ${error}` : typeof value === 'string' ? value : JSON.stringify(value);
+        console.log(`  ${command}\n    ${detail}`);
+      }
+      return checkpoint;
+    };
+    const baseline = await capture('baseline');
+    if (baseline.reads.some(({ error }) => error)) throw new Error('A baseline read failed. See checkpoints.json.');
     console.log(
-      `\n${formatFixture(plan, options.player)}\nFixture ready. Enter server console commands here. Ctrl+C, end of input, or stop ends the session.`,
+      `\n${formatFixture(plan, options.player)}\nFixture ready. Enter read [label] to save the independent reads, or enter a server command. Ctrl+C, end of input, or stop ends the session.`,
     );
     server.console.on('line', (line) => console.log(line));
     input.on('line', (line) => {
-      if (line.trim()) server.console.write(`${line.trim().replace(/^\//, '')}\n`);
+      const command = line.trim();
+      if (!command) return;
+      pending = pending
+        .then(async () => {
+          if (signal.aborted) return;
+          const checkpoint = /^read(?:\s+(.*))?$/.exec(command);
+          if (checkpoint) await capture(checkpoint[1] ?? 'follow-up');
+          else server.console.write(`${command.replace(/^\//, '')}\n`);
+        })
+        .catch((error) => {
+          if (!signal.aborted) console.error(`Error: ${error.message}`);
+        });
     });
     await Promise.race([
       new Promise((done) => {
@@ -588,6 +636,7 @@ async function startFixture(options, plan) {
   } finally {
     input.close();
     try {
+      await pending;
       await server.stop();
     } finally {
       process.off('SIGINT', stop);

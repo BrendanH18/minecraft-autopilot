@@ -25,6 +25,8 @@ function passed(gate, { commit = COMMIT, archiveSha256 = ARCHIVE } = {}) {
         recorded: archiveSha256,
         matches: true,
         predatesBuild: false,
+        manifestMatches: true,
+        bundleVerified: true,
       },
     },
   });

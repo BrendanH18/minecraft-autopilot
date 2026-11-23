@@ -112,7 +112,6 @@ import { registerVitalsSeriesTools } from './vitals-series-tools.js';
 import { registerRoutineMetricsTools } from './routine-metrics-tools.js';
 import { registerEventQueryTools } from './event-query-tools.js';
 import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
-import { registerAcceptanceTools } from './acceptance-tools.js';
 
 const program = new Command();
 program
@@ -126,14 +125,22 @@ const abortController = new AbortController();
 let activeAdapter;
 let activeBridge;
 let activeMcp;
-let shuttingDown = false;
-async function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  abortController.abort(new Error('Stopped by user.'));
-  await activeAdapter?.close();
-  await activeBridge?.close();
-  await activeMcp?.close();
+let shutdownTask;
+function shutdown() {
+  shutdownTask ??= Promise.resolve().then(async () => {
+    abortController.abort(new Error('Stopped by user.'));
+    const results = await Promise.allSettled([activeAdapter?.close(), activeBridge?.close(), activeMcp?.close()]);
+    for (const result of results) {
+      if (result.status === 'rejected') console.error(result.reason);
+    }
+  });
+  return shutdownTask;
+}
+
+async function closeIfStopping(resource) {
+  if (!abortController.signal.aborted) return;
+  await resource.close();
+  abortController.signal.throwIfAborted();
 }
 process.once('SIGINT', () => {
   shutdown().catch(console.error);
@@ -165,6 +172,7 @@ function log(value) {
 }
 async function connect() {
   activeAdapter = await FabricAdapter.connect(program.opts().bridge);
+  await closeIfStopping(activeAdapter);
   return activeAdapter;
 }
 async function perform(action) {
@@ -940,12 +948,10 @@ program
   .description('Expose Minecraft tools over MCP stdio for a local agent.')
   .action(async () => {
     const { serveMcp } = await import('./mcp.js');
-    const server = (activeMcp = await serveMcp(await connect()));
-    process.stdin.once('end', () =>
-      shutdown()
-        .then(() => server.close())
-        .catch(console.error),
-    );
+    const adapter = await connect();
+    process.stdin.once('end', () => shutdown().catch(console.error));
+    activeMcp = await serveMcp(adapter);
+    await closeIfStopping(activeMcp);
   });
 
 program
@@ -968,16 +974,20 @@ program
       directory = await mkdtemp(join(dataDirectory, 'tmp', 'demo-'));
     }
     const path = directory ? join(directory, 'bridge.json') : program.opts().bridge;
-    activeBridge = await startBridge(new Harness(new DemoDriver({ scenario: options.scenario })), {
-      discoveryPath: path,
-    });
-    log(`DEMO SIMULATION (${options.scenario} scenario) — no real Minecraft world is connected.`);
-    if (!options.smoke) {
-      log(`Bridge ready. In a second terminal: npm start -- observe\nDiscovery file: ${path}\nCtrl+C stops the demo.`);
-      return;
-    }
-    const adapter = (activeAdapter = await FabricAdapter.connect(path));
     try {
+      activeBridge = await startBridge(new Harness(new DemoDriver({ scenario: options.scenario })), {
+        discoveryPath: path,
+      });
+      await closeIfStopping(activeBridge);
+      log(`DEMO SIMULATION (${options.scenario} scenario) — no real Minecraft world is connected.`);
+      if (!options.smoke) {
+        log(
+          `Bridge ready. In a second terminal: npm start -- observe\nDiscovery file: ${path}\nCtrl+C stops the demo.`,
+        );
+        return;
+      }
+      const adapter = (activeAdapter = await FabricAdapter.connect(path));
+      await closeIfStopping(adapter);
       await adapter.execute({ type: 'set_home' });
       await adapter.execute({ type: 'goto', x: 5, y: 64, z: 5 });
       // A full inventory has no slot for new logs until something is stored.
@@ -989,9 +999,10 @@ program
       await adapter.release();
       print({ demonstration: 'simulation', scenario: options.scenario, ...(await adapter.observe()) });
     } finally {
-      await adapter.close();
-      await activeBridge.close();
-      await rm(directory, { recursive: true, force: true });
+      if (directory) {
+        await shutdown();
+        await rm(directory, { recursive: true, force: true });
+      }
     }
   });
 
@@ -1024,6 +1035,7 @@ program
       await driver.close();
       throw error;
     }
+    await closeIfStopping(activeBridge);
     log(
       `Connected as ${driver.bot.username}. Bridge ready. Use commands from a second terminal. Ctrl+C disconnects the bot.`,
     );
@@ -1089,6 +1101,7 @@ registerSnapshotQueryTools(program, { print });
 function firstCommand(args) {
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
+    if (argument === '--') return args[index + 1];
     if (argument === '--bridge') index++;
     else if (argument !== '--json' && !argument.startsWith('--bridge=')) return argument;
   }
@@ -1097,17 +1110,21 @@ function firstCommand(args) {
 try {
   const commandName = firstCommand(process.argv.slice(2));
   // Root help and unknown-command suggestions still use the full command tree.
-  if (
-    commandName !== 'acceptance' &&
-    !program.commands.some((command) => command.name() === commandName || command.aliases().includes(commandName))
-  ) {
+  const coreCommand = program.commands.some(
+    (command) => command.name() === commandName || command.aliases().includes(commandName),
+  );
+  const fullHelp = !coreCommand && !['acceptance', '-V', '--cli-version'].includes(commandName);
+  if (fullHelp) {
     const [planning, studies] = await Promise.all([import('./planning-tools.js'), import('./planning-studies.js')]);
     planning.registerPlanningTools(program, { print });
     planning.registerPlanningExtensions(program, { print });
     planning.registerBuildPlanningTools(program, { print });
     studies.registerPlanningStudies(program, { print });
   }
-  registerAcceptanceTools(program, { print });
+  if (fullHelp || commandName === 'acceptance') {
+    const { registerAcceptanceTools } = await import('./acceptance-tools.js');
+    registerAcceptanceTools(program, { print });
+  }
   await program.parseAsync();
 } catch (error) {
   console.error(program.opts().json ? JSON.stringify({ error: error.message }) : `Error: ${error.message}`);

@@ -20,6 +20,7 @@ It records human observations. It does not run gameplay, contact Minecraft or a 
 | `acceptance status [--commit <sha> --archive-sha256 <sha>] [--require-eligible]` | Show the latest finished session for each open gate and backend. Supply both hashes to inspect one candidate. The exit status is unsuccessful with `--require-eligible` unless every open gate has eligible evidence on one candidate. |
 
 Sessions can be named by their full id or an unambiguous prefix of at least six characters.
+Each session records the original checklist for reporting. If the gate's checklist changes, start a new session to record passing evidence.
 
 Use backend `both` only for the authenticated handoff, which exercises the client and the bot in one session. Gates marked `both` otherwise need a separate session for each backend on the same candidate. `demo` is for rehearsing the workflow and never counts.
 
@@ -57,7 +58,7 @@ from the CLI's source checkout. A transferred bundle is checked by its
 contents because copying files can change their modification times.
 
 With `--require-candidate`, failed checks exit unsuccessfully before saving a
-session. This requires a clean checkout and a matching archive and manifest.
+session. This requires a clean checkout and a verified installable archive.
 For `fabric` and `both`, it also requires a `--mods-dir` with matching jars.
 Omit `--require-candidate` to rehearse with the `demo` backend or to record a
 session with incomplete provenance for troubleshooting.
@@ -68,6 +69,7 @@ session with incomplete provenance for troubleshooting.
 - `git rev-parse HEAD` and whether `git status --porcelain` shows changes.
 - The candidate's `BUILD.json`, whether its `sourceCommit` matches the commit, and whether `sourceModified` is `false`.
 - The SHA-256 of `minecraft-agent-0.1.0.zip`, whether it matches the unique entry in `ARCHIVE_SHA256SUMS`, and whether the packaged build manifest matches the loose `BUILD.json`.
+- Whether the ZIP passes the bundle checks, including all required entries, jar checksums, and pinned dependency hashes.
 - With `--mods-dir`, the SHA-256 of each packaged jar found in that folder and the expected hash from the archive.
 - The Node version.
 
@@ -81,10 +83,10 @@ A gate's evidence is **eligible** when, for each backend it needs, the latest fi
 - used the gate's backend (never `demo`);
 - ran on a known commit with a clean worktree;
 - has a `BUILD.json` that matches that commit and records `sourceModified: false`;
-- has an archive checksum that matches `ARCHIVE_SHA256SUMS` and, in new sessions, a packaged manifest that matches the loose `BUILD.json`;
+- has a verified archive, with a checksum that matches `ARCHIVE_SHA256SUMS` and a packaged manifest that matches the loose `BUILD.json`;
 - for `fabric` or `both`, has all packaged jars present with hashes matching the archive.
 
-A later failed or blocked session replaces earlier eligible evidence. Existing Fabric and authenticated handoff sessions remain readable and need a new session with matching jar hashes to qualify.
+A later failed or blocked session replaces earlier eligible evidence. Earlier sessions remain readable. Repeat sessions that lack full archive verification or, for Fabric and authenticated handoff, matching jar hashes.
 
 `acceptance status` groups individually eligible open gates in `candidates` by commit and archive SHA-256. If those gates span multiple candidates, it reports a problem and the top-level `eligible` count is zero. The gate and backend details still show which evidence passed, so you can identify which sessions to repeat. Before marking any remaining gate complete, save the status with all open gates eligible on one candidate for [release sign-off](RELEASE.md#live-checks-required-before-shipping).
 
