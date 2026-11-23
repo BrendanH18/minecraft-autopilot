@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile, unlink, symlink } from 'node:fs/promises';
+import { mkdir, writeFile, unlink, symlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ARCHIVE_NAME, verifyModArchive, verifyModBundle } from '../src/bundle.js';
 import { archiveTest, zip } from './acceptance-zip.js';
@@ -82,14 +82,14 @@ async function archiveFixture(t, alter = (entries) => entries) {
 
 test('release verification checks a ZIP against the verified loose bundle', archiveTest, async (t) => {
   const { directory, expected, archiveSha256 } = await archiveFixture(t, (entries) => [['mods/', ''], ...entries]);
-  assert.deepEqual(await verifyModArchive(directory, expected), {
+  assert.deepEqual(await verifyModArchive(directory, { expectedFiles: expected }), {
     verified: true,
     files: ['app.jar', 'dependency.jar'],
     archive: ARCHIVE_NAME,
     archiveSha256,
   });
   await writeFile(join(directory, 'ARCHIVE_SHA256SUMS'), `${'a'.repeat(64)}  ${ARCHIVE_NAME}\n`);
-  await assert.rejects(verifyModArchive(directory, expected), /Archive checksum mismatch/);
+  await assert.rejects(verifyModArchive(directory, { expectedFiles: expected }), /Archive checksum mismatch/);
 });
 
 test('archive verification rejects extra, missing and duplicate entries', archiveTest, async (t) => {
@@ -98,10 +98,29 @@ test('archive verification rejects extra, missing and duplicate entries', archiv
     (entries) => entries.filter(([name]) => name !== 'LICENSE'),
     (entries) => [...entries, entries[0]],
     (entries) => [['../app.jar', 'app'], ...entries.slice(1)],
+    (entries) => [...entries, ['mods/ ', 'unexpected trailing-space entry']],
   ]) {
     const { directory, expected } = await archiveFixture(t, alter);
-    await assert.rejects(verifyModArchive(directory, expected), /exactly the expected bundle entries/);
+    await assert.rejects(
+      verifyModArchive(directory, { expectedFiles: expected }),
+      /exactly the expected bundle entries/,
+    );
   }
+});
+
+test('a transferred ZIP verifies its own checksums and pinned jars without loose files', archiveTest, async (t) => {
+  const { directory, expected, archiveSha256 } = await archiveFixture(t);
+  await rm(join(directory, 'mods'), { recursive: true });
+  for (const name of ['BUILD.json', 'INSTALL.md', 'LICENSE', 'SHA256SUMS']) await unlink(join(directory, name));
+  const options = { compareLoose: false, expectedFiles: expected };
+  assert.equal((await verifyModArchive(directory, options)).archiveSha256, archiveSha256);
+  await assert.rejects(
+    verifyModArchive(directory, {
+      ...options,
+      expectedFiles: [expected[0], { ...expected[1], sha256: digest('different upstream') }],
+    }),
+    /Pinned dependency checksum mismatch/,
+  );
 });
 
 test('a matching outer checksum cannot hide stale or different packaged files', archiveTest, async (t) => {
@@ -109,7 +128,7 @@ test('a matching outer checksum cannot hide stale or different packaged files', 
     const { directory, expected } = await archiveFixture(t, (entries) =>
       entries.map(([entry, content]) => [entry, entry === name ? 'different bytes' : content]),
     );
-    await assert.rejects(verifyModArchive(directory, expected), {
+    await assert.rejects(verifyModArchive(directory, { expectedFiles: expected }), {
       message: `Archive entry differs from loose bundle: ${name}`,
     });
   }

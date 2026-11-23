@@ -169,6 +169,8 @@ test('storage failure fixtures independently verify the blocked lid and refreshe
   assert.ok(scoped.fixture.includes('setblock 94 -60 0 minecraft:barrel[facing=up]'));
   assert.match(scoped.actions[2], /data modify block 94 -60 0 Items\[0\]\.count set value 2/);
   assert.match(scoped.actions[2], /setblock 98 -59 0 minecraft:stone/);
+  assert.match(scoped.actions[3], /tp FixtureUser 84\.5 -60 0\.5 and record Pos/);
+  assert.match(scoped.actions.join('\n'), /Read Pos while the player walks to the barrel/);
   assert.deepEqual(
     scoped.actions.filter((action) => action.startsWith('mc-agent inspect-storage')),
     ['mc-agent inspect-storage --container 94,-60,0', 'mc-agent inspect-storage --container 98,-60,0'],

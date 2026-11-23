@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -8,7 +9,9 @@ import { testDirectory } from './helpers.js';
 
 const commit = 'a'.repeat(40);
 const jarSha256 = 'b'.repeat(64);
-const run = (minute, scenarios, { model = null, environment = { commit, dirty: false }, minecraft } = {}) => ({
+const cleanSource = { commit, dirty: false };
+const candidate = { ...cleanSource, sourceAtFinish: cleanSource };
+const run = (minute, scenarios, { model = null, environment = candidate, minecraft } = {}) => ({
   schema: 'minecraft-agent/live-bot-acceptance/1',
   finishedAt: `2026-11-22T10:0${minute}:00.000Z`,
   environment,
@@ -59,7 +62,7 @@ test('review-bot groups coverage and prefers the latest attempt over older attem
   const [report] = reports;
   assert.deepEqual(report.rejected, []);
   assert.equal(report.runs[0].serverLog, '/runner/server.out');
-  assert.equal(report.runs[0].sourceAtFinish, null);
+  assert.deepEqual(report.runs[0].sourceAtFinish, cleanSource);
   const gate = (id) => report.gates.find(({ gate }) => gate === id);
   const withdraw = gate('bot-withdraw-craft');
   assert.equal(withdraw.offline.find(({ id }) => id === 'withdraw').status, 'fail');
@@ -92,22 +95,26 @@ test('review-bot rejects passes without supported server provenance and runs wit
       environment: { commit, dirty: false, sourceAtFinish: { commit: 'c'.repeat(40), dirty: false } },
     }),
     run(7, passing, { environment: { commit, dirty: false, sourceAtFinish: { commit: null, dirty: null } } }),
+    run(8, passing, { environment: cleanSource }),
   ]);
-  await assert.rejects(parse, /7 bot result file\(s\) rejected/);
+  await assert.rejects(parse, /8 bot result file\(s\) rejected/);
   const [report] = reports;
   assert.deepEqual(report.runs, []);
   assert.deepEqual(report.serverJarSha256s, []);
   assert.match(report.rejected[0].reason, /Minecraft 1\.21\.1 server; recorded unknown/);
   assert.match(report.rejected[1].reason, /Minecraft 1\.21\.1 server; recorded 1\.21\.4/);
   for (const { reason } of report.rejected.slice(2, 4)) assert.match(reason, /server jar SHA-256/);
-  for (const { reason } of report.rejected.slice(4)) assert.match(reason, /same clean candidate commit/);
+  for (const { reason } of report.rejected.slice(4, 7)) assert.match(reason, /same clean candidate commit/);
+  assert.match(report.rejected[7].reason, /source state at finish/);
 });
 
 test('review-bot finds copied logs and reports distinct server jars across passing runs', async (t) => {
   const otherJar = 'a'.repeat(64);
+  const log = 'server output';
+  const serverLogSha256 = createHash('sha256').update(log).digest('hex');
   const { directory, files, reports, parse } = await review(t, [
     run(1, [{ id: 'withdraw', status: 'pass' }], {
-      environment: { commit, dirty: false, sourceAtFinish: { commit, dirty: false } },
+      minecraft: { serverLogSha256 },
     }),
     run(2, [{ id: 'craft-bootstrap', status: 'pass' }], { minecraft: { jarSha256: otherJar } }),
     run(3, [{ id: 'stale-removal-model', status: 'skipped' }], {
@@ -117,7 +124,7 @@ test('review-bot finds copied logs and reports distinct server jars across passi
   const logDirectory = join(directory, 'server');
   await mkdir(logDirectory);
   const logFile = join(logDirectory, 'server.out');
-  await writeFile(logFile, 'server output');
+  await writeFile(logFile, log);
   const artifactFile = join(directory, 'results.json');
   await rename(files[0], artifactFile);
   files[0] = artifactFile;
@@ -127,11 +134,32 @@ test('review-bot finds copied logs and reports distinct server jars across passi
   assert.deepEqual(report.serverJarSha256s, [otherJar, jarSha256]);
   assert.equal(report.runs[0].serverLogPath, logFile);
   assert.equal(report.runs[0].serverLog, '/runner/server.out');
+  assert.equal(report.runs[0].serverLogSha256, serverLogSha256);
   assert.equal(report.runs[0].serverVersion, '1.21.1');
   assert.equal(report.runs[0].serverJarSha256, jarSha256);
   assert.deepEqual(report.runs[0].sourceAtFinish, { commit, dirty: false });
   assert.equal(report.runs[1].serverLogPath, null);
   assert.equal(report.runs[2].serverJarSha256, null);
+
+  await writeFile(logFile, 'an unrelated run');
+  await parse();
+  assert.equal(reports.at(-1).runs[0].serverLogPath, null);
+});
+
+test('review-bot prefers the recorded log when the results file sits beside another run', async (t) => {
+  const original = await testDirectory(t, 'original-bot-log-');
+  const recorded = join(original, 'server.out');
+  await writeFile(recorded, 'actual server log');
+  const { directory, files, reports, parse } = await review(t, [
+    run(1, [{ id: 'withdraw', status: 'pass' }], { minecraft: { serverLog: recorded } }),
+  ]);
+  await mkdir(join(directory, 'server'));
+  await writeFile(join(directory, 'server', 'server.out'), 'different server log');
+  const result = join(directory, 'results.json');
+  await rename(files[0], result);
+  files[0] = result;
+  await parse();
+  assert.equal(reports[0].runs[0].serverLogPath, recorded);
 });
 
 test('review-bot rejects dirty, different-commit and malformed files without counting their passes', async (t) => {

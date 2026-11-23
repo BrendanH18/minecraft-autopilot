@@ -115,7 +115,7 @@ schema, startedAt, finishedAt
 review: { reviewed: false, note }          # a person sets this when they accept the run
 scope                                      # bot only; not Fabric or authenticated handoff
 environment: { commit, dirty, node, java, platform, javaPreflight, sourceAtFinish: { commit, dirty } }
-minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, seed, levelType }
+minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, serverLogSha256, seed, levelType }
 options: { port, account, keepServer, model, noThinking, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
@@ -137,14 +137,16 @@ npm start -- acceptance review-bot --commit "$candidate_commit" offline/results.
 
 The JSON report shows `pass`, `fail`, `skipped`, or `missing` for each runner
 scenario, with separate offline and real-model totals for each gate. Each
-outcome points to its results file. For artifacts that preserve the runner's
-directory layout, `serverLogPath` locates the copied `server/server.out` next
-to `results.json`. The recorded path is also included. The most recently finished run that attempted a
-scenario takes precedence. A skip is shown if no run attempted that scenario.
+outcome points to its results file. `serverLogPath` uses the runner's recorded
+log when available. For a copied `results.json`, the reviewer uses the
+adjacent `server/server.out` if its SHA-256 matches the recorded log. The most
+recently finished run that attempted a scenario takes precedence. A skip is
+shown if no run attempted that scenario.
 Unreadable, malformed, dirty, and different-commit files are listed under
 `rejected`, and the command exits unsuccessfully if any file was rejected.
 Passing scenarios must contain passing checks and identify the Minecraft
-server version and jar SHA-256. Real-model scenarios also identify the
+server version and jar SHA-256. Older runs without final Git provenance
+remain historical observations. Real-model scenarios also identify the
 configured model. The report lists all distinct server jar hashes so reviewers
 can see which configurations the supplied runs cover. The report covers the
 runner's share of the bot gates. A person records the sessions and signs off.

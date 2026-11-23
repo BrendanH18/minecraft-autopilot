@@ -10,7 +10,7 @@ It records human observations. It does not run gameplay, contact Minecraft or a 
 | --- | --- |
 | `acceptance list [--open] [--backend <fabric\|mineflayer\|both>]` | List open and closed gates. A fabric or mineflayer filter includes gates that need both. |
 | `acceptance show <gate>` | Show prerequisites, numbered steps, and the evidence to record. |
-| `acceptance preflight --backend <fabric\|mineflayer\|both> [--candidate-dir <path>] [--mods-dir <path>]` | Print candidate and launcher provenance, and exit unsuccessfully if verification fails. Saves no session. |
+| `acceptance preflight --backend <fabric\|mineflayer\|both> [--candidate-dir <path>] [--mods-dir <path>]` | Verify the installable ZIP, candidate source, and launcher provenance without saving a session. |
 | `acceptance start <gate> --backend <fabric\|mineflayer\|both\|demo> [--candidate-dir <path>] [--require-candidate] [--mods-dir <path>] [--launcher ..] [--server ..] [--model ..] [--mcp-client ..] [--note ..]` | Start a session and capture provenance. Use `--require-candidate` to check provenance before recording a live session and `--mods-dir` for packaged Fabric and authenticated handoff. |
 | `acceptance step <session> <n> pass\|fail [--note ..]` | Record an observation for step `n`. Re-recording keeps the earlier observation. |
 | `acceptance finish <session> pass\|fail\|blocked [--note ..]` | Finish a session. `fail` and `blocked` need `--note`. `pass` is refused while a step's latest observation failed. |

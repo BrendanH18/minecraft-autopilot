@@ -53,7 +53,17 @@ async function fixture(t, { archiveCommit = commit, changes = '' } = {}) {
     for (const [index] of steps.entries()) await run('step', session.id, String(index + 1), 'pass');
     return run('finish', session.id, 'pass');
   };
-  return { directory, dist, modsDir, run, start, finish, jarContents, archiveSha256: digest(archive) };
+  return {
+    directory,
+    dist,
+    modsDir,
+    run,
+    start,
+    finish,
+    jarContents,
+    archiveSha256: digest(archive),
+    output: () => output,
+  };
 }
 
 test('matching launcher jars make a completed Fabric gate eligible', archiveTest, async (t) => {
@@ -70,20 +80,22 @@ test('matching launcher jars make a completed Fabric gate eligible', archiveTest
   assert.ok(!markdown.includes(modsDir));
 });
 
-test('preflight verifies backend-specific requirements without recording a session', archiveTest, async (t) => {
-  const { directory, modsDir, run, archiveSha256 } = await fixture(t);
-  const bot = await run('preflight', '--backend', 'mineflayer');
-  assert.equal(bot.verified, true);
-  assert.equal(bot.provenance.archive.sha256, archiveSha256);
-  assert.equal(bot.provenance.mods, undefined);
+test('preflight requires an installable archive and leaves the sessions file untouched', archiveTest, async (t) => {
+  const { directory, modsDir, run, archiveSha256, output } = await fixture(t);
+  await assert.rejects(run('preflight', '--backend', 'mineflayer'), /Candidate verification failed/);
+  assert.equal(output().verified, false);
+  assert.equal(output().provenance.archive.sha256, archiveSha256);
+  assert.match(output().problems[0], /exactly the expected bundle entries/);
 
   for (const backend of ['fabric', 'both']) {
     await assert.rejects(run('preflight', '--backend', backend), /Candidate verification failed/);
-    const result = await run('preflight', '--backend', backend, '--mods-dir', modsDir);
-    assert.equal(result.verified, true);
-    assert.equal(result.provenance.mods.archiveSha256, archiveSha256);
-    assert.deepEqual(result.problems, []);
-    assert.deepEqual(result.warnings, []);
+    assert.match(output().problems[0], /launcher mod jars were not checked/);
+    await assert.rejects(
+      run('preflight', '--backend', backend, '--mods-dir', modsDir),
+      /Candidate verification failed/,
+    );
+    assert.equal(output().provenance.mods.archiveSha256, archiveSha256);
+    assert.match(output().problems[0], /exactly the expected bundle entries/);
   }
   await assert.rejects(run('preflight', '--backend', 'demo'), /Use a live backend/);
   await assert.rejects(readFile(acceptanceFile(directory)), { code: 'ENOENT' });

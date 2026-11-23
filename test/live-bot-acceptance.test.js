@@ -1432,6 +1432,10 @@ test('candidate evidence hashes the prepared server jar and checks the source ag
   };
   deps.sha256File = async (path) => {
     assert.ok(prepared);
+    if (path === '/fake/run/server/server.out') {
+      assert.equal(deps.calls.serverStops, 1);
+      return 'b'.repeat(64);
+    }
     assert.equal(path, '/fake/run/server/server.jar');
     hashed = true;
     return 'a'.repeat(64);
@@ -1446,6 +1450,7 @@ test('candidate evidence hashes the prepared server jar and checks the source ag
   const result = await runAcceptance(options, deps);
   assert.equal(result.error, null);
   assert.equal(result.minecraft.jarSha256, 'a'.repeat(64));
+  assert.equal(result.minecraft.serverLogSha256, 'b'.repeat(64));
   assert.equal(result.environment.dirty, false);
   assert.deepEqual(result.environment.sourceAtFinish, { commit: 'abc123', dirty: true });
 });

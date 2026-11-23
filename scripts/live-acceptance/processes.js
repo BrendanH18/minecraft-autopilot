@@ -4,6 +4,7 @@ import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
+import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { projectRoot } from '../../src/config.js';
 import { FabricAdapter } from '../../src/fabric-adapter.js';
@@ -217,6 +218,7 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
         ]);
       }
       await settle(child, exited, steps);
+      await finished(log);
     },
   };
 }

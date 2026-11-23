@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
-import { MINECRAFT_VERSION } from './processes.js';
+import { MINECRAFT_VERSION, sha256File } from './processes.js';
 import { RELEASE, scenarios } from './scenarios.js';
 
 const gateGroups = [
@@ -21,6 +21,7 @@ const resultSchema = z.object({
   finishedAt: z.iso.datetime(),
   minecraft: z.object({
     serverLog: z.string().trim().min(1),
+    serverLogSha256: z.string().regex(sha256).nullish(),
     serverVersion: z.string().nullish(),
     jarSha256: z.string().nullish(),
   }),
@@ -37,12 +38,13 @@ const resultSchema = z.object({
   error: z.string().nullish(),
 });
 
-async function findServerLog(file, recorded) {
+async function findServerLog(file, recorded, checksum) {
   const candidates = [resolve(recorded)];
   // The workflow and Boat both preserve this layout when copying evidence from the runner.
-  if (basename(file) === 'results.json') candidates.unshift(resolve(dirname(file), 'server/server.out'));
+  if (checksum && basename(file) === 'results.json') candidates.push(resolve(dirname(file), 'server/server.out'));
   for (const path of candidates) {
-    if ((await stat(path).catch(() => null))?.isFile()) return path;
+    if (!(await stat(path).catch(() => null))?.isFile()) continue;
+    if (!checksum || (await sha256File(path).catch(() => null)) === checksum) return path;
   }
   return null;
 }
@@ -69,14 +71,15 @@ export async function reviewBotEvidence(files, commit) {
         throw new Error(`Recorded commit ${result.environment.commit ?? 'unknown'} does not match the candidate.`);
       if (result.environment.dirty !== false) throw new Error('The run did not record a clean worktree.');
       const { sourceAtFinish } = result.environment;
+      const hasPass = result.scenarios.some(({ status }) => status === 'pass');
+      if (hasPass && !sourceAtFinish) throw new Error('Passing results need the candidate source state at finish.');
       if (sourceAtFinish && (sourceAtFinish.commit !== commit || sourceAtFinish.dirty !== false))
         throw new Error('The run did not finish on the same clean candidate commit.');
       if (new Set(result.scenarios.map(({ id }) => id)).size !== result.scenarios.length)
         throw new Error('The run contains duplicate scenario IDs.');
 
       const { finishedAt, error, minecraft, options } = result;
-      const { serverLog, serverVersion, jarSha256 } = minecraft;
-      const hasPass = result.scenarios.some(({ status }) => status === 'pass');
+      const { serverLog, serverVersion, jarSha256, serverLogSha256 } = minecraft;
       if (hasPass && serverVersion !== MINECRAFT_VERSION)
         throw new Error(
           `Passing results need a Minecraft ${MINECRAFT_VERSION} server; recorded ${serverVersion ?? 'unknown'}.`,
@@ -95,7 +98,8 @@ export async function reviewBotEvidence(files, commit) {
         file,
         finishedAt,
         serverLog,
-        serverLogPath: await findServerLog(file, serverLog),
+        serverLogPath: await findServerLog(file, serverLog, serverLogSha256),
+        serverLogSha256: serverLogSha256 ?? null,
         serverVersion: serverVersion ?? null,
         serverJarSha256: jarSha256 ?? null,
         sourceAtFinish: sourceAtFinish ?? null,

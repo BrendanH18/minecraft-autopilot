@@ -6,7 +6,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual, promisify } from 'node:util';
-import { ARCHIVE_NAME, modBundleFiles } from './bundle.js';
+import { ARCHIVE_NAME, modBundleFiles, verifyModArchive } from './bundle.js';
 import { dataDirectory, projectRoot, writePrivateJson } from './config.js';
 import {
   ACCEPTANCE_GATES,
@@ -745,6 +745,15 @@ export function registerAcceptanceTools(
       if (!GATE_BACKENDS.includes(backend)) throw new Error(`Use a live backend: ${GATE_BACKENDS.join(', ')}.`);
       const { provenance, warnings } = await readCandidate(options);
       const problems = provenanceProblems({ backend, provenance });
+      if (!problems.length) {
+        try {
+          const candidateDir = options.candidateDir ?? join(root, 'dist');
+          const bundle = await verifyModArchive(candidateDir, { compareLoose: false });
+          if (bundle.archiveSha256 !== provenance.archive.sha256) problems.push('archive changed during preflight');
+        } catch (error) {
+          problems.push(`installable archive verification failed: ${error.message}`);
+        }
+      }
       print({ backend, verified: problems.length === 0, provenance, problems, warnings });
       if (problems.length) throw new Error('Candidate verification failed.');
     });
