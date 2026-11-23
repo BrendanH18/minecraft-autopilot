@@ -15,6 +15,9 @@ on:
       - 'scripts/live-acceptance/**'
       - 'scripts/setup-mod.js'
       - 'scripts/gradle.js'
+      - 'mod/*.gradle'
+      - 'mod/gradle.properties'
+      - 'mod/gradle/wrapper/gradle-wrapper.properties'
       - 'package.json'
       - 'package-lock.json'
 

@@ -39,7 +39,9 @@ don't run the full `scripts/boat-check.sh` before handing work back.
   and for checks CI doesn't run.
 - The Bot acceptance workflow runs the headless `--fast` scenarios on pull
   requests that touch `src/`, the scenario runner or the server jar setup
-  (owner decision, 2026-11-22). It leaves out the three long-running
+  (owner decision, 2026-11-22). It isn't a required check, so treat a failing
+  `bot-acceptance` run like a failing `node` or `mod` job: fix it before the
+  pull request merges. It leaves out the three long-running
   `recovery-*` scenarios; when a change affects recovery, cancel or stop, run
   them on Boat before handing back:
   `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario <scenario>`
