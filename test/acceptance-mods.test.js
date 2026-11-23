@@ -53,7 +53,17 @@ async function fixture(t, { archiveCommit = commit, changes = '' } = {}) {
     for (const [index] of steps.entries()) await run('step', session.id, String(index + 1), 'pass');
     return run('finish', session.id, 'pass');
   };
-  return { directory, dist, modsDir, run, start, finish, jarContents, archiveSha256: digest(archive) };
+  return {
+    directory,
+    dist,
+    modsDir,
+    run,
+    start,
+    finish,
+    jarContents,
+    archiveSha256: digest(archive),
+    output: () => output,
+  };
 }
 
 test('matching launcher jars make a completed Fabric gate eligible', archiveTest, async (t) => {
@@ -68,6 +78,27 @@ test('matching launcher jars make a completed Fabric gate eligible', archiveTest
   assert.match(markdown, /Launcher mods at session start/);
   assert.ok(markdown.includes(digest(jarContents[0][1])));
   assert.ok(!markdown.includes(modsDir));
+});
+
+test('preflight requires an installable archive and leaves the sessions file untouched', archiveTest, async (t) => {
+  const { directory, modsDir, run, archiveSha256, output } = await fixture(t);
+  await assert.rejects(run('preflight', '--backend', 'mineflayer'), /Candidate verification failed/);
+  assert.equal(output().verified, false);
+  assert.equal(output().provenance.archive.sha256, archiveSha256);
+  assert.match(output().problems[0], /exactly the expected bundle entries/);
+
+  for (const backend of ['fabric', 'both']) {
+    await assert.rejects(run('preflight', '--backend', backend), /Candidate verification failed/);
+    assert.match(output().problems[0], /launcher mod jars were not checked/);
+    await assert.rejects(
+      run('preflight', '--backend', backend, '--mods-dir', modsDir),
+      /Candidate verification failed/,
+    );
+    assert.equal(output().provenance.mods.archiveSha256, archiveSha256);
+    assert.match(output().problems[0], /exactly the expected bundle entries/);
+  }
+  await assert.rejects(run('preflight', '--backend', 'demo'), /Use a live backend/);
+  await assert.rejects(readFile(acceptanceFile(directory)), { code: 'ENOENT' });
 });
 
 test(

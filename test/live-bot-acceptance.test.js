@@ -307,7 +307,7 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
     assert.match(scenario.fixture[0], /^forceload add /);
     assert.match(scenario.cleanup.at(-1), /^forceload remove /);
     assert.ok(
-      scenario.cleanup.some((command) => /^fill .* air$/.test(command)),
+      scenario.cleanup.some((command) => /^fill .* (?:minecraft:)?air$/.test(command)),
       `${scenario.id} removes its fixture`,
     );
     assert.ok(
@@ -1078,6 +1078,7 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
     { commit: value.environment.commit, dirty: value.environment.dirty },
     { commit: 'abc123', dirty: false },
   );
+  assert.deepEqual(value.environment.sourceAtFinish, { commit: 'abc123', dirty: false });
   assert.equal(value.minecraft.jarSha256, 'f'.repeat(64));
   assert.equal(value.minecraft.serverVersion, '1.21.1');
   assert.equal(value.minecraft.serverLog, '/fake/run/server/server.out');
@@ -1349,7 +1350,7 @@ test('overlapping runs keep their server, bot state, and review evidence in sepa
   }
 });
 
-test('--fast dry-run includes the offline storage and crafting scenarios and excludes pits and models', () => {
+test('--fast dry-run includes short offline scenarios and excludes pits and models', () => {
   const plan = buildPlan(parseOptions(['--fast', '--dry-run', '--model', 'local-test-model']));
   assert.deepEqual(
     plan.scenarios.map(({ id }) => id),
@@ -1378,6 +1379,7 @@ test('--fast dry-run includes the offline storage and crafting scenarios and exc
       'craft-mixed-stone',
       'craft-reuses-consumed-slot',
       'craft-no-table',
+      'cobblestone-hostiles-dimension',
     ],
   );
   assert.throws(() => parseOptions(['--fast', '--all']), /Choose only one/);
@@ -1418,6 +1420,60 @@ test('a live selection with no completed checks returns an unsuccessful exit sta
   const deps = fakeDeps(world);
   assert.equal(await main(['--scenario', 'stale-removal-model', '--accept-eula'], deps), 1);
   assert.deepEqual(deps.calls.results.value.summary, { pass: 0, fail: 0, skipped: 1, error: null });
+});
+
+test('candidate evidence hashes the prepared server jar and checks the source again after cleanup', async () => {
+  const deps = fakeDeps(fakeWorld());
+  const { startServer } = deps;
+  let prepared = false;
+  let hashed = false;
+  deps.prepareServerDirectory = async () => {
+    prepared = true;
+  };
+  deps.sha256File = async (path) => {
+    assert.ok(prepared);
+    if (path === '/fake/run/server/server.out') {
+      assert.equal(deps.calls.serverStops, 1);
+      return 'b'.repeat(64);
+    }
+    assert.equal(path, '/fake/run/server/server.jar');
+    hashed = true;
+    return 'a'.repeat(64);
+  };
+  deps.startServer = () => {
+    assert.ok(hashed);
+    return startServer();
+  };
+  deps.environment = () => ({ commit: 'abc123', dirty: deps.calls.serverStops > 0 });
+
+  const options = parseOptions(['--scenario', 'stale-removal-model', '--accept-eula']);
+  const result = await runAcceptance(options, deps);
+  assert.equal(result.error, null);
+  assert.equal(result.minecraft.jarSha256, 'a'.repeat(64));
+  assert.equal(result.minecraft.serverLogSha256, 'b'.repeat(64));
+  assert.equal(result.environment.dirty, false);
+  assert.deepEqual(result.environment.sourceAtFinish, { commit: 'abc123', dirty: true });
+});
+
+test('a failed server shutdown never hashes a partial log', async () => {
+  const deps = fakeDeps(fakeWorld());
+  const { startServer } = deps;
+  deps.startServer = () => ({
+    ...startServer(),
+    stop: async () => {
+      throw new Error('still running');
+    },
+  });
+  const hashed = [];
+  deps.sha256File = async (path) => {
+    hashed.push(path);
+    return 'a'.repeat(64);
+  };
+  const options = parseOptions(['--scenario', 'stale-removal-model', '--accept-eula']);
+  const result = await runAcceptance(options, deps);
+  assert.deepEqual(hashed, ['/fake/run/server/server.jar']);
+  assert.equal(result.minecraft.serverLogSha256, null);
+  assert.equal(result.error, 'Server stop failed: still running');
 });
 
 test('settle cancels its escalation timer once the child exits', async () => {
@@ -1463,11 +1519,16 @@ test('asynchronous server stdin errors fail pending commands and allow signal sh
     child.kill = (signal) => {
       child.signalCode = signal;
       child.emit('exit', null, signal);
+      setImmediate(() => {
+        child.stdout.emit('data', 'last server output after exit\n');
+        child.emit('close', null, signal);
+      });
     };
     const server = startServer({ directory, spawnImpl: () => child });
     await assert.rejects(server.console.command('time set 1000'), /server stdin failed: EPIPE/);
     await server.stop();
     assert.equal(child.signalCode, 'SIGTERM');
+    assert.equal(await readFile(join(directory, 'server.out'), 'utf8'), 'last server output after exit\n');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

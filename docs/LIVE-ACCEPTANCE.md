@@ -29,7 +29,7 @@ node scripts/live-bot-acceptance.js --accept-eula --scenario withdraw-craft-mode
 ```
 
 Choose one of `--scenario ID` (repeatable), `--all`, or `--fast`. The fast preset
-runs offline collection, storage, withdrawal, and crafting scenarios. It
+runs offline collection, storage, withdrawal, crafting, and dimension-change scenarios. It
 omits the three pit recovery scenarios and scenarios that require a real model.
 Use `--dry-run --json` to read the selected fixtures, actions, and checks as structured data.
 
@@ -63,7 +63,7 @@ is kept for seven days, including when a scenario fails and produces evidence.
 3. Applies world rules: peaceful, no daylight/weather cycle, no mob spawning, random tick speed 0, time 1000, clear weather.
 4. For each scenario, in its own 64-block lane (beyond the bot's 48-block collection search): force-loads the lane, builds the fixture, starts a **fresh bot session** with `node src/cli.js --bridge <run-dir>/bridge.json server --host 127.0.0.1 --port N --account LiveBot --auth offline --version 1.21.1` and sets `MC_AGENT_HOME` to `<run-dir>/agent-home`. Then it resets the player, teleports it, and waits until the bridge and server agree on its position and inventory.
 5. Runs the scenario, then always sends a bridge emergency stop, removes the fixture, and stops the bot process — also after a failed check, an exception, or Ctrl+C.
-6. Stops the server (`stop`, then SIGTERM/SIGKILL if needed), writes the results file, and prints the paths to it and `server.out`. The report includes the log path even when `--out` puts the report elsewhere. Run directories are retained for review and accumulate on disk.
+6. Stops the server (`stop`, then SIGTERM/SIGKILL if needed), captures the final Git state, writes the results file, and prints the paths to it and `server.out`. The report includes the log path even when `--out` puts the report elsewhere. Run directories are retained for review and accumulate on disk.
 
 Independent verification uses only server console reads: `data get block X Y Z Items`, `data get entity NAME Inventory`, `data get entity NAME Pos`, and, for blocks without data such as a crafting table, `execute if block X Y Z BLOCK` ("Test passed" or "Test failed"). The bot's own reports are compared against them, never trusted alone.
 
@@ -102,6 +102,7 @@ Ctrl+C stops the current scenario, cleans up its fixture even with `--keep-serve
 | `craft-mixed-stone` | Player holds one each of cobblestone, blackstone, and cobbled deepslate plus two sticks. `craft stone_pickaxe 1` beside a table. | Server inventory holds one pickaxe and the existing table remains. | Bot withdraw and craft, mixed table inputs. |
 | `craft-reuses-consumed-slot` | Player holds one log and 35 full cobblestone stacks. `craft oak_planks 4`. | The planks occupy the slot freed by the log. All cobblestone remains. | Bot withdraw and craft, full inventory with room after consumption. |
 | `craft-no-table` | Player has the inputs for a stone pickaxe with no crafting table held or nearby. | Job reports that a table is required. The server confirms the inputs remain. | Bot withdraw and craft, missing table. |
+| `cobblestone-hostiles-dimension` | The bot starts with an iron pickaxe near eight cobblestone blocks and two enclosed husks. The server teleports the bot to a Nether landing pad during navigation. | Server inventory confirms at least four cobblestone. The bridge includes the husk within 16 blocks. Navigation is cancelled on the dimension change and control returns to manual. Server position reads confirm the bot stays on the landing pad. | Bot half of the cobblestone, hostile observations, and dimension-change gate. |
 
 ### Collect-and-store without a model
 
@@ -113,15 +114,15 @@ The `agent` command always needs an Ollama model; there is no deterministic CLI 
 schema, startedAt, finishedAt
 review: { reviewed: false, note }          # a person sets this when they accept the run
 scope                                      # bot only; not Fabric or authenticated handoff
-environment: { commit, dirty, node, java, platform, javaPreflight }
-minecraft: { expectedVersion, serverVersion, jar, jarSha256, seed, levelType }
+environment: { commit, dirty, node, java, platform, javaPreflight, sourceAtFinish: { commit, dirty } }
+minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, serverLogSha256, seed, levelType }
 options: { port, account, keepServer, model, noThinking, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
 summary: { pass, fail, skipped, error }, error
 ```
 
-`steps` record every console command, bridge/CLI action, and read with timing and outcome. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. A run from a dirty tree (`dirty: true`) is not release-candidate evidence.
+`steps` record every console command, bridge/CLI action, and read with timing and outcome. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
 
 Cleanup failures fail the affected scenario. If the runner cannot stop the bot, it records the failure and skips the remaining scenarios. Failed runs include the last available bot output alongside the server log. A run exits unsuccessfully when it records zero passing scenarios, including a selection made up entirely of real-model scenarios without `--model`.
 
@@ -135,15 +136,22 @@ npm start -- acceptance review-bot --commit "$candidate_commit" offline/results.
 ```
 
 The JSON report shows `pass`, `fail`, `skipped`, or `missing` for each runner
-scenario, with separate offline and real-model coverage. Each outcome points to
-its results file, and the runs list includes the server log path recorded on
-the machine that ran it. The most recently finished run that attempted a
-scenario takes precedence. A skip is shown if no run attempted that scenario.
+scenario, with separate offline and real-model totals for each gate. Each
+outcome points to its results file. `serverLogPath` uses the runner's recorded
+log when available. For a copied `results.json`, the reviewer uses the
+adjacent `server/server.out` if its SHA-256 matches the recorded log. The most
+recently finished run that attempted a scenario takes precedence. A skip is
+shown if no run attempted that scenario.
 Unreadable, malformed, dirty, and different-commit files are listed under
 `rejected`, and the command exits unsuccessfully if any file was rejected.
-Passing scenarios must contain passing checks and, for real-model scenarios,
-identify the configured model. The report covers the runner's share of the bot
-gates and leaves session recording and sign-off to the reviewer.
+Passing scenarios must contain passing checks and identify the Minecraft
+server version and jar SHA-256, and their server log must match its recorded
+SHA-256. The reviewer rejects older passing runs without final Git provenance
+and can still report runs containing only failed or skipped scenarios.
+Real-model scenarios also identify the
+configured model. The report lists all distinct server jar hashes so reviewers
+can see which configurations the supplied runs cover. The report covers the
+runner's share of the bot gates. A person records the sessions and signs off.
 
 For each scenario, confirm in the results and `server.out` that the fixture built as intended (no command errors), the bot was in the expected place, and the checks reflect the RELEASE.md wording, not only that they passed. In particular: the pit run really timed out (not "No reachable matching blocks remain"), the cancel landed during the return trip, and storage changes happened before the final inspection. Then record the commit, jar checksum, server/bot/model configuration, scenario, and result in DEVELOPMENT.md before ticking a box.
 
@@ -197,17 +205,23 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
 | `cobblestone-hostiles-dimension` | Cobblestone blocks, an iron pickaxe, and a stationary husk enclosed in glass. Read player inventory after collection and compare `mc-agent threats` with server positions. During the printed navigation run, enter the provided teleport command to land on a prepared Nether platform. Verify that the dimension change cancelled the job and repeat the player position and dimension reads. |
 | `pit` | Bot runner's oak-log shaft and mining fatigue, with player inventory and position reads before collection and after recovery. |
 | `deposit-chest`, `deposit-barrel`, `deposit-full-chest`, `deposit-double-chest` | Three stacks of logs and nearby storage. The single chest setup also prints the contents-removal and blocked-lid commands for fresh inspection. The double chest prints item reads for both halves. |
+| `deposit-blocked-chest` | A stone block over the lid before the first deposit. Read the lid, chest contents, and player inventory to verify the failure leaves all counts unchanged. |
 | `deposit-return` | The bot runner's elevated home and chest out of reach. Optionally remove the step once the player is back at home to test the blocked return. |
+| `inspect-scoped-storage` | Deposit into a chest and barrel, then change the barrel stock and block the chest. The barrel-only refresh must read the changed count and preserve the start position. A chest-only refresh must report failure. |
 | `withdraw`, `withdraw-omitted`, `withdraw-no-candidate`, `withdraw-short-stock`, `withdraw-full-inventory` | The bot runner's stocks, distances, and player inventories, with independent chest and player reads. |
 | `craft-bootstrap`, `craft-missing-ingredients`, `craft-full-inventory` | Start with the bot runner's supplies. Bootstrap also reads the possible crafting-table placement blocks before and after crafting. |
 | `withdraw-craft-model` | A stocked chest, crafting table, and two sticks for a real Ollama run with withdrawal and crafting criteria. |
 | `mcp-collection` | A single oak log and an iron axe for an actual MCP agent to collect, with independent block, inventory, and position reads. |
 | `eat-interruption` | Bread and measured hunger reduced to about ten, with food level and inventory reads for F8, menu, or stop during the eating animation. |
+| `eat-timeout` | Bread with a 30-second consumption time. Run explicit eating to observe the five-second timeout, then run a fresh wait case to measure the ten-second backoff between automatic attempts. Read bread count and hunger independently. |
 | `low-health-retreat` | Disabled regeneration. Save home while healthy, move away, start a wait job, then apply poison and observe or interrupt the retreat. |
+| `eat-retreat-timeout` | The same slow bread and a home enclosed in bedrock after the player moves away. Lower health during a wait and measure the retreat's 60-second budget while eating attempts continue. |
 | `collection-return` | Two sand blocks and a shovel for a partial collection and interruption on the way back. |
+| `collection-unreachable-return` | One sand block at a distance and a bedrock enclosure added around the starting point once the character leaves. Read the sand, enclosure, inventory, and position to verify a partial collection followed by a failed return. |
 | `collect-full-inventory` | An axe, 34 stacks, and enough time to fill the last slot during mining and verify the bounded return. |
 | `withdraw-multi-stack` | A double chest stocked with three stacks and independent reads for both halves after interruption. |
 | `craft-interruption` | A placed crafting table and enough planks for four chests to check interruption between crafts. |
+| `deposit-expiry`, `withdraw-expiry`, `craft-expiry` | A double chest and 36 stacks to transfer, or 64 chests to craft. Slow the fixture server to five ticks per second and suspend the controlling CLI after the first items move. Observe partial progress, the lease-expired cancellation, and unchanged counts after resuming the old CLI. |
 | `death-navigation`, `disconnect-mining` | Dedicated player death or kick steps during an active job, with the server left running for follow-up observations after respawn or rejoin. |
 
 Fixture startup verifies server setup and baseline reads. The packaged client

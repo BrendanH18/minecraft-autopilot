@@ -8,7 +8,7 @@ export function zip(entries) {
   const files = [];
   const directory = [];
   let offset = 0;
-  for (const [path, text] of entries) {
+  for (const [path, text, mode] of entries) {
     const name = Buffer.from(path);
     const bytes = Buffer.from(text);
     const header = Buffer.alloc(30);
@@ -21,6 +21,10 @@ export function zip(entries) {
     const entry = Buffer.alloc(46);
     entry.writeUInt32LE(0x02014b50, 0);
     entry.writeUInt16LE(20, 4);
+    if (mode !== undefined) {
+      entry.writeUInt16LE(0x0314, 4);
+      entry.writeUInt16LE(mode, 40);
+    }
     header.copy(entry, 6, 4, 30);
     entry.writeUInt32LE(offset, 42);
     files.push(header, name, bytes);

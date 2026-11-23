@@ -4,6 +4,7 @@ import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
+import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { projectRoot } from '../../src/config.js';
 import { FabricAdapter } from '../../src/fabric-adapter.js';
@@ -185,10 +186,11 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
   const exited = new Promise((resolve) =>
     child.once('exit', (code, signal) => {
       serverConsole.end(`server exited (${signal || code})`);
-      log.end();
       resolve({ code, signal });
     }),
   );
+  // The process can exit before stdout and stderr have delivered their final chunks.
+  child.once('close', () => log.end());
   child.once('error', (error) => serverConsole.end(`server failed to start: ${error.message}`));
   for (const stream of [child.stdout, child.stderr])
     stream.on('data', (chunk) => {
@@ -217,6 +219,7 @@ export function startServer({ directory, java = 'java', memory = '2G', spawnImpl
         ]);
       }
       await settle(child, exited, steps);
+      await finished(log);
     },
   };
 }

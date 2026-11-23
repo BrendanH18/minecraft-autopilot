@@ -885,6 +885,34 @@ test('after mining a high log the bot walks to where its drop lands, not to the 
   );
 });
 
+test('the last mined drop can meet the quota during the return trip', async (t) => {
+  const { driver, bot, controller } = collectionFixture(t);
+  const position = new Vec3(3, 63, 0);
+  let mined = false;
+  let pickedUp = false;
+  bot.findBlocks = () => (mined ? [] : [position]);
+  bot.dig = async () => {
+    mined = true;
+  };
+  bot.inventory.items = () => (pickedUp ? [{ name: 'sand', count: 1, slot: 36 }] : []);
+  driver.pickUpDrop = async () => {};
+  const returnFromCollection = driver.returnFromCollection.bind(driver);
+  driver.returnFromCollection = async (start, signal) => {
+    const returned = await returnFromCollection(start, signal);
+    pickedUp = true;
+    return returned;
+  };
+
+  const progress = [];
+  const result = await driver.execute(
+    { type: 'collect', block: 'sand', count: 1 },
+    { signal: controller.signal, onProgress: (message) => progress.push(message) },
+  );
+  assert.ok(progress.includes('No reachable matching blocks remain; returning to where collection started.'));
+  assert.equal(result.message, 'Collected requested items and returned to the starting point.');
+  assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
+});
+
 test('mining deadline reserves recovery time and reports failure after returning from a pit', async (t) => {
   const { driver, bot, trips } = collectionFixture(t);
   driver.approach = async (_position, signal) => {

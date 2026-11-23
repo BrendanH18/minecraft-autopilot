@@ -1,4 +1,12 @@
-import { bridgeItemTotals, distance, itemCount, itemTotals, sameTotals } from './nbt-parse.js';
+import {
+  bridgeItemTotals,
+  distance,
+  itemCount,
+  itemTotals,
+  parseDataReply,
+  sameTotals,
+  toPosition,
+} from './nbt-parse.js';
 
 // Superflat 1.21.1: bedrock -64, dirt -63..-62, grass -61; players stand at y = -60.
 export const STAND = -60;
@@ -8,6 +16,11 @@ export const laneOrigin = (lane) => ({ x: 96 + 64 * lane, z: 0 });
 const RETURNING = /returning to where collection started/;
 const COLLECTION_DEADLINE_MS = 180_000;
 const RETURN_BUDGET_MS = 60_000;
+const COBBLESTONE = 'minecraft:cobblestone';
+const PICKAXE = 'minecraft:iron_pickaxe';
+const HUSK = 'minecraft:husk';
+const OVERWORLD = 'minecraft:overworld';
+const NETHER = 'minecraft:the_nether';
 
 export const RELEASE = {
   pit: 'RELEASE.md: "Force a bot mining timeout in a real pit. Verify the bounded return attempt, failure status, preserved inventory progress, and immediate cancellation during recovery."',
@@ -19,6 +32,8 @@ export const RELEASE = {
     'RELEASE.md: "Validate bot withdraw and craft against a local server with the same cases ..." (withdrawal cases)',
   craft:
     'RELEASE.md: "Validate bot withdraw and craft against a local server with the same cases ..." (crafting cases)',
+  cobblestone:
+    'RELEASE.md: "Validate cobblestone with a pickaxe, hostile observations, and release on dimension change." (bot half)',
 };
 
 const at = (o, dx, y, dz) => `${o.x + dx} ${y} ${o.z + dz}`;
@@ -128,6 +143,56 @@ function platformPlan({ bot, lane }) {
       ...resetPlayer(bot),
       `fill ${at(o, -2, STAND, -2)} ${at(o, 10, STAND + 3, 2)} air`,
       killDrops(o),
+      forceload(o, 'remove'),
+    ],
+  };
+}
+
+function cobblestonePlan({ bot, lane }) {
+  const o = laneOrigin(lane);
+  const start = center(point(o, 0, STAND, 0));
+  // Drops can land out of pickup range; keep a reserve so this gate can also exercise navigation.
+  const cobblestoneRow = `${at(o, -4, STAND, -1)} ${at(o, -4, STAND, 6)}`;
+  const husks = [
+    { tag: 'bot_fixture_near', z: 9 },
+    { tag: 'bot_fixture_far', z: 22 },
+  ].map(({ tag, z }) => ({
+    tag,
+    pos: center(point(o, 0, STAND, z)),
+    box: `${at(o, -1, STAND, z - 1)} ${at(o, 1, STAND + 2, z + 1)}`,
+    inside: `${at(o, 0, STAND, z)} ${at(o, 0, STAND + 1, z)}`,
+    selector: `@e[type=${HUSK},tag=${tag},limit=1]`,
+  }));
+  // The pad is above the Nether roof, where the teleport never lands inside terrain.
+  const landing = { x: 2.5, y: 201, z: 2.5 };
+  const nether = `execute in ${NETHER} run`;
+  return {
+    origin: o,
+    points: { start, landing, cobblestone: point(o, -4, STAND, 0), destination: point(o, 40, STAND, 0) },
+    hooks: { teleport: `${nether} ${teleport(bot, landing)}` },
+    reads: [`data get entity ${bot} Dimension`, ...husks.map(({ selector }) => `data get entity ${selector} Pos`)],
+    fixture: [
+      forceload(o, 'add'),
+      `fill ${cobblestoneRow} ${COBBLESTONE}`,
+      'difficulty normal',
+      ...husks.flatMap(({ box, inside, pos, tag }) => [
+        `fill ${box} minecraft:glass`,
+        `fill ${inside} minecraft:air`,
+        `summon ${HUSK} ${pos.x} ${pos.y} ${pos.z} {NoAI:1b,PersistenceRequired:1b,Tags:["${tag}"]}`,
+      ]),
+      `${nether} forceload add 0 0 4 4`,
+      `${nether} fill 0 200 0 4 200 4 minecraft:stone`,
+    ],
+    prepare: [...resetPlayer(bot), teleport(bot, start), `give ${bot} ${PICKAXE} 1`],
+    cleanup: [
+      `execute in ${OVERWORLD} run ${teleport(bot, start)}`,
+      ...resetPlayer(bot),
+      ...husks.flatMap(({ selector, box }) => [`kill ${selector}`, `fill ${box} minecraft:air`]),
+      `fill ${cobblestoneRow} minecraft:air`,
+      killDrops(o),
+      'difficulty peaceful',
+      `${nether} fill 0 200 0 4 200 4 minecraft:air`,
+      `${nether} forceload remove 0 0 4 4`,
       forceload(o, 'remove'),
     ],
   };
@@ -284,6 +349,132 @@ const spread = (samples) =>
   );
 const heldOnBridge = (state) =>
   (state.inventory || []).filter((item) => item.name === LOG).reduce((total, item) => total + item.count, 0);
+
+async function runCobblestone(ctx, plan) {
+  const { landing, destination, cobblestone } = plan.points;
+  const [dimensionRead, nearRead, farRead] = plan.reads;
+  const serverData = async (command) => parseDataReply(await ctx.server.command(command)).value;
+  const baseline = await ctx.step(
+    'independent baseline (inventory, player position and dimension, husk positions)',
+    async () => ({
+      inventory: itemTotals(await ctx.server.inventory()),
+      position: await ctx.server.position(),
+      cobblestonePresent: await ctx.server.testBlock(cobblestone, COBBLESTONE),
+      dimension: await serverData(dimensionRead),
+      near: toPosition(await serverData(nearRead)),
+      far: toPosition(await serverData(farRead)),
+    }),
+  );
+  ctx.check(
+    'server starts in the Overworld with a pickaxe, cobblestone in the fixture, and none held',
+    baseline.dimension === OVERWORLD && baseline.cobblestonePresent && sameTotals(baseline.inventory, { [PICKAXE]: 1 }),
+    baseline,
+  );
+
+  const threats = await ctx.step('bridge: observe nearby hostiles', async () => (await ctx.bridge.observe()).threats);
+  const husks = (threats ?? []).filter(({ type }) => type === HUSK);
+  const nearDistance = distance(baseline.position, baseline.near);
+  const near = husks.find((threat) => distance(threat, baseline.near) <= 0.5);
+  const farDistance = distance(baseline.position, baseline.far);
+  ctx.check(
+    'bridge reports the nearby husk at the server position and distance',
+    nearDistance <= 16 && !!near && Math.abs(near.distance - nearDistance) <= 0.5,
+    { serverPosition: baseline.near, serverDistance: nearDistance, observed: near },
+  );
+  ctx.check(
+    'bridge omits the husk outside the 16-block threat radius',
+    farDistance > 16 && !husks.some((threat) => distance(threat, baseline.far) <= 0.5),
+    { serverPosition: baseline.far, serverDistance: farDistance, observed: husks },
+  );
+
+  const collected = await ctx.step('bridge: collect cobblestone 4 with the held pickaxe', () =>
+    ctx.bridge.execute({ type: 'collect', block: COBBLESTONE, count: 4 }),
+  );
+  const inventory = await ctx.step('independent inventory after collection', async () =>
+    itemTotals(await ctx.server.inventory()),
+  );
+  const observedInventory = bridgeItemTotals((await ctx.bridge.observe()).inventory);
+  const held = inventory[COBBLESTONE] ?? 0;
+  ctx.check(
+    'collection completes and server inventory contains at least four cobblestone and the pickaxe',
+    collected.status === 'completed' && held >= 4 && sameTotals(inventory, { [PICKAXE]: 1, [COBBLESTONE]: held }),
+    { job: collected, inventory },
+  );
+  ctx.check('bridge inventory agrees with the server', sameTotals(inventory, observedInventory), {
+    inventory,
+    observedInventory,
+  });
+
+  const position = await ctx.server.position();
+  const navigation = ctx.bridge
+    .execute(
+      { type: 'goto', ...destination },
+      {
+        signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(15_000)]),
+      },
+    )
+    .then(
+      (job) => ({ job }),
+      (error) => ({ error: error.message }),
+    );
+  const moving = await ctx.step('wait for an active goto with server-observed movement', async () => {
+    const deadline = ctx.now() + 8000;
+    do {
+      const { mode, job } = await ctx.bridge.observe();
+      if (mode === 'agent' && job?.type === 'goto' && job.status === 'running') {
+        const current = await ctx.server.position();
+        if (distance(current, position) >= 1) return { job, position: current };
+      } else if (job?.type === 'goto' && job.status !== 'running') return null;
+      await ctx.sleep(250);
+    } while (ctx.now() < deadline);
+    return null;
+  });
+  ctx.check('dimension change is triggered during active navigation', !!moving, { moving });
+  if (!moving) {
+    await ctx.bridge.cancel();
+    ctx.note('navigation', await navigation);
+    return;
+  }
+  await ctx.step('server: teleport the player to the Nether while goto runs', () =>
+    ctx.server.command(plan.hooks.teleport),
+  );
+  const outcome = await navigation;
+  const landed = () =>
+    ctx.step('independent server dimension and position', async () => ({
+      dimension: await serverData(dimensionRead),
+      position: await ctx.server.position(),
+    }));
+  const first = await landed();
+  await ctx.sleep(1500);
+  const last = await landed();
+  const state = await ctx.bridge.observe();
+  ctx.check(
+    'the same goto is cancelled by the dimension change and control returns to manual',
+    state.connected &&
+      state.mode === 'manual' &&
+      !state.stopping &&
+      state.job?.id === moving.job.id &&
+      state.job.status === 'cancelled' &&
+      /dimension changed/i.test(state.job.message) &&
+      !!outcome.error,
+    { outcome, mode: state.mode, stopping: state.stopping, job: state.job },
+  );
+  ctx.check(
+    'server confirms the Nether landing and no resumed navigation',
+    first.dimension === NETHER &&
+      last.dimension === NETHER &&
+      distance(first.position, landing) <= 0.5 &&
+      distance(first.position, last.position) <= 0.2,
+    { first, last, landing },
+  );
+  ctx.check(
+    'bridge position and dimension agree with the server',
+    state.player?.dimension === last.dimension &&
+      !!state.player?.position &&
+      distance(state.player.position, last.position) <= 0.5,
+    { bridge: state.player, server: last },
+  );
+}
 
 /** Shared by the timeout, cancel, and stop scenarios. mode: timeout | cancel | stop. */
 async function runRecovery(ctx, plan, mode) {
@@ -1435,6 +1626,26 @@ export const scenarios = [
     count: 1,
     failure: /needs a crafting table; none is within 16 blocks and none is held/,
   }),
+  {
+    id: 'cobblestone-hostiles-dimension',
+    lane: 29,
+    title: 'Collect cobblestone, observe hostile mobs, and release control on entering the Nether',
+    release: [RELEASE.cobblestone],
+    plan: cobblestonePlan,
+    run: runCobblestone,
+    during: ({ hooks }) => [hooks.teleport],
+    actions: [
+      'bridge: observe hostile mobs, checked against server positions',
+      'bridge: collect cobblestone 4 with the held pickaxe',
+      'bridge: goto along the flat lane; teleport to the Nether after server-observed movement',
+    ],
+    expect: [
+      'bridge shows the nearby husk and omits the one beyond 16 blocks',
+      'server inventory holds at least four cobblestone and the pickaxe',
+      'the same goto is cancelled because the dimension changed; bridge is manual and settled',
+      'server and bridge show a stationary player on the Nether landing pad',
+    ],
+  },
 ];
 
 export const scenarioIds = scenarios.map((scenario) => scenario.id);

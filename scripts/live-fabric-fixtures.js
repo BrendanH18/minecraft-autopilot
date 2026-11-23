@@ -90,6 +90,42 @@ function eatingPlan(player) {
   };
 }
 
+function failedEatingPlan(player) {
+  const plan = eatingPlan(player);
+  const bread = 'minecraft:bread[food={nutrition:5,saturation:6,eat_seconds:30}]';
+  return {
+    ...plan,
+    prepare: [...preparePlayer(player), `give ${player} ${bread} 8`],
+    actions: [
+      'mc-agent eat',
+      'Record the elapsed time to Eating timed out (about 5 seconds). Check the server food level and bread count against the baseline.',
+      'In a fresh run use mc-agent wait 25. From a second terminal, sample mc-agent health about once a second.',
+      'Record Eating, Could not eat after about 5 seconds, and the next Eating at least 10 seconds after the failure. Record the wait result and repeat the server food level and inventory reads.',
+    ],
+  };
+}
+
+function unreachableHome() {
+  return `fill 94 ${STAND - 1} -2 98 ${STAND + 3} 2 minecraft:bedrock hollow`;
+}
+
+function failedEatingRetreatPlan(player) {
+  const plan = failedEatingPlan(player);
+  return {
+    ...plan,
+    fixture: [...plan.fixture, 'forceload add 80 -16 128 16'],
+    verify: [...plan.verify, `execute if block 98 ${STAND} 0 minecraft:bedrock`],
+    actions: [
+      'mc-agent set-home',
+      `In the fixture terminal, enter tp ${player} 120.5 ${STAND} 0.5, then ${unreachableHome()}.`,
+      'mc-agent wait 120',
+      `While the wait is running, enter damage ${player} 13 minecraft:generic in the fixture terminal. Read Health to confirm it is at most 8.`,
+      'Sample mc-agent health and mc-agent job from a second terminal. Record the failed eating attempt, the start of retreat, and the elapsed time to Survival retreat timed out (about 60 seconds from the retreat start).',
+      'Compare the server food level and bread count with the baseline and confirm the bedrock enclosure remained in place. Repeat position reads five seconds apart after the job ends.',
+    ],
+  };
+}
+
 function lowHealthPlan(player) {
   const [poison, clearPoison] = vitalCommands(player, { effect: 'poison', amplifier: 1 });
   return {
@@ -121,6 +157,24 @@ function collectionReturnPlan(player) {
   };
 }
 
+function unreachableReturnPlan(player) {
+  const sand = `64 ${STAND} 0`;
+  return {
+    fixture: ['forceload add 48 -16 112 16', `setblock ${sand} minecraft:sand`],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:iron_shovel 1`],
+    verify: [
+      ...readCommands(player),
+      `execute if block ${sand} minecraft:sand`,
+      `execute if block 94 ${STAND} 0 minecraft:bedrock`,
+    ],
+    actions: [
+      'mc-agent collect sand 5',
+      `Once the server Pos read shows x below 93 and before the player mines the sand, enter ${unreachableHome()} in the fixture terminal.`,
+      'Record one sand collected and a failed return to the starting point. Read the inventory, position, and both blocks again to confirm partial progress and the intact enclosure.',
+    ],
+  };
+}
+
 function fullInventoryCollectionPlan(player) {
   const plan = takeoverPlan(player);
   return {
@@ -140,31 +194,108 @@ function fullInventoryCollectionPlan(player) {
   };
 }
 
-function withdrawTransferPlan(player) {
+function withdrawTransferPlan(player, expiry = false) {
   const { fixture, points, reads } = storePlan({ bot: player, lane: 0 }, { storage: 'double' });
   const { x, y, z } = points.chest;
-  const logs = [0, 1, 2].map((slot) => `{Slot:${slot}b,id:"minecraft:oak_log",count:64}`);
+  const seed = (halfZ, stacks) => {
+    const logs = Array.from({ length: stacks }, (_, slot) => `{Slot:${slot}b,id:"minecraft:oak_log",count:64}`);
+    return `data merge block ${x} ${y} ${halfZ} {Items:[${logs.join(',')}]}`;
+  };
   return {
-    fixture: [...fixture, `data merge block ${x} ${y} ${z} {Items:[${logs.join(',')}]}`],
+    fixture: [...fixture, ...(expiry ? [seed(z, 27), seed(z - 1, 9)] : [seed(z, 3)])],
     prepare: preparePlayer(player),
     verify: [...readCommands(player, points.chest), ...reads],
+    actions: expiry
+      ? expiryActions('mc-agent withdraw oak_log', 'Repeat both chest half reads and the player inventory read.')
+      : [
+          'mc-agent withdraw oak_log',
+          'While stacks are moving, press F8, close the storage screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+          'Repeat both chest half reads and the player inventory read five seconds apart.',
+        ],
+  };
+}
+
+function craftInterruptionPlan(player, expiry = false) {
+  return {
+    fixture: ['forceload add 80 -16 112 16', `setblock 98 ${STAND} 0 minecraft:crafting_table`],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:oak_planks ${expiry ? 512 : 32}`],
+    verify: [...readCommands(player), `execute if block 98 ${STAND} 0 minecraft:crafting_table`],
+    actions: expiry
+      ? expiryActions(
+          'mc-agent craft chest 64',
+          'Repeat the player inventory read and compare the plank and chest counts.',
+        )
+      : [
+          'mc-agent craft chest 4',
+          'While crafting, press F8, close the crafting table screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+          'Repeat the player inventory read five seconds apart and compare plank and chest counts.',
+        ],
+  };
+}
+
+function expiryActions(command, followUp) {
+  return [
+    'In the fixture terminal, enter tick rate 5 to give the server-confirmed steps enough time to observe expiry.',
+    command,
+    'Suspend the controlling CLI (Ctrl+Z) as soon as the first items move. Wait 10 seconds and run mc-agent job from a second terminal.',
+    'Record manual control, a cancelled job naming lease expiry, and partial progress. If the job settled before expiry, repeat on a fresh fixture.',
+    `${followUp} Resume the old CLI with fg and repeat the reads five seconds later. Confirm nothing else moved and control stayed manual.`,
+  ];
+}
+
+function depositExpiryPlan(player) {
+  const { fixture, prepare, points, reads } = storePlan(
+    { bot: player, lane: 0 },
+    { storage: 'double', depositLogs: 2304 },
+  );
+  return {
+    fixture,
+    prepare,
+    verify: [...readCommands(player, points.chest), ...reads],
+    actions: expiryActions('mc-agent deposit oak_log', 'Repeat both chest half reads and the player inventory read.'),
+  };
+}
+
+function blockedDepositPlan(player) {
+  const { fixture, prepare, points, hooks } = storePlan({ bot: player, lane: 0 });
+  const { x, y, z } = points.chest;
+  return {
+    fixture: [...fixture, hooks.blockLid],
+    prepare,
+    verify: [...readCommands(player, points.chest), `execute if block ${x} ${y + 1} ${z} minecraft:stone`],
     actions: [
-      'mc-agent withdraw oak_log',
-      'While stacks are moving, press F8, close the storage screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
-      'Repeat both chest half reads and the player inventory read five seconds apart.',
+      'mc-agent deposit oak_log 4',
+      'Verify failure to open storage and confirm both the player inventory and chest contents stayed at their baseline counts.',
     ],
   };
 }
 
-function craftInterruptionPlan(player) {
+function scopedInspectionPlan(player) {
+  const chest = `98 ${STAND} 0`;
+  const barrel = `94 ${STAND} 0`;
+  const lid = `98 ${STAND + 1} 0`;
   return {
-    fixture: ['forceload add 80 -16 112 16', `setblock 98 ${STAND} 0 minecraft:crafting_table`],
-    prepare: [...preparePlayer(player), `give ${player} minecraft:oak_planks 32`],
-    verify: [...readCommands(player), `execute if block 98 ${STAND} 0 minecraft:crafting_table`],
+    fixture: [
+      'forceload add 80 -16 112 16',
+      `setblock ${chest} minecraft:chest[facing=west]`,
+      `setblock ${barrel} minecraft:barrel[facing=up]`,
+    ],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:oak_log 16`],
+    verify: [
+      ...readCommands(player),
+      `data get block ${chest} Items`,
+      `data get block ${barrel} Items`,
+      `execute if block ${lid} minecraft:stone`,
+    ],
     actions: [
-      'mc-agent craft chest 4',
-      'While crafting, press F8, close the crafting table screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
-      'Repeat the player inventory read five seconds apart and compare plank and chest counts.',
+      `In the fixture terminal, enter tp ${player} 97.5 ${STAND} 0.5, then run mc-agent deposit oak_log 8.`,
+      `In the fixture terminal, enter tp ${player} 95.5 ${STAND} 0.5, then run mc-agent deposit oak_log 8.`,
+      `In the fixture terminal, enter data modify block ${barrel} Items[0].count set value 2, then setblock ${lid} minecraft:stone. Repeat the server reads.`,
+      `In the fixture terminal, enter tp ${player} 84.5 ${STAND} 0.5 and record Pos. This is 10 blocks from the barrel.`,
+      `mc-agent inspect-storage --container 94,${STAND},0`,
+      'Read Pos while the player walks to the barrel. Confirm the scoped inspection succeeded, mc-agent observe shows two logs in the barrel, and the final Pos is within 1.75 blocks of the inspection start.',
+      `mc-agent inspect-storage --container 98,${STAND},0`,
+      'Verify the blocked chest refresh fails. Repeat the server reads and keep the failed inspection result with the last-observed storage snapshot.',
     ],
   };
 }
@@ -216,8 +347,9 @@ const fixtures = {
   pit: {
     botScenario: 'recovery-timeout',
     actions: [
+      'mc-agent set-home',
       'mc-agent collect oak_log 64',
-      'Observe partial progress and the attempt to return to the starting ledge.',
+      'Record partial progress and the attempt to return to the starting ledge. Compare the job outcome with the initial and final server inventory and position.',
     ],
   },
   'deposit-return': {
@@ -265,16 +397,28 @@ const fixtures = {
     actions: ['mc-agent deposit oak_log 8', 'For a fresh run with omitted count, use mc-agent deposit oak_log.'],
   },
   'deposit-full-chest': { storage: 'full', actions: ['mc-agent deposit oak_log 8'] },
+  'deposit-blocked-chest': { build: blockedDepositPlan },
   'deposit-double-chest': {
     storage: 'double',
-    actions: ['mc-agent deposit oak_log', 'Read both halves after the transfer or a takeover.'],
+    actions: [
+      'mc-agent deposit oak_log',
+      'While stacks are moving, press F8, close the storage screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+      'Read both chest halves and the player inventory after the transfer or a takeover. Repeat after five seconds.',
+    ],
   },
+  'deposit-expiry': { build: depositExpiryPlan },
+  'inspect-scoped-storage': { build: scopedInspectionPlan },
   'eat-interruption': { build: eatingPlan },
+  'eat-timeout': { build: failedEatingPlan },
   'low-health-retreat': { build: lowHealthPlan },
+  'eat-retreat-timeout': { build: failedEatingRetreatPlan },
   'collection-return': { build: collectionReturnPlan },
+  'collection-unreachable-return': { build: unreachableReturnPlan },
   'collect-full-inventory': { build: fullInventoryCollectionPlan },
   'withdraw-multi-stack': { build: withdrawTransferPlan },
+  'withdraw-expiry': { build: (player) => withdrawTransferPlan(player, true) },
   'craft-interruption': { build: craftInterruptionPlan },
+  'craft-expiry': { build: (player) => craftInterruptionPlan(player, true) },
   'death-navigation': { build: deathPlan },
   'disconnect-mining': { build: disconnectPlan },
 };

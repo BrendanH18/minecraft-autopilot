@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { verifyModBundle } from '../src/bundle.js';
+import { verifyModArchive } from '../src/bundle.js';
 
 const directory = fileURLToPath(new URL('../dist/', import.meta.url));
-console.log(JSON.stringify(await verifyModBundle(directory), null, 2));
+console.log(JSON.stringify(await verifyModArchive(directory), null, 2));

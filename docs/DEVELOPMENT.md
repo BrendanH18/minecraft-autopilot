@@ -31,7 +31,7 @@ npm run check        # JavaScript syntax
 npm test             # Node tests
 npm start -- demo --smoke
 npm run build:mod    # compile, Java tests, package to dist/
-npm run verify:mod   # verify installation files and pinned dependency hashes
+npm run verify:mod   # verify the loose installation, pinned hashes, and ZIP (requires unzip)
 npm run dev:mod      # Fabric development client with a test identity
 ```
 
@@ -47,7 +47,7 @@ development machine. It needs the `boat` CLI, signed in, plus `jq` and `git`.
 scripts/boat-check.sh -- node --test test/harness.test.js   # a targeted check: any command
 scripts/boat-check.sh                 # the full CONTRIBUTING.md list, to reproduce CI
 scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario withdraw
-scripts/boat-check.sh --fetch dist -- npm run build:mod   # a bundle for packaged acceptance on the Mac
+scripts/boat-check.sh --fetch dist -- 'npm run build:mod && npm run verify:mod'   # a verified bundle for the Mac
 scripts/boat-check.sh --save          # the full list, then refresh the warm snapshot
 scripts/boat-check.sh --status        # this worktree's sandbox
 scripts/boat-check.sh --done          # delete it when the work ends

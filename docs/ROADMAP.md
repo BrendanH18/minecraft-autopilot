@@ -12,6 +12,7 @@ The November audit identified recovery and verification gaps. The following sour
 
 - Fabric backs off automatic eating for ten seconds after failed consumption. Action and retreat deadlines are checked before eating, so failed food use cannot indefinitely defer recovery.
 - Bot mining has a separate deadline and up to sixty seconds for a return attempt. Takeover, cancellation, expiry, death, and survival interruption still stop collection without starting recovery.
+- If the bot runs out of matching blocks, a pickup during the return can still satisfy the collection quota. A failed return remains a failed action.
 - Combined collection/deposit criteria for the same item check the net increase across inventory and storage, so storing the collected quota does not require gathering a duplicate quota.
 - Deposit verification never uses cached contents for success. On every backend, each container's baseline is the live contents the task's first deposit read there, and the final check reopens only the task's containers. Failed inspection cannot pass using cached contents. Ordinary observations remain last-observed snapshots.
 - Fabric timing policy is extracted into a helper tested without Minecraft. Controller/game integration still needs live tests; helper tests do not establish full backend parity.
@@ -43,6 +44,8 @@ Throughout: the weekly `acceptance:bot` workflow stays green, user-reported v0.1
 ## Month 1 (23 November – 20 December 2026): ship v0.1.0
 
 The goal for the month is a reviewed v0.1.0 candidate. Agents do the headless work in Boat; a person runs the packaged Fabric sessions on the Mac; the account owner runs the authenticated handoff. If a person or the account owner is unavailable, the release waits; nothing ships on partial evidence.
+
+Use [candidate preflight](ACCEPTANCE.md#workflow) to check the archive and installed jars before opening a live session. The [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) prepares the storage, recovery, and expiry cases for the keyboard sessions. The bot runner now covers the bot half of the cobblestone, hostile observation, and dimension-change gate on the candidate under review.
 
 ### Week 1 (23–29 November): harden and prepare (headless, Boat)
 
