@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
 import { archiveTest, zip } from './acceptance-zip.js';
@@ -12,7 +12,7 @@ import { ARCHIVE_NAME, acceptanceFile, registerAcceptanceTools } from '../src/ac
 const commit = 'a'.repeat(40);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-async function fixture(t, { archiveCommit = commit } = {}) {
+async function fixture(t, { archiveCommit = commit, changes = '' } = {}) {
   const root = await testDirectory(t, 'acceptance-mods-');
   const modsDir = join(root, 'launcher profile/mods');
   const directory = join(root, 'agent-home');
@@ -42,7 +42,7 @@ async function fixture(t, { archiveCommit = commit } = {}) {
     },
     root,
     directory,
-    git: ([command]) => ({ status: 0, stdout: command === 'rev-parse' ? commit : '' }),
+    git: ([command]) => ({ status: 0, stdout: command === 'rev-parse' ? commit : changes }),
   });
   const run = async (...args) => {
     await program.parseAsync(['acceptance', ...args], { from: 'user' });
@@ -70,6 +70,58 @@ test('matching launcher jars make a completed Fabric gate eligible', archiveTest
   assert.ok(!markdown.includes(modsDir));
 });
 
+test(
+  'strict start accepts a transferred candidate with matching content and changed timestamps',
+  archiveTest,
+  async (t) => {
+    const { directory, dist, modsDir, start, finish, archiveSha256 } = await fixture(t);
+    const candidateDir = join(directory, 'fetched dist');
+    await mkdir(directory);
+    const old = new Date('2026-11-01T00:00:00Z');
+    await utimes(join(dist, 'ARCHIVE_SHA256SUMS'), old, old);
+    const alias = join(directory, 'local dist alias');
+    await symlink(dist, alias, 'junction');
+    await assert.rejects(
+      start('--candidate-dir', alias, '--require-candidate', '--mods-dir', modsDir),
+      /archive predates BUILD.json/,
+    );
+    await rename(dist, candidateDir);
+    const started = await start(
+      '--candidate-dir',
+      relative(process.cwd(), candidateDir),
+      '--require-candidate',
+      '--mods-dir',
+      modsDir,
+    );
+    assert.equal(started.session.provenance.archive.sha256, archiveSha256);
+    assert.deepEqual(started.session.warnings, []);
+    assert.equal((await finish(started)).eligible, true);
+    await writeFile(join(candidateDir, ARCHIVE_NAME), 'changed archive');
+    await assert.rejects(
+      start('--candidate-dir', candidateDir, '--require-candidate', '--mods-dir', modsDir),
+      /archive checksum not verified against ARCHIVE_SHA256SUMS/,
+    );
+  },
+);
+
+test(
+  'strict start reports the dirty checkout and launcher jar mismatches before recording a session',
+  archiveTest,
+  async (t) => {
+    const { directory, modsDir, start, jarContents } = await fixture(t, { changes: ' M src/cli.js\n' });
+    const [[missing], [replaced]] = jarContents;
+    await rm(join(modsDir, missing));
+    await writeFile(join(modsDir, replaced), 'different bytes');
+    await assert.rejects(start('--require-candidate', '--mods-dir', modsDir), ({ message }) => {
+      assert.ok(message.includes('worktree had uncommitted changes'));
+      assert.ok(message.includes(`launcher mod jar missing or unreadable: ${missing}`));
+      assert.ok(message.includes(`launcher mod jar differs from the archive: ${replaced}`));
+      return true;
+    });
+    await assert.rejects(readFile(acceptanceFile(directory)), { code: 'ENOENT' });
+  },
+);
+
 test('missing and replaced launcher jars stay ineligible despite matching loose jars', archiveTest, async (t) => {
   const { dist, modsDir, run, start, finish, jarContents } = await fixture(t);
   const [[missing], [replaced, expected]] = jarContents;
@@ -96,11 +148,11 @@ test('an archive from a different commit cannot verify the launcher jars', archi
   const { modsDir, start, finish } = await fixture(t, { archiveCommit: 'b'.repeat(40) });
   const started = await start('--mods-dir', modsDir);
   assert.equal(started.session.provenance.archive.matches, true);
-  assert.match(started.session.warnings.join('\n'), /archive BUILD\.json differs from dist\/BUILD\.json/);
+  assert.match(started.session.warnings.join('\n'), /archive BUILD\.json differs from the loose BUILD\.json/);
   const result = await finish(started);
   assert.equal(result.eligible, false);
   assert.deepEqual(result.problems, [
-    'archive BUILD.json not verified against dist/BUILD.json',
+    'archive BUILD.json not verified against the loose BUILD.json',
     'launcher mod jars were not verified against the recorded archive',
   ]);
 });

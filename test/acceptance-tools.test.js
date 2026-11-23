@@ -291,9 +291,9 @@ test('a mismatched embedded build manifest makes bot evidence ineligible', archi
   const { provenance, warnings } = await collectProvenance({ root: await distRoot(t, { archive }), git: cleanGit() });
   assert.equal(provenance.archive.matches, true);
   assert.equal(provenance.archive.manifestMatches, false);
-  assert.match(warnings.join('\n'), /archive BUILD\.json differs from dist\/BUILD\.json/);
+  assert.match(warnings.join('\n'), /archive BUILD\.json differs from the loose BUILD\.json/);
   assert.deepEqual(provenanceProblems({ backend: 'mineflayer', provenance }), [
-    'archive BUILD.json not verified against dist/BUILD.json',
+    'archive BUILD.json not verified against the loose BUILD.json',
   ]);
 });
 
@@ -378,7 +378,7 @@ test('a dirty worktree or missing dist makes the report and status refuse verifi
   assert.match(
     output.written.at(-1),
     new RegExp(
-      `${UNVERIFIED}:\\*\\* worktree had uncommitted changes; dist/BUILD\\.json missing or unreadable; archive checksum missing`,
+      `${UNVERIFIED}:\\*\\* worktree had uncommitted changes; BUILD\\.json missing or unreadable; archive checksum missing`,
     ),
   );
   assert.match(output.written.at(-1), /Artifact: missing; no checksum recorded/);
