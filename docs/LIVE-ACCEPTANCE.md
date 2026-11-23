@@ -192,7 +192,10 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
    `read <label>` in the fixture terminal to run and save the same independent
    reads, for example `read after-f8` and `read five-seconds-later`. A checkpoint
    records the time range, each command, and each value or error. Manual server
-   commands still work in the fixture terminal. Use a fresh
+   commands still work in the fixture terminal. Wait for the fixture command
+   confirmation in chat before starting the next observation. If the session
+   ends during a read, the checkpoint saves completed reads and marks itself
+   interrupted. Use a fresh
    run for each alternative or retry. Use a different `--port` for each run
    in the same client session, or restart the Minecraft client before
    reusing an address. Fabric remembers storage observations by server

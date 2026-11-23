@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { basename, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -513,11 +514,31 @@ function formatFixture({ id, fixture, prepare, actions: commands, verify, variat
 
 const itemRead = /^data get block (-?\d+) (-?\d+) (-?\d+) Items$/;
 
+export async function sendFixtureCommand(serverConsole, command, signal) {
+  signal.throwIfAborted();
+  if (serverConsole.ended) throw new Error(`Fixture server console is closed: ${serverConsole.ended}`);
+  // A raw command can print a line that also matches a subsequent read. Wait
+  // until the server has handled both the raw command and its unique marker.
+  const marker = `fixture-command-${randomUUID()}`;
+  try {
+    serverConsole.write(`${command}\nsay ${marker}\n`);
+    await serverConsole.waitFor((line) => line.endsWith(marker), {
+      history: true,
+      label: 'fixture command confirmation',
+      signal,
+      timeoutMs: 15_000,
+    });
+  } catch (error) {
+    if (!signal.aborted) serverConsole.end(error.message);
+    throw error;
+  }
+}
+
 export async function readFixtureCheckpoint(serverConsole, commands, { label, signal, now = Date.now }) {
   const startedAt = new Date(now()).toISOString();
   const reads = [];
   for (const command of commands) {
-    signal.throwIfAborted();
+    if (signal.aborted) break;
     try {
       const coords = itemRead.exec(command);
       const value = coords
@@ -525,11 +546,17 @@ export async function readFixtureCheckpoint(serverConsole, commands, { label, si
         : await serverConsole.command(command, { signal });
       reads.push({ command, value });
     } catch (error) {
-      signal.throwIfAborted();
+      if (signal.aborted) break;
       reads.push({ command, error: error.message });
     }
   }
-  return { label, startedAt, finishedAt: new Date(now()).toISOString(), reads };
+  return {
+    label,
+    startedAt,
+    finishedAt: new Date(now()).toISOString(),
+    reads,
+    ...(signal.aborted && { interrupted: true }),
+  };
 }
 
 async function lowerVital(console, player, vitalTarget, signal) {
@@ -597,7 +624,7 @@ async function startFixture(options, plan) {
       const checkpoint = await readFixtureCheckpoint(server.console, plan.verify, { label, signal });
       evidence.checkpoints.push(checkpoint);
       await writePrivateJson(evidencePath, evidence);
-      console.log(`Independent reads (${label})`);
+      console.log(`Independent reads (${label})${checkpoint.interrupted ? ' interrupted' : ''}`);
       for (const { command, value, error } of checkpoint.reads) {
         const detail = error ? `Error: ${error}` : typeof value === 'string' ? value : JSON.stringify(value);
         console.log(`  ${command}\n    ${detail}`);
@@ -605,6 +632,7 @@ async function startFixture(options, plan) {
       return checkpoint;
     };
     const baseline = await capture('baseline');
+    if (baseline.interrupted) return;
     if (baseline.reads.some(({ error }) => error)) throw new Error('A baseline read failed. See checkpoints.json.');
     console.log(
       `\n${formatFixture(plan, options.player)}\nFixture ready. Enter read [label] to save the independent reads, or enter a server command. Ctrl+C, end of input, or stop ends the session.`,
@@ -618,7 +646,8 @@ async function startFixture(options, plan) {
           if (signal.aborted) return;
           const checkpoint = /^read(?:\s+(.*))?$/.exec(command);
           if (checkpoint) await capture(checkpoint[1] ?? 'follow-up');
-          else server.console.write(`${command.replace(/^\//, '')}\n`);
+          else if (/^\/?stop$/i.test(command)) stop();
+          else await sendFixtureCommand(server.console, command.replace(/^\//, ''), signal);
         })
         .catch((error) => {
           if (!signal.aborted) console.error(`Error: ${error.message}`);
