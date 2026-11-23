@@ -595,6 +595,7 @@ async function startFixture(options, plan) {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
   let pending = Promise.resolve();
+  let checkpointFailure;
   try {
     await server.console.ready({ signal });
     if (server.console.version !== MINECRAFT_VERSION) {
@@ -623,7 +624,11 @@ async function startFixture(options, plan) {
     const capture = async (label) => {
       const checkpoint = await readFixtureCheckpoint(server.console, plan.verify, { label, signal });
       evidence.checkpoints.push(checkpoint);
-      await writePrivateJson(evidencePath, evidence);
+      try {
+        await writePrivateJson(evidencePath, evidence);
+      } catch (error) {
+        throw new Error(`Could not save checkpoint "${label}" to ${evidencePath}: ${error.message}`, { cause: error });
+      }
       console.log(`Independent reads (${label})${checkpoint.interrupted ? ' interrupted' : ''}`);
       for (const { command, value, error } of checkpoint.reads) {
         const detail = error ? `Error: ${error}` : typeof value === 'string' ? value : JSON.stringify(value);
@@ -645,8 +650,15 @@ async function startFixture(options, plan) {
         .then(async () => {
           if (signal.aborted) return;
           const checkpoint = /^read(?:\s+(.*))?$/.exec(command);
-          if (checkpoint) await capture(checkpoint[1] ?? 'follow-up');
-          else if (/^\/?stop$/i.test(command)) stop();
+          if (checkpoint) {
+            try {
+              await capture(checkpoint[1] ?? 'follow-up');
+            } catch (error) {
+              checkpointFailure = error;
+              console.error(error.message);
+              stop();
+            }
+          } else if (/^\/?stop$/i.test(command)) stop();
           else await sendFixtureCommand(server.console, command.replace(/^\//, ''), signal);
         })
         .catch((error) => {
@@ -672,6 +684,7 @@ async function startFixture(options, plan) {
       process.off('SIGTERM', stop);
     }
   }
+  if (checkpointFailure) throw checkpointFailure;
 }
 
 async function main() {
