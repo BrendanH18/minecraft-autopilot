@@ -200,6 +200,8 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
 | `deposit-return` | The bot runner's elevated home and chest out of reach. Optionally remove the step once the player is back at home to test the blocked return. |
 | `withdraw`, `withdraw-omitted`, `withdraw-no-candidate`, `withdraw-short-stock`, `withdraw-full-inventory` | The bot runner's stocks, distances, and player inventories, with independent chest and player reads. |
 | `craft-bootstrap`, `craft-missing-ingredients`, `craft-full-inventory` | Start with the bot runner's supplies. Bootstrap also reads the possible crafting-table placement blocks before and after crafting. |
+| `withdraw-craft-model` | A stocked chest, crafting table, and two sticks for a real Ollama run with withdrawal and crafting criteria. |
+| `mcp-collection` | A single oak log and an iron axe for an actual MCP agent to collect, with independent block, inventory, and position reads. |
 | `eat-interruption` | Bread and measured hunger reduced to about ten, with food level and inventory reads for F8, menu, or stop during the eating animation. |
 | `low-health-retreat` | Disabled regeneration. Save home while healthy, move away, start a wait job, then apply poison and observe or interrupt the retreat. |
 | `collection-return` | Two sand blocks and a shovel for a partial collection and interruption on the way back. |
@@ -211,3 +213,28 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
 Fixture startup verifies server setup and baseline reads. The packaged client
 actions, F8, model and MCP sessions, and authenticated handoff still require
 the observations in [the release checklist](RELEASE.md).
+
+### Packaged Fabric model and MCP sessions
+
+Install the candidate jars in a normal launcher profile and start each
+[acceptance session](ACCEPTANCE.md#workflow) with `--backend fabric` and that
+profile's `--mods-dir`. Use the fixture helper to start a fresh server for each
+session and run the printed commands only after `Fixture ready`.
+
+1. **Real local model (`fabric-local-model`).** Start `withdraw-craft-model`
+   and record the installed Ollama model name and version. Capture the initial
+   chest and player inventory reads, then use the printed `mc-agent agent`
+   command with that model. It asks for four cobblestone so one remains in
+   inventory after crafting, satisfying `--verify-withdraw cobblestone:1`
+   alongside `--verify-craft stone_pickaxe:1`. Record `criteria_met`, the final
+   chest contents (20 oak logs and one cobblestone), the final player inventory
+   (one stone pickaxe and one cobblestone), the server position, and manual
+   control from a separate `mc-agent observe`. These observations also cover
+   the real-model step of `fabric-withdraw-craft`.
+2. **Actual MCP agent (`fabric-mcp-agent`).** Start `mcp-collection`. Connect
+   an [MCP client](USAGE.md#connect-an-mcp-agent) to the packaged profile's bridge
+   and have the agent observe, explicitly take control, collect one oak log,
+   and stop with `minecraft_stop`. Record the client name and version, allowed
+   tools, call sequence, and raw tool results. After stop, repeat the server
+   reads to confirm the log block is gone and the player has one oak log. Record
+   the inventory gain and `mode: manual` from a separate `mc-agent observe`.

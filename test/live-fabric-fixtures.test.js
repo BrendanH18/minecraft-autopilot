@@ -34,6 +34,8 @@ test('Fabric fixture dry run lists all setups and uses the named player without 
       'craft-bootstrap',
       'craft-missing-ingredients',
       'craft-full-inventory',
+      'withdraw-craft-model',
+      'mcp-collection',
       'deposit-chest',
       'deposit-barrel',
       'deposit-full-chest',
@@ -145,6 +147,28 @@ test('transfer and crafting interruption fixtures seed several units and print c
   const crafting = fixturePlan('craft-interruption', player);
   assert.ok(crafting.prepare.includes(`give ${player} minecraft:oak_planks 32`));
   assert.ok(crafting.verify.includes('execute if block 98 -60 0 minecraft:crafting_table'));
+});
+
+test('the model fixture stocks enough cobblestone for crafting and a retained withdrawal gain', () => {
+  const plan = fixturePlan('withdraw-craft-model', 'FixtureUser');
+  assert.match(plan.fixture.join('\n'), /id:"minecraft:cobblestone",count:5/);
+  assert.match(plan.fixture.join('\n'), /setblock .* minecraft:crafting_table/);
+  assert.ok(plan.prepare.includes('give FixtureUser minecraft:stick 2'));
+  assert.match(plan.actions[1], /Withdraw exactly four cobblestone.*--verify-withdraw cobblestone:1/);
+  assert.match(plan.actions[1], /--verify-craft stone_pickaxe:1/);
+  assert.ok(plan.verify.includes('data get entity FixtureUser Inventory'));
+  assert.ok(plan.verify.some((command) => /^data get block .* Items$/.test(command)));
+});
+
+test('the MCP collection fixture equips the player and independently reads the log and inventory', () => {
+  const plan = fixturePlan('mcp-collection', 'FixtureUser');
+  assert.ok(plan.fixture.includes('setblock 98 -60 0 minecraft:oak_log'));
+  assert.ok(plan.prepare.includes('give FixtureUser minecraft:iron_axe 1'));
+  assert.ok(plan.verify.includes('execute if block 98 -60 0 minecraft:oak_log'));
+  assert.ok(plan.verify.includes('data get entity FixtureUser Inventory'));
+  assert.ok(plan.verify.includes('data get entity FixtureUser Pos'));
+  const action = plan.actions[1].match(/\{.*\}/)[0];
+  assert.deepEqual(JSON.parse(action), { action: { type: 'collect', block: 'oak_log', count: 1 } });
 });
 
 test('death and disconnect fixture instructions leave the server running for independent follow-up reads', () => {
