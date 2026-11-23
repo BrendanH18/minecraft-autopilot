@@ -108,6 +108,13 @@ test('archive verification rejects extra, missing and duplicate entries', archiv
   }
 });
 
+test('archive verification rejects a symlink with matching bytes and checksum', archiveTest, async (t) => {
+  const { directory, expected } = await archiveFixture(t, (entries) =>
+    entries.map(([name, bytes]) => (name === 'mods/app.jar' ? [name, bytes, 0o120777] : [name, bytes])),
+  );
+  await assert.rejects(verifyModArchive(directory, { expectedFiles: expected }), /must be regular files/);
+});
+
 test('a transferred ZIP verifies its own checksums and pinned jars without loose files', archiveTest, async (t) => {
   const { directory, expected, archiveSha256 } = await archiveFixture(t);
   await rm(join(directory, 'mods'), { recursive: true });

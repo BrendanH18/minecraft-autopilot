@@ -145,8 +145,10 @@ shown if no run attempted that scenario.
 Unreadable, malformed, dirty, and different-commit files are listed under
 `rejected`, and the command exits unsuccessfully if any file was rejected.
 Passing scenarios must contain passing checks and identify the Minecraft
-server version and jar SHA-256. Older runs without final Git provenance
-remain historical observations. Real-model scenarios also identify the
+server version and jar SHA-256, and their server log must match its recorded
+SHA-256. The reviewer rejects older passing runs without final Git provenance
+and can still report runs containing only failed or skipped scenarios.
+Real-model scenarios also identify the
 configured model. The report lists all distinct server jar hashes so reviewers
 can see which configurations the supplied runs cover. The report covers the
 runner's share of the bot gates. A person records the sessions and signs off.

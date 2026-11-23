@@ -553,10 +553,12 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     results.scenarios.push(...remaining.map((scenario) => scenarioRecord(scenario, results.error)));
   } finally {
     if (server) {
-      await server.stop().catch((error) => {
+      try {
+        await server.stop();
+        results.minecraft.serverLogSha256 = await deps.sha256File(where.serverLog).catch(() => null);
+      } catch (error) {
         results.error ??= `Server stop failed: ${error.message}`;
-      });
-      results.minecraft.serverLogSha256 = await deps.sha256File(where.serverLog).catch(() => null);
+      }
     }
     if (signal.aborted && !inspecting) results.error ??= `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
     const { commit, dirty } = deps.environment({ java: options.java });

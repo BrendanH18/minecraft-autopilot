@@ -85,6 +85,21 @@ export async function verifyModArchive(directory, { expectedFiles = modBundleFil
   if (entries.length !== expected.size || !entries.every((name) => expected.delete(name))) {
     throw new Error('Archive must contain exactly the expected bundle entries.');
   }
+  const { stdout: details } = await execFileAsync('unzip', ['-Z', '-l', archivePath], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024,
+    timeout: 10_000,
+  });
+  const modes = details
+    .replace(/\r?\n$/, '')
+    .split(/\r?\n/)
+    .slice(2, -1);
+  if (
+    modes.length !== entries.length ||
+    modes.some((line, i) => !line.startsWith('-') && !(entries[i] === 'mods/' && line.startsWith('d')))
+  ) {
+    throw new Error('Archive bundle files must be regular files.');
+  }
   const readEntry = async (name) => {
     const { stdout: packed } = await execFileAsync('unzip', ['-p', archivePath, name], {
       encoding: 'buffer',

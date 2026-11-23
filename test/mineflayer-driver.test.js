@@ -903,10 +903,12 @@ test('the last mined drop can meet the quota during the return trip', async (t) 
     return returned;
   };
 
+  const progress = [];
   const result = await driver.execute(
     { type: 'collect', block: 'sand', count: 1 },
-    { signal: controller.signal, onProgress() {} },
+    { signal: controller.signal, onProgress: (message) => progress.push(message) },
   );
+  assert.ok(progress.includes('No reachable matching blocks remain; returning to where collection started.'));
   assert.equal(result.message, 'Collected requested items and returned to the starting point.');
   assert.deepEqual(bot.entity.position, new Vec3(0, 64, 0));
 });

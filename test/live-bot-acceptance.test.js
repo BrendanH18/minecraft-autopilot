@@ -1455,6 +1455,27 @@ test('candidate evidence hashes the prepared server jar and checks the source ag
   assert.deepEqual(result.environment.sourceAtFinish, { commit: 'abc123', dirty: true });
 });
 
+test('a failed server shutdown never hashes a partial log', async () => {
+  const deps = fakeDeps(fakeWorld());
+  const { startServer } = deps;
+  deps.startServer = () => ({
+    ...startServer(),
+    stop: async () => {
+      throw new Error('still running');
+    },
+  });
+  const hashed = [];
+  deps.sha256File = async (path) => {
+    hashed.push(path);
+    return 'a'.repeat(64);
+  };
+  const options = parseOptions(['--scenario', 'stale-removal-model', '--accept-eula']);
+  const result = await runAcceptance(options, deps);
+  assert.deepEqual(hashed, ['/fake/run/server/server.jar']);
+  assert.equal(result.minecraft.serverLogSha256, null);
+  assert.equal(result.error, 'Server stop failed: still running');
+});
+
 test('settle cancels its escalation timer once the child exits', async () => {
   const timers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
   const before = timers();

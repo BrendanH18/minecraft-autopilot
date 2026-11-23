@@ -94,11 +94,14 @@ export async function reviewBotEvidence(files, commit) {
         if (scenario.requiresModel && (!options.model?.trim() || observations?.model !== options.model))
           throw new Error(`Passing scenario ${id} did not record the configured real model.`);
       }
+      const serverLogPath = await findServerLog(file, serverLog, serverLogSha256);
+      if (hasPass && (!serverLogSha256 || !serverLogPath))
+        throw new Error('Passing results need a readable server log matching the recorded SHA-256.');
       runs.push({
         file,
         finishedAt,
         serverLog,
-        serverLogPath: await findServerLog(file, serverLog, serverLogSha256),
+        serverLogPath,
         serverLogSha256: serverLogSha256 ?? null,
         serverVersion: serverVersion ?? null,
         serverJarSha256: jarSha256 ?? null,

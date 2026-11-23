@@ -798,10 +798,9 @@ export class MineflayerDriver {
         }
         // Mining often digs downward; return so later navigation, which cannot dig, is not trapped in a pit.
         const moved = start.distanceTo(this.bot.entity.position) > 2;
-        if (moved)
-          onProgress(
-            `${collectionError ? 'Collection failed' : 'Collected requested items'}; returning to where collection started.`,
-          );
+        let progress = collectionError ? 'Collection failed' : 'Collected requested items';
+        if (collectionError === exhausted) progress = 'No reachable matching blocks remain';
+        if (moved) onProgress(`${progress}; returning to where collection started.`);
         const returned = await this.returnFromCollection(start, signal);
         // The server may credit the last mined drop while the bot is returning.
         if (collectionError && (collectionError !== exhausted || count() < target))
