@@ -10,7 +10,7 @@ It records human observations. It does not run gameplay, contact Minecraft or a 
 | --- | --- |
 | `acceptance list [--open] [--backend <fabric\|mineflayer\|both>]` | List open and closed gates. A fabric or mineflayer filter includes gates that need both. |
 | `acceptance show <gate>` | Show prerequisites, numbered steps, and the evidence to record. |
-| `acceptance start <gate> --backend <fabric\|mineflayer\|both\|demo> [--mods-dir <path>] [--launcher ..] [--server ..] [--model ..] [--mcp-client ..] [--note ..]` | Start a session and capture provenance. Use `--mods-dir` for packaged Fabric and authenticated handoff. |
+| `acceptance start <gate> --backend <fabric\|mineflayer\|both\|demo> [--candidate-dir <path>] [--require-candidate] [--mods-dir <path>] [--launcher ..] [--server ..] [--model ..] [--mcp-client ..] [--note ..]` | Start a session and capture provenance. Use `--require-candidate` to check provenance before recording a live session and `--mods-dir` for packaged Fabric and authenticated handoff. |
 | `acceptance step <session> <n> pass\|fail [--note ..]` | Record an observation for step `n`. Re-recording keeps the earlier observation. |
 | `acceptance finish <session> pass\|fail\|blocked [--note ..]` | Finish a session. `fail` and `blocked` need `--note`. `pass` is refused while a step's latest observation failed. |
 | `acceptance sessions [--gate <gate>]` | List recorded sessions. |
@@ -35,6 +35,7 @@ Copy the three jars from that archive into the launcher profile's `mods` folder 
 ```sh
 npm start -- acceptance show fabric-f8-takeover
 npm start -- acceptance start fabric-f8-takeover --backend fabric \
+  --require-candidate \
   --mods-dir "/path/to/launcher-profile/mods" \
   --launcher "Minecraft Launcher, Fabric Loader 0.16.14" --server "single-player" --model "qwen3.5:4b-mlx"
 npm start -- acceptance step 3f2a9c 1 pass --note "F8 during inference; observe showed manual"
@@ -45,16 +46,29 @@ npm start -- acceptance report --gate fabric-f8-takeover
 
 Record independent evidence in step notes, such as a server `data get` read or a separate `mc-agent observe`, not the agent's own report.
 
+Use `--candidate-dir <path>` when the bundle is outside the checkout's `dist/`.
+For a bundle fetched with [Boat checks](DEVELOPMENT.md#boat-checks), pass
+`--candidate-dir ".runtime/boat-check/<check>/dist"`. Keep the ZIP,
+`BUILD.json`, and `ARCHIVE_SHA256SUMS` together. Git provenance still comes
+from the CLI's source checkout. A transferred bundle is checked by its
+contents because copying files can change their modification times.
+
+With `--require-candidate`, failed checks exit unsuccessfully before saving a
+session. This requires a clean checkout and a matching archive and manifest.
+For `fabric` and `both`, it also requires a `--mods-dir` with matching jars.
+Omit `--require-candidate` to rehearse with the `demo` backend or to record a
+session with incomplete provenance for troubleshooting.
+
 ## What `start` records
 
 - The ISO start time, gate, backend, and the configuration flags.
 - `git rev-parse HEAD` and whether `git status --porcelain` shows changes.
-- `dist/BUILD.json`, whether its `sourceCommit` matches the commit, and whether `sourceModified` is `false`.
-- The SHA-256 of `dist/minecraft-agent-0.1.0.zip`, whether it matches the unique entry in `dist/ARCHIVE_SHA256SUMS`, and whether the packaged build manifest matches the loose `dist/BUILD.json`.
+- The candidate's `BUILD.json`, whether its `sourceCommit` matches the commit, and whether `sourceModified` is `false`.
+- The SHA-256 of `minecraft-agent-0.1.0.zip`, whether it matches the unique entry in `ARCHIVE_SHA256SUMS`, and whether the packaged build manifest matches the loose `BUILD.json`.
 - With `--mods-dir`, the SHA-256 of each packaged jar found in that folder and the expected hash from the archive.
 - The Node version.
 
-A missing `dist/` is recorded as `null` with a warning. Acceptance uses `unzip` on PATH to read the candidate archive. Use the `mods` folder of the launcher profile used for the session. The hash check records the files present when the session starts. Confirm the launcher profile and client in your observations.
+Missing candidate files are recorded as `null` with warnings in a non-strict session. Acceptance uses `unzip` on PATH to read the candidate archive. Use the `mods` folder of the launcher profile used for the session. The hash check records the files present when the session starts. Confirm the launcher profile and client in your observations.
 
 ## Eligibility
 
@@ -63,8 +77,8 @@ A gate's evidence is **eligible** when, for each backend it needs, the latest fi
 - finished as `pass`, with a passing latest observation for every step;
 - used the gate's backend (never `demo`);
 - ran on a known commit with a clean worktree;
-- has a `dist/BUILD.json` that matches that commit and records `sourceModified: false`;
-- has an archive checksum that matches `ARCHIVE_SHA256SUMS` and, in new sessions, a packaged manifest that matches `dist/BUILD.json`;
+- has a `BUILD.json` that matches that commit and records `sourceModified: false`;
+- has an archive checksum that matches `ARCHIVE_SHA256SUMS` and, in new sessions, a packaged manifest that matches the loose `BUILD.json`;
 - for `fabric` or `both`, has all packaged jars present with hashes matching the archive.
 
 A later failed or blocked session replaces earlier eligible evidence. Existing Fabric and authenticated handoff sessions remain readable and need a new session with matching jar hashes to qualify.

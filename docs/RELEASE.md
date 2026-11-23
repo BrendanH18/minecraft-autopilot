@@ -15,7 +15,7 @@ The CI workflow is configured, but its remote execution on the final release com
 
 ## Live checks required before shipping
 
-Record each session with [`mc-agent acceptance`](ACCEPTANCE.md). For packaged Fabric and authenticated handoff, pass the launcher profile's `mods` folder with `acceptance start --mods-dir`. The [bot scenario runner](LIVE-ACCEPTANCE.md) and the [Fabric lifecycle checklist](LIFECYCLE-SCENARIOS.md) cover several of these boxes.
+Record each session with [`mc-agent acceptance`](ACCEPTANCE.md). Use `acceptance start --require-candidate` to verify provenance before each live session. For packaged Fabric and authenticated handoff, pass the launcher profile's `mods` folder with `--mods-dir`. The [bot scenario runner](LIVE-ACCEPTANCE.md) and the [Fabric lifecycle checklist](LIFECYCLE-SCENARIOS.md) cover several of these boxes.
 
 Before ticking any remaining box, capture `acceptance status` with every open gate eligible on one candidate. Keep its commit and archive SHA-256 with the reviewed evidence for publication. The status report covers the open gates, so take this snapshot while they are all still open. A person reviews the evidence and ticks the boxes.
 

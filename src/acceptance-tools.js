@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { mkdir, open, rmdir, stat } from 'node:fs/promises';
+import { mkdir, open, realpath, rmdir, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
@@ -286,7 +286,12 @@ export async function collectProvenance({
   git = defaultGit,
   node = process.version,
   modsDir,
+  candidateDir,
 } = {}) {
+  const localDist = resolve(root, 'dist');
+  const bundleDir = candidateDir === undefined ? localDist : resolve(candidateDir);
+  const buildPath = join(bundleDir, 'BUILD.json');
+  const sumsPath = join(bundleDir, 'ARCHIVE_SHA256SUMS');
   const warnings = [];
   const revision = git(['rev-parse', 'HEAD']),
     changes = git(['status', '--porcelain', '--untracked-files=normal']);
@@ -298,8 +303,8 @@ export async function collectProvenance({
   else if (dirty) warnings.push('The worktree has uncommitted changes.');
   let build = null;
   let buildManifest;
-  const buildText = await readOptional(join(root, 'dist/BUILD.json'));
-  if (buildText === null) warnings.push('dist/BUILD.json is missing; run npm run build:mod from a clean commit.');
+  const buildText = await readOptional(buildPath);
+  if (buildText === null) warnings.push('BUILD.json is missing from the candidate directory; use a clean mod build.');
   else {
     let data;
     try {
@@ -308,7 +313,7 @@ export async function collectProvenance({
       data = null;
     }
     if (!data || typeof data !== 'object' || Array.isArray(data))
-      warnings.push('dist/BUILD.json is not valid JSON for a build manifest.');
+      warnings.push('BUILD.json is not valid JSON for a build manifest.');
     else {
       buildManifest = data;
       const sourceCommit = typeof data.sourceCommit === 'string' ? data.sourceCommit.slice(0, 64) : null;
@@ -321,26 +326,27 @@ export async function collectProvenance({
         clean: sourceModified === false,
       };
       if (!build.commitMatches)
-        warnings.push(`dist/BUILD.json was built from ${sourceCommit ?? 'an unknown commit'}, not the current commit.`);
-      if (!build.clean)
-        warnings.push('dist/BUILD.json does not record a clean source tree (sourceModified is not false).');
+        warnings.push(`BUILD.json was built from ${sourceCommit ?? 'an unknown commit'}, not the current commit.`);
+      if (!build.clean) warnings.push('BUILD.json does not record a clean source tree (sourceModified is not false).');
     }
   }
   let archive = null;
-  const archivePath = join(root, 'dist', ARCHIVE_NAME);
+  const archivePath = join(bundleDir, ARCHIVE_NAME);
   try {
     const archiveSha256 = await sha256File(archivePath);
-    const sums = await readOptional(join(root, 'dist/ARCHIVE_SHA256SUMS'));
+    const sums = await readOptional(sumsPath);
     const entries =
       sums
         ?.split('\n')
         .map((text) => text.trim().split(/\s+\*?/))
         .filter(([, name]) => name === ARCHIVE_NAME) ?? [];
     const recorded = entries.length === 1 && sha256.safeParse(entries[0][0]).success ? entries[0][0] : null;
-    // Packaging writes BUILD.json, then the archive, then ARCHIVE_SHA256SUMS. A BUILD.json newer than the checksum
-    // file means packaging stopped part-way, so a matching older archive may not be the build BUILD.json describes.
-    const modified = async (name) => (await stat(join(root, 'dist', name)).catch(() => null))?.mtimeMs ?? null;
-    const [buildAt, sumsAt] = [await modified('BUILD.json'), await modified('ARCHIVE_SHA256SUMS')];
+    // In the build's output directory, a newer manifest can indicate interrupted packaging.
+    // Transferred bundles can get new timestamps, so verify them using the checksums and manifest contents.
+    const isLocalDist =
+      bundleDir === localDist || (await realpath(bundleDir)) === (await realpath(localDist).catch(() => null));
+    const modified = async (path) => (await stat(path).catch(() => null))?.mtimeMs ?? null;
+    const [buildAt, sumsAt] = isLocalDist ? await Promise.all([modified(buildPath), modified(sumsPath)]) : [null, null];
     archive = {
       name: ARCHIVE_NAME,
       sha256: archiveSha256,
@@ -353,14 +359,14 @@ export async function collectProvenance({
       warnings.push(
         `dist/BUILD.json is newer than dist/ARCHIVE_SHA256SUMS; packaging did not finish, so ${ARCHIVE_NAME} may be an older build.`,
       );
-    if (entries.length > 1) warnings.push(`dist/ARCHIVE_SHA256SUMS repeats the checksum for ${ARCHIVE_NAME}.`);
-    else if (!recorded) warnings.push(`dist/ARCHIVE_SHA256SUMS has no checksum for ${ARCHIVE_NAME}.`);
-    else if (!archive.matches) warnings.push(`dist/${ARCHIVE_NAME} does not match dist/ARCHIVE_SHA256SUMS.`);
+    if (entries.length > 1) warnings.push(`ARCHIVE_SHA256SUMS repeats the checksum for ${ARCHIVE_NAME}.`);
+    else if (!recorded) warnings.push(`ARCHIVE_SHA256SUMS has no checksum for ${ARCHIVE_NAME}.`);
+    else if (!archive.matches) warnings.push(`${ARCHIVE_NAME} does not match ARCHIVE_SHA256SUMS.`);
     if (archive.matches && !archive.predatesBuild && buildManifest) {
       try {
         const packed = JSON.parse(await readArchiveEntry(archivePath, 'BUILD.json', MAX_METADATA_BYTES));
         if (!isDeepStrictEqual(packed, buildManifest))
-          warnings.push('The archive BUILD.json differs from dist/BUILD.json.');
+          warnings.push('The archive BUILD.json differs from the loose BUILD.json.');
         else if ((await sha256File(archivePath)) !== archiveSha256)
           warnings.push('The candidate archive changed while its BUILD.json was being checked.');
         else archive.manifestMatches = true;
@@ -374,7 +380,7 @@ export async function collectProvenance({
     }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    warnings.push(`dist/${ARCHIVE_NAME} is missing; no artifact checksum was recorded.`);
+    warnings.push(`${ARCHIVE_NAME} is missing from the candidate directory; no artifact checksum was recorded.`);
   }
   const provenance = { commit, dirty, node: String(node).slice(0, 64), build, archive };
   if (modsDir !== undefined) {
@@ -511,7 +517,7 @@ export function provenanceProblems({ backend, provenance: p }) {
   const problems = [];
   if (!p.commit) problems.push('git commit unknown');
   if (p.dirty !== false) problems.push(p.dirty ? 'worktree had uncommitted changes' : 'worktree state unknown');
-  if (!p.build) problems.push('dist/BUILD.json missing or unreadable');
+  if (!p.build) problems.push('BUILD.json missing or unreadable');
   else {
     if (!p.build.commitMatches) problems.push('BUILD.json commit does not match the session commit');
     if (!p.build.clean) problems.push('BUILD.json does not record sourceModified false');
@@ -520,7 +526,7 @@ export function provenanceProblems({ backend, provenance: p }) {
   else if (!p.archive.matches) problems.push('archive checksum not verified against ARCHIVE_SHA256SUMS');
   else if (p.archive.predatesBuild) problems.push('archive predates BUILD.json; packaging did not finish');
   else if (p.archive.manifestMatches === false)
-    problems.push('archive BUILD.json not verified against dist/BUILD.json');
+    problems.push('archive BUILD.json not verified against the loose BUILD.json');
   if (hasFabric(backend)) problems.push(...launcherModProblems(p));
   return problems;
 }
@@ -640,7 +646,7 @@ export function renderMarkdown(sessions) {
       `- Commit: \`${p.commit ?? 'unknown'}\` (${p.dirty === false ? 'clean worktree' : p.dirty ? 'dirty worktree' : 'worktree state unknown'}); Node ${p.node}`,
       `- BUILD.json: ${build}`,
       `- Artifact: ${archive}`,
-      ...(p.archive?.manifestMatches === true ? ['- Archive BUILD.json: matches dist/BUILD.json.'] : []),
+      ...(p.archive?.manifestMatches === true ? ['- Archive BUILD.json: matches the loose BUILD.json.'] : []),
       problems.length
         ? `- Provenance: **${UNVERIFIED}:** ${problems.join('; ')}.`
         : '- Provenance: clean commit, BUILD.json matches with sourceModified false, archive checksum verified.',
@@ -730,6 +736,8 @@ export function registerAcceptanceTools(
     .command('start <gate>')
     .description('Start a session and record source, archive, and optional launcher mod provenance.')
     .requiredOption('--backend <backend>', `backend under test: ${SESSION_BACKENDS.join(', ')}`)
+    .option('--candidate-dir <path>', 'read the bundle and its metadata from this directory (default: dist)')
+    .option('--require-candidate', 'refuse to start unless candidate provenance is verified')
     .option('--mods-dir <path>', 'hash packaged jars in the launcher profile mods directory (uses unzip)')
     .option('--launcher <text>', 'launcher and profile, for example "Minecraft Launcher, Fabric Loader 0.16.14"')
     .option('--server <text>', 'world or server, for example "single-player" or "vanilla 1.21.1, offline"')
@@ -738,19 +746,30 @@ export function registerAcceptanceTools(
     .option('--note <text>', 'free-form setup notes')
     .action(async (gateId, options) => {
       const gate = findGate(gateId);
-      const { provenance, warnings } = await collectProvenance({ root, git, node, modsDir: options.modsDir });
-      const { session } = await editSessions(path, (sessions) => {
+      const { provenance, warnings } = await collectProvenance({
+        root,
+        git,
+        node,
+        modsDir: options.modsDir,
+        candidateDir: options.candidateDir,
+      });
+      const session = createSession({
+        gate: gateId,
+        backend: options.backend,
+        options,
+        provenance,
+        warnings,
+        now: now(),
+      });
+      if (options.requireCandidate) {
+        if (session.backend === 'demo') throw new Error('Use a live backend with --require-candidate.');
+        const problems = provenanceProblems(session);
+        if (problems.length) throw new Error(`Candidate verification failed:\n- ${problems.join('\n- ')}`);
+      }
+      await editSessions(path, (sessions) => {
         if (sessions.length >= MAX_SESSIONS)
           throw new Error(`At most ${MAX_SESSIONS} sessions can be recorded; archive ${path} first.`);
-        const session = createSession({
-          gate: gateId,
-          backend: options.backend,
-          options,
-          provenance,
-          warnings,
-          now: now(),
-        });
-        return { sessions: [...sessions, session], session };
+        return { sessions: [...sessions, session] };
       });
       print({
         session,
