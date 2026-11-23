@@ -135,7 +135,7 @@ a fifth of a core when idle on the default 4 vCPU, 8 GB sandbox.
 
 **Implemented:**
 
-1. **Fabric client mod** that controls the player already logged into Minecraft. It targets Minecraft Java 1.21.1, Java 21, Fabric Loader 0.16.14, Fabric API 0.116.17+1.21.1, and Baritone 1.11.3.
+1. **Fabric client mod** that controls the player already logged into Minecraft. It targets Minecraft Java 1.21.1, Java 21, Fabric Loader 0.20.1, Fabric API 0.116.18+1.21.1, and Baritone 1.11.3.
 2. **Standalone server bot** (Mineflayer) with Microsoft device authentication, or explicit offline authentication for development servers.
 3. **CLI and bridge:**
    - An authenticated localhost HTTP API.

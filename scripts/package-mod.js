@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -6,8 +6,8 @@ import { verifyModBundle } from '../src/bundle.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = `${root}/dist/mods`;
-const fabricName = 'fabric-api-0.116.17+1.21.1.jar';
-const fabricHash = '79ac44b40780acbd884b34c50be1e39af682847e5f5cb3b1fddeeaa768dce800';
+const fabricName = 'fabric-api-0.116.18+1.21.1.jar';
+const fabricHash = '1cb46442dda6d3be9979a2619610eb1c1f6641cd7ed7cb3eec058589ce9eed46';
 const checksum = (bytes) => createHash('sha256').update(bytes).digest('hex');
 await mkdir(output, { recursive: true });
 let fabric;
@@ -20,7 +20,7 @@ if (!fabric || checksum(fabric) !== fabricHash) {
       `${fabricName} is missing or failed verification. No download was made. Re-run package-mod.js with --allow-downloads only after approving this dependency.`,
     );
   const response = await fetch(
-    `https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.116.17+1.21.1/${fabricName}`,
+    `https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.116.18+1.21.1/${fabricName}`,
     { signal: AbortSignal.timeout(120_000) },
   );
   if (!response.ok) throw new Error(`Fabric API download failed: HTTP ${response.status}`);
@@ -38,11 +38,12 @@ for (const [source, name] of files) {
   await copyFile(`${root}/${source}`, `${output}/${name}`);
   hashes.push(`${checksum(await readFile(`${output}/${name}`))}  ${name}`);
 }
+await rm(`${output}/fabric-api-0.116.17+1.21.1.jar`, { force: true });
 await writeFile(`${root}/dist/SHA256SUMS`, `${hashes.join('\n')}\n`);
 await copyFile(`${root}/LICENSE`, `${root}/dist/LICENSE`);
 await writeFile(
   `${root}/dist/INSTALL.md`,
-  `# Minecraft Agent 0.1.0\n\nInstall Minecraft Java **1.21.1** with Fabric Loader **0.16.14 or newer**. Copy all three jars from this bundle's mods directory into that profile's mods directory.\n\nStart Minecraft and enter a world or Java 1.21.1 server. In this repository run:\n\n\`\`\`sh\nnpm start -- attach /path/to/game-directory/config/minecraft-agent/bridge.json\nnpm start -- observe\nnpm start -- set-home\nnpm start -- collect oak_log 8\n\`\`\`\n\nF8 returns control immediately. See the repository README.md for the CLI, local model, and server bot setup.\n\nThird-party dependencies are unmodified official releases:\n- Baritone 1.11.3: LGPL-3.0, source and license at https://github.com/cabaletta/baritone/releases/tag/v1.11.3\n- Fabric API 0.116.17: Apache-2.0, source and license at https://github.com/FabricMC/fabric\n`,
+  `# Minecraft Agent 0.1.0\n\nInstall Minecraft Java **1.21.1** with Fabric Loader **0.16.14 or newer**. Copy all three jars from this bundle's mods directory into that profile's mods directory.\n\nStart Minecraft and enter a world or Java 1.21.1 server. In this repository run:\n\n\`\`\`sh\nnpm start -- attach /path/to/game-directory/config/minecraft-agent/bridge.json\nnpm start -- observe\nnpm start -- set-home\nnpm start -- collect oak_log 8\n\`\`\`\n\nF8 returns control immediately. See the repository README.md for the CLI, local model, and server bot setup.\n\nThird-party dependencies are unmodified official releases:\n- Baritone 1.11.3: LGPL-3.0, source and license at https://github.com/cabaletta/baritone/releases/tag/v1.11.3\n- Fabric API 0.116.18: Apache-2.0, source and license at https://github.com/FabricMC/fabric\n`,
 );
 await verifyModBundle(`${root}/dist`);
 const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
