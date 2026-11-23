@@ -13,8 +13,39 @@ snapshot `minecraft-autopilot-warm` (Java 21, `node_modules`, Gradle caches,
 the pinned jars and the vanilla server jar), and pushes every check into a fresh
 directory in it. See [Boat checks](docs/DEVELOPMENT.md#boat-checks).
 
-- Hand-off checks (the CONTRIBUTING.md list): `scripts/boat-check.sh`
-- Any other command: `scripts/boat-check.sh -- npm test`
+CI is the gate (owner decision, 2026-11-22). It runs the full check suite once,
+on the pushed commit: the CI `node` job runs actionlint, `npm run lint`,
+`npm run check`, `npm test` and the demo smoke, and the `mod` job builds the mod
+(Gradle's `check`, so Spotless and the Java tests), packages it and runs
+`npm run verify:mod`. That covers every command in the CONTRIBUTING.md list, so
+don't run the full `scripts/boat-check.sh` before handing work back.
+
+- While working, run targeted checks on Boat with
+  `scripts/boat-check.sh -- <command>`: the tests that cover the code you
+  changed, plus lint and syntax for the areas you touched. Chain them in one
+  check (`&&`) so they share one push. The cheap choices:
+  - Node side (`src/`, `scripts/`, `test/`): `node --test test/<name>.test.js`
+    for the affected test files, `npm run lint` (Biome, a few seconds) and
+    `npm run check`. Add `npm start -- demo --smoke` when the CLI, bridge or
+    simulated harness changed.
+  - Mod side (`mod/`): `npm run lint:mod` (Spotless) and
+    `node scripts/gradle.js test` (compiles and runs the Java tests). Add
+    `npm run build:mod && npm run verify:mod` only when packaging,
+    `scripts/setup-mod.js`, `scripts/package-mod.js`, `scripts/verify-mod.js`
+    or the pinned dependencies changed.
+  - Docs-only changes need no Boat check; CI on the pull request is enough.
+- Then push and let CI run everything. When a CI job fails, reproduce that job,
+  or just its failing test, on Boat with the script, fix it and push again.
+  The full `scripts/boat-check.sh` (no command) is for reproducing CI failures
+  and for checks CI doesn't run.
+- CI on pull requests doesn't run the headless bot acceptance (the Bot
+  acceptance workflow runs only weekly, on demand, and when its own workflow
+  file changes). When a change affects bot gameplay or the scenario runner,
+  run the affected scenarios on Boat (below) before handing back. The live and
+  manual steps in [LIVE-ACCEPTANCE.md](docs/LIVE-ACCEPTANCE.md) and
+  [RELEASE.md](docs/RELEASE.md) are unchanged.
+- The hand-off report lists the targeted checks that ran, and says CI is the
+  full check.
 - Headless bot acceptance against the offline vanilla server (no Ollama):
   `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario <scenario>`
   (or `--all`, which takes well over ten minutes); the results come back to
@@ -31,7 +62,8 @@ directory in it. See [Boat checks](docs/DEVELOPMENT.md#boat-checks).
 - Never share a sandbox between agents: each agent works in its own worktree,
   or sets `MCA_BOAT_KEY=<name>` when two agents share a checkout.
 - After dependency or toolchain changes, refresh the snapshot with
-  `scripts/boat-check.sh --save` (hand-off checks, then save).
+  `scripts/boat-check.sh --save`. It still runs the full CONTRIBUTING.md list
+  first and saves only if that passes.
 - Use as few starts as possible: one sandbox for the whole job. Run
   `boat limits` before starting one. If the included starts are used up, the
   script refuses rather than pay for extra starts (`MCA_BOAT_PAID_STARTS=1`

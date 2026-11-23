@@ -20,7 +20,7 @@ Add regression coverage for behavior changes. Documentation edits generally need
 
 ## Validation and pull requests
 
-Before submitting code changes:
+CI runs the full check suite on every pull request; the `node` and `mod` jobs must pass before merging. It covers this list:
 
 ```sh
 npm run lint
@@ -32,6 +32,6 @@ npm run build:mod
 npm run verify:mod
 ```
 
-`scripts/boat-check.sh` runs this list in a Boat sandbox; see [Boat checks](docs/DEVELOPMENT.md#boat-checks). Report exact blockers for checks you cannot run. Distinguish fixtures, simulation, mocked inference, and live gameplay. Record live versions/results in the development guide and leave unverified release checks open.
+While working, run the checks that cover your change: the affected tests plus lint and syntax for the areas you touched (`npm run lint:mod` and `node scripts/gradle.js test` for the mod). Push and let CI run the rest. When a CI job fails, reproduce that job or its failing test, fix it, and push again. `scripts/boat-check.sh` runs the whole list in a Boat sandbox, for reproducing CI failures; see [Boat checks](docs/DEVELOPMENT.md#boat-checks). CI on pull requests doesn't run the headless bot acceptance, so run the affected [scenarios](docs/LIVE-ACCEPTANCE.md) yourself when a change affects bot gameplay. In the pull request, list the checks you ran. Report exact blockers for checks you cannot run. Distinguish fixtures, simulation, mocked inference, and live gameplay. Record live versions/results in the development guide and leave unverified release checks open.
 
 Use the PR template to describe the problem, resulting behavior, and validation. Generated jars, caches, worlds, runtime state, tokens, and task results remain ignored. Source contributions use the [MIT license](LICENSE); third-party jars retain their own licenses.

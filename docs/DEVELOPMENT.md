@@ -44,14 +44,21 @@ Agents run builds, tests and the headless bot acceptance in a
 development machine. It needs the `boat` CLI, signed in, plus `jq` and `git`.
 
 ```sh
-scripts/boat-check.sh                 # the hand-off checks in CONTRIBUTING.md
-scripts/boat-check.sh -- npm test     # any command
+scripts/boat-check.sh -- node --test test/harness.test.js   # a targeted check: any command
+scripts/boat-check.sh                 # the full CONTRIBUTING.md list, to reproduce CI
 scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario withdraw
 scripts/boat-check.sh --fetch dist -- npm run build:mod   # a bundle for packaged acceptance on the Mac
-scripts/boat-check.sh --save          # hand-off checks, then refresh the warm snapshot
+scripts/boat-check.sh --save          # the full list, then refresh the warm snapshot
 scripts/boat-check.sh --status        # this worktree's sandbox
 scripts/boat-check.sh --done          # delete it when the work ends
 ```
+
+CI is the full check (owner decision, 2026-11-22): it runs every command in
+the CONTRIBUTING.md list on the pushed commit, so agents run only targeted
+checks here while working, such as the affected tests, `npm run lint`,
+`npm run check`, `npm run lint:mod` or `node scripts/gradle.js test`. The full
+list with no command is for reproducing a CI failure. See
+[AGENTS.md](../AGENTS.md) for the cheap choices on each side.
 
 Each worktree gets one long-lived sandbox, so a series of checks spends one of
 the account's daily sandbox starts instead of one per check. The first check
@@ -105,7 +112,7 @@ checkout its own sandbox, and `MCA_BOAT_TYPE` (default `default`: 4 vCPUs,
 8 GB). There are also `MCA_BOAT_SNAPSHOT` and `MCA_BOAT_KEEP_CHECKS`. A check holds a per-sandbox lock, so two runs never
 share a sandbox at once.
 
-`--save` runs the checks and, if they pass, saves the sandbox as the warm
+`--save` runs the full CONTRIBUTING.md list and, if it passes, saves the sandbox as the warm
 snapshot, without check directories. The sandbox remains available for this
 worktree's later checks. Re-run it after changes to dependencies or the
 toolchain. The Minecraft client, packaged Fabric acceptance, authenticated
