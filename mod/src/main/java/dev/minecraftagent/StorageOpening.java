@@ -37,6 +37,10 @@ final class StorageOpening {
         return sequence >= 0;
     }
 
+    void discardIfUnsent() {
+        if (!sent()) reset();
+    }
+
     boolean mayOwnReply() {
         return pending && !cancelled;
     }

@@ -4,7 +4,9 @@ package dev.minecraftagent;
 final class ActionTiming {
     private long deadline;
     private long retreatDeadline;
+    private long retreatRetryAt;
     private long eatingRetryAt;
+    private boolean retreatBackoff;
     private boolean eatingBackoff;
 
     void start(long now, long budget) {
@@ -21,6 +23,15 @@ final class ActionTiming {
 
     boolean retreatExpired(long now) {
         return now - retreatDeadline >= 0;
+    }
+
+    void retreatAttempted(long now) {
+        retreatRetryAt = now + 10_000_000_000L;
+        retreatBackoff = true;
+    }
+
+    boolean canRetreat(long now) {
+        return !retreatBackoff || now - retreatRetryAt >= 0;
     }
 
     void eatingFailed(long now) {

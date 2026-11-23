@@ -60,4 +60,16 @@ class StorageOpeningTest {
         opening.reset(); // Disconnect or world change must not block a later world.
         assertFalse(opening.pending());
     }
+
+    @Test
+    void anInteractionThatAbortsBeforeSendingCannotBlockTheNextAction() {
+        StorageOpening opening = new StorageOpening();
+        opening.expect();
+        opening.discardIfUnsent();
+        assertFalse(opening.pending());
+        opening.expect();
+        opening.sent(7);
+        opening.discardIfUnsent();
+        assertTrue(opening.pending(), "a sent interaction still needs late screen cleanup");
+    }
 }

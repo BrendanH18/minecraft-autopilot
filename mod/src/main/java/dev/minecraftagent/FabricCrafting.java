@@ -92,10 +92,6 @@ final class FabricCrafting {
         return requested;
     }
 
-    String outputName() {
-        return outputName;
-    }
-
     /** Null while crafting continues, otherwise the outcome. Throws for unexpected server or screen states. */
     FabricStorage.Result tick(long now) {
         if (client.player.currentScreenHandler != handler)
@@ -146,7 +142,7 @@ final class FabricCrafting {
                 if (result.getCount() != recipe.yield())
                     throw new IllegalStateException("The server offered " + result.getCount() + " " + outputName
                             + " per craft; expected " + recipe.yield() + ".");
-                if (InventoryRoom.capacity(mainSlots(client.player.getInventory()), outputName, output.getMaxCount())
+                if (InventoryRoom.capacity(mainSlots(client.player.getInventory(), result), result.getMaxCount())
                         < result.getCount()) {
                     returnGrid();
                     return new FabricStorage.Result(
@@ -208,8 +204,8 @@ final class FabricCrafting {
         return sources;
     }
 
-    /** The hotbar and main inventory as plain slot data for {@link InventoryRoom}. */
-    static List<InventoryRoom.Slot> mainSlots(PlayerInventory inventory) {
+    /** The hotbar and main inventory, including whether each stack accepts the incoming item. */
+    static List<InventoryRoom.Slot> mainSlots(PlayerInventory inventory, ItemStack incoming) {
         List<InventoryRoom.Slot> slots = new ArrayList<>(InventoryRoom.MAIN_SLOTS);
         for (int index = 0; index < InventoryRoom.MAIN_SLOTS; index++) {
             ItemStack stack = inventory.getStack(index);
@@ -217,7 +213,7 @@ final class FabricCrafting {
                     stack.isEmpty()
                             ? InventoryRoom.Slot.EMPTY
                             : new InventoryRoom.Slot(
-                                    Registries.ITEM.getId(stack.getItem()).toString(),
+                                    ItemStack.areItemsAndComponentsEqual(stack, incoming),
                                     stack.getCount(),
                                     stack.getMaxCount()));
         }

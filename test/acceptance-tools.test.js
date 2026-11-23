@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { testDirectory } from './helpers.js';
-import { archiveTest, zip } from './acceptance-zip.js';
+import { archiveTest, candidateZip, expectedFiles, zip } from './acceptance-zip.js';
 import { projectRoot } from '../src/config.js';
 import { modBundleFiles } from '../src/bundle.js';
 import { ACCEPTANCE_GATES, OPEN_GATES, findGate, requiredBackends } from '../src/acceptance-gates.js';
@@ -48,6 +48,8 @@ const VERIFIED = {
     recorded: 'b'.repeat(64),
     matches: true,
     predatesBuild: false,
+    manifestMatches: true,
+    bundleVerified: true,
   },
   mods: {
     archiveSha256: 'b'.repeat(64),
@@ -70,7 +72,7 @@ async function distRoot(
   {
     build = { version: '0.1.0', minecraft: '1.21.1', sourceCommit: COMMIT, sourceModified: false },
     sums = 'match',
-    archive = zip([['BUILD.json', JSON.stringify(build)]]),
+    archive = candidateZip(build),
   } = {},
 ) {
   const root = await testDirectory(t, 'acceptance-root-');
@@ -92,6 +94,7 @@ function cli(options) {
   registerAcceptanceTools(program, {
     print: (value) => output.printed.push(value),
     write: (text) => output.written.push(text),
+    expectedFiles,
     ...options,
   });
   const run = (...args) =>
@@ -161,9 +164,10 @@ test('list and show expose open and closed gates through Commander', async (t) =
 
 test('provenance verifies the archive manifest with unzip', archiveTest, async (t) => {
   const root = await distRoot(t);
-  const verified = await collectProvenance({ root, git: cleanGit(), node: 'v22.12.0' });
+  const verified = await collectProvenance({ root, git: cleanGit(), node: 'v22.12.0', expectedFiles });
   assert.deepEqual(verified.warnings, []);
   assert.equal(verified.provenance.archive.manifestMatches, true);
+  assert.equal(verified.provenance.archive.bundleVerified, true);
   assert.deepEqual(provenanceProblems({ provenance: verified.provenance }), []);
 });
 
@@ -501,6 +505,29 @@ test('finish rules and step history: notes for fail/blocked, failed steps block 
   assert.match(renderMarkdown([session]), /1\. pass \(earlier: fail\) — Collect cobblestone/);
   assert.match(renderMarkdown([session]), /2\. not recorded/);
   assert.equal(renderMarkdown([]), 'No acceptance sessions recorded.\n');
+});
+
+test('a recorded checklist retains the original step labels and cannot qualify against an edited gate', async (t) => {
+  const gate = 'bot-mining-timeout';
+  const session = createSession({ gate, backend: 'mineflayer', provenance: VERIFIED });
+  assert.deepEqual(session.checklist, findGate(gate).steps);
+  const saved = session.checklist.reduce(
+    (sessions, _, index) => recordStep(sessions, session.id, index + 1, 'pass').sessions,
+    [session],
+  );
+  const passed = finishSession(saved, session.id, 'pass').session;
+  const checklist = ['Original step text before the edit.', ...session.checklist.slice(1)];
+  const path = acceptanceFile(await testDirectory(t, 'acceptance-checklist-'));
+  await writeSessions(path, [{ ...passed, checklist }]);
+  const [older] = await readSessions(path);
+  assert.deepEqual(eligibilityProblems(older), ['gate checklist has changed since this session started']);
+  assert.match(renderMarkdown([older]), /1\. pass — Original step text before the edit\./);
+
+  const unfinished = [{ ...session, checklist }];
+  assert.throws(() => recordStep(unfinished, session.id, 1, 'pass'), /checklist .* has changed/);
+  assert.throws(() => finishSession(unfinished, session.id, 'pass'), /checklist .* has changed/);
+  const blocked = finishSession(unfinished, session.id, 'blocked', { note: 'Checklist changed.' });
+  assert.equal(blocked.session.finished.result, 'blocked');
 });
 
 test('session ids resolve by exact id or an unambiguous prefix of at least six characters', () => {

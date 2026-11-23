@@ -79,7 +79,7 @@ public final class AgentController {
     private BlockPos destination;
     private BlockPos collectStart;
     private boolean returning;
-    private String collectionFailure;
+    private CollectionReturn collectionReturn;
     private long returnStarted;
     private ClientWorld controlledWorld;
     private ClientPlayerEntity controlledPlayer;
@@ -92,7 +92,6 @@ public final class AgentController {
     private boolean recovering;
     private boolean resumeAfterEating;
     private String survivalMessage = "Idle";
-    private long lastRecovery;
 
     public AgentController(MinecraftClient client) {
         this.client = client;
@@ -246,7 +245,8 @@ public final class AgentController {
                 throw new IllegalArgumentException("Unsupported action: " + type);
         }
         stopMotion();
-        if (Set.of("deposit", "withdraw", "craft", "inspect_storage").contains(type)) endEating();
+        endEating();
+        resumeAfterEating = false;
         action = requested.deepCopy();
         job = new JsonObject();
         job.addProperty("id", UUID.randomUUID().toString());
@@ -257,7 +257,7 @@ public final class AgentController {
         timing.start(jobStarted, type.equals("wait") ? (long) (wait * 1e9) + 5_000_000_000L : 180_000_000_000L);
         destination = goal;
         returning = false;
-        collectionFailure = null;
+        collectionReturn = null;
         try {
             switch (type) {
                 case "set_home": {
@@ -355,7 +355,8 @@ public final class AgentController {
         }
         if (running() && !recovering && timing.expired(now)) {
             if (returning) finishCollectionReturn(false, "Could not return to the starting point in time.");
-            else if (collecting()) beginReturn(now, "Collection timed out before reaching the requested quota.");
+            else if (collecting())
+                beginReturn(now, CollectionReturn.failed("Collection timed out before reaching the requested quota."));
             else finish("failed", "Action timed out.");
             return;
         }
@@ -387,7 +388,7 @@ public final class AgentController {
             survivalMessage = "Eating";
             return;
         }
-        if (client.player.getHealth() <= 8 && !recovering && now - lastRecovery > 10_000_000_000L) {
+        if (client.player.getHealth() <= 8 && !recovering && timing.canRetreat(now)) {
             stopMotion();
             endEating();
             if (storage.active()) {
@@ -396,7 +397,7 @@ public final class AgentController {
                         "failed",
                         "Storage action interrupted for survival. Check inventory and storage before retrying.");
             }
-            lastRecovery = now;
+            timing.retreatAttempted(now);
             JsonObject home = homes.get(identity());
             if (home != null) {
                 destination = new BlockPos(
@@ -446,20 +447,20 @@ public final class AgentController {
                 String drop = COLLECT_DROPS.get(string(action, "block"));
                 int have = inventoryCount(drop);
                 job.addProperty("message", "Inventory: " + have + "/" + targetCount);
-                if (have >= targetCount) beginReturn(now, null);
+                if (have >= targetCount) beginReturn(now, CollectionReturn.quotaReached());
                 else if (string(action, "block").equals("cobblestone") && !hasPickaxe())
-                    beginReturn(now, "Collection stopped because no pickaxe remains.");
+                    beginReturn(now, CollectionReturn.failed("Collection stopped because no pickaxe remains."));
                 // Checked every tick: mining stops as soon as no drop could be picked up, not at the 180 s deadline.
                 else if (!hasRoomFor(drop))
                     beginReturn(
                             now,
-                            InventoryRoom.fullMessage(
+                            CollectionReturn.failed(InventoryRoom.fullMessage(
                                     have - (targetCount - collectRequested),
                                     collectRequested,
-                                    string(action, "block")));
+                                    string(action, "block"))));
                 else if (now - jobStarted > 3_000_000_000L
                         && !baritone().getMineProcess().isActive())
-                    beginReturn(now, "No reachable matching blocks found.");
+                    beginReturn(now, CollectionReturn.noReachableBlocks());
                 break;
             }
             case "wait":
@@ -536,11 +537,11 @@ public final class AgentController {
     }
 
     /** Mining often digs downward; walk back to the start, breaking blocks if needed, so later navigation is not trapped. */
-    private void beginReturn(long now, String failure) {
+    private void beginReturn(long now, CollectionReturn reason) {
         stopMotion();
         endEating();
         resumeAfterEating = false;
-        collectionFailure = failure;
+        collectionReturn = reason;
         returning = true;
         returnStarted = now;
         timing.start(now, 60_000_000_000L);
@@ -549,20 +550,15 @@ public final class AgentController {
             finishCollectionReturn(true, "At the starting point.");
             return;
         }
-        job.addProperty(
-                "message",
-                (failure == null ? "Collected requested items" : "Collection failed")
-                        + "; returning to where collection started.");
+        job.addProperty("message", reason.returningMessage());
         BaritoneAPI.getSettings().allowBreak.value = true;
         baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(collectStart, 1));
     }
 
     private void finishCollectionReturn(boolean returned, String message) {
         int have = inventoryCount(COLLECT_DROPS.get(string(action, "block")));
-        String outcome = collectionFailure == null ? "Collected requested items." : collectionFailure;
-        finish(
-                returned && collectionFailure == null ? "completed" : "failed",
-                outcome + " Inventory: " + have + "/" + targetCount + ". " + message);
+        CollectionReturn.Outcome outcome = collectionReturn.finish(returned, have, targetCount, message);
+        finish(outcome.success() ? "completed" : "failed", outcome.message());
     }
 
     private boolean collecting() {
@@ -703,18 +699,8 @@ public final class AgentController {
     }
 
     private boolean hasRoomFor(String item) {
-        List<InventoryRoom.Slot> slots = new ArrayList<>(InventoryRoom.MAIN_SLOTS);
-        for (int i = 0; i < InventoryRoom.MAIN_SLOTS; i++) {
-            ItemStack stack = client.player.getInventory().getStack(i);
-            slots.add(
-                    stack.isEmpty()
-                            ? InventoryRoom.Slot.EMPTY
-                            : new InventoryRoom.Slot(
-                                    Registries.ITEM.getId(stack.getItem()).toString(),
-                                    stack.getCount(),
-                                    stack.getMaxCount()));
-        }
-        return InventoryRoom.hasRoom(slots, "minecraft:" + item);
+        Item drop = Registries.ITEM.get(Identifier.of("minecraft", item));
+        return InventoryRoom.hasRoom(FabricCrafting.mainSlots(client.player.getInventory(), new ItemStack(drop)));
     }
 
     private int inventoryCount(String item) {

@@ -102,12 +102,14 @@ const sessionSchema = z
             matches: z.boolean(),
             predatesBuild: z.boolean(),
             manifestMatches: z.boolean().optional(),
+            bundleVerified: z.boolean().optional(),
           })
           .strict()
           .nullable(),
         mods: modProvenanceSchema.optional(),
       })
       .strict(),
+    checklist: z.array(z.string().min(1).max(1000)).min(1).max(50).optional(),
     warnings: z.array(z.string().max(500)).max(20),
     steps: z
       .array(
@@ -287,6 +289,7 @@ export async function collectProvenance({
   node = process.version,
   modsDir,
   candidateDir,
+  expectedFiles = modBundleFiles,
 } = {}) {
   const localDist = resolve(root, 'dist');
   const bundleDir = candidateDir === undefined ? localDist : resolve(candidateDir);
@@ -354,6 +357,7 @@ export async function collectProvenance({
       matches: recorded === archiveSha256,
       predatesBuild: buildAt !== null && sumsAt !== null && buildAt > sumsAt,
       manifestMatches: false,
+      bundleVerified: false,
     };
     if (archive.predatesBuild)
       warnings.push(
@@ -376,6 +380,15 @@ export async function collectProvenance({
             ? 'Could not run unzip or read the candidate archive. Check that unzip is on PATH and the archive exists.'
             : 'Could not read BUILD.json from the candidate archive.',
         );
+      }
+    }
+    if (archive.manifestMatches) {
+      try {
+        const bundle = await verifyModArchive(bundleDir, { compareLoose: false, expectedFiles });
+        if (bundle.archiveSha256 === archiveSha256) archive.bundleVerified = true;
+        else warnings.push('The candidate archive changed during bundle verification.');
+      } catch (error) {
+        warnings.push(`Installable archive verification failed: ${error.message}`.slice(0, 500));
       }
     }
   } catch (error) {
@@ -430,6 +443,7 @@ export function createSession({
     startedAt: now.toISOString(),
     config,
     provenance,
+    checklist: [...gate.steps],
     warnings: allWarnings,
     steps: [],
     finished: null,
@@ -459,6 +473,9 @@ const assertOpen = (session) => {
     );
 };
 
+const checklistChanged = (session, gate) =>
+  session.checklist !== undefined && !isDeepStrictEqual(session.checklist, gate.steps);
+
 /** Latest observation per step number; earlier observations stay in the record. */
 export const latestSteps = (session) => {
   const map = new Map();
@@ -472,6 +489,8 @@ export function recordStep(sessions, reference, step, result, { note: text, now 
   assertOpen(session);
   const gate = findGate(session.gate),
     n = Number(step);
+  if (checklistChanged(session, gate))
+    throw new Error(`The checklist for ${gate.id} has changed. Start a new session for the current checklist.`);
   if (!Number.isInteger(n) || n < 1 || n > gate.steps.length)
     throw new Error(`Step must be an integer from 1 to ${gate.steps.length} for gate ${gate.id}.`);
   if (!['pass', 'fail'].includes(result)) throw new Error('Step result must be pass or fail.');
@@ -487,6 +506,8 @@ export function finishSession(sessions, reference, result, { note: text, now = n
   if (!['pass', 'fail', 'blocked'].includes(result)) throw new Error('Result must be pass, fail, or blocked.');
   const written = optional(text, note, 'Note');
   if (result !== 'pass' && !written) throw new Error(`A ${result} result needs --note describing what happened.`);
+  if (result === 'pass' && checklistChanged(session, findGate(session.gate)))
+    throw new Error(`The checklist for ${session.gate} has changed. Start a new session for the current checklist.`);
   const failed = [...latestSteps(session).values()]
     .filter((entry) => entry.result === 'fail')
     .map((entry) => entry.step);
@@ -527,6 +548,7 @@ export function provenanceProblems({ backend, provenance: p }) {
   else if (p.archive.predatesBuild) problems.push('archive predates BUILD.json; packaging did not finish');
   else if (p.archive.manifestMatches === false)
     problems.push('archive BUILD.json not verified against the loose BUILD.json');
+  else if (p.archive.bundleVerified !== true) problems.push('installable archive integrity was not verified');
   if (hasFabric(backend)) problems.push(...launcherModProblems(p));
   return problems;
 }
@@ -540,8 +562,11 @@ export function eligibilityProblems(session) {
   if (session.backend === 'demo') problems.push('demo backend is a rehearsal');
   else if (!requiredBackends(gate).includes(session.backend))
     problems.push(`backend ${session.backend} does not match gate backend ${gate.backend}`);
+  if (checklistChanged(session, gate)) problems.push('gate checklist has changed since this session started');
   const latest = latestSteps(session);
-  const missing = gate.steps.map((_, index) => index + 1).filter((n) => latest.get(n)?.result !== 'pass');
+  const missing = (session.checklist ?? gate.steps)
+    .map((_, index) => index + 1)
+    .filter((n) => latest.get(n)?.result !== 'pass');
   if (missing.length) problems.push(`steps without a passing observation: ${missing.join(', ')}`);
   return [...problems, ...provenanceProblems(session)];
 }
@@ -647,6 +672,7 @@ export function renderMarkdown(sessions) {
       `- BUILD.json: ${build}`,
       `- Artifact: ${archive}`,
       ...(p.archive?.manifestMatches === true ? ['- Archive BUILD.json: matches the loose BUILD.json.'] : []),
+      ...(p.archive?.bundleVerified === true ? ['- Installable archive: contents and pinned jars verified.'] : []),
       problems.length
         ? `- Provenance: **${UNVERIFIED}:** ${problems.join('; ')}.`
         : '- Provenance: clean commit, BUILD.json matches with sourceModified false, archive checksum verified.',
@@ -660,9 +686,10 @@ export function renderMarkdown(sessions) {
         ),
       );
     if (session.backend === 'demo') lines.push(`- **${UNVERIFIED}:** the demo backend is a rehearsal.`);
+    if (checklistChanged(session, gate)) lines.push('- Checklist: the gate has changed since the session started.');
     lines.push(
       '- Steps:',
-      ...gate.steps.map((text, index) => {
+      ...(session.checklist ?? gate.steps).map((text, index) => {
         const all = session.steps.filter((entry) => entry.step === index + 1),
           last = latest.get(index + 1);
         const earlier =
@@ -714,6 +741,7 @@ export function registerAcceptanceTools(
     git = defaultGit,
     now = () => new Date(),
     node = process.version,
+    expectedFiles = modBundleFiles,
   } = {},
 ) {
   const path = acceptanceFile(directory);
@@ -723,7 +751,7 @@ export function registerAcceptanceTools(
       'Record live release-gate acceptance sessions with commit and artifact provenance; never edits RELEASE.md.',
     );
   const readCandidate = (options) =>
-    collectProvenance({ root, git, node, modsDir: options.modsDir, candidateDir: options.candidateDir });
+    collectProvenance({ root, git, node, expectedFiles, modsDir: options.modsDir, candidateDir: options.candidateDir });
   group
     .command('list')
     .description('List live release gates from docs/RELEASE.md, open and closed.')
@@ -745,15 +773,6 @@ export function registerAcceptanceTools(
       if (!GATE_BACKENDS.includes(backend)) throw new Error(`Use a live backend: ${GATE_BACKENDS.join(', ')}.`);
       const { provenance, warnings } = await readCandidate(options);
       const problems = provenanceProblems({ backend, provenance });
-      if (!problems.length) {
-        try {
-          const candidateDir = options.candidateDir ?? join(root, 'dist');
-          const bundle = await verifyModArchive(candidateDir, { compareLoose: false });
-          if (bundle.archiveSha256 !== provenance.archive.sha256) problems.push('archive changed during preflight');
-        } catch (error) {
-          problems.push(`installable archive verification failed: ${error.message}`);
-        }
-      }
       print({ backend, verified: problems.length === 0, provenance, problems, warnings });
       if (problems.length) throw new Error('Candidate verification failed.');
     });
@@ -783,7 +802,8 @@ export function registerAcceptanceTools(
       if (options.requireCandidate) {
         if (session.backend === 'demo') throw new Error('Use a live backend with --require-candidate.');
         const problems = provenanceProblems(session);
-        if (problems.length) throw new Error(`Candidate verification failed:\n- ${problems.join('\n- ')}`);
+        if (problems.length)
+          throw new Error(`Candidate verification failed:\n- ${[...new Set([...problems, ...warnings])].join('\n- ')}`);
       }
       await editSessions(path, (sessions) => {
         if (sessions.length >= MAX_SESSIONS)

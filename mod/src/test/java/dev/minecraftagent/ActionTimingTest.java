@@ -47,4 +47,13 @@ class ActionTimingTest {
         assertFalse(timing.expired(80_000_000_000L), "retreat has its own shorter deadline");
         assertFalse(timing.canAutoEat(80_000_000_000L, false));
     }
+
+    @Test
+    void firstRetreatCanStartAtAnyMonotonicClockOrigin() {
+        ActionTiming timing = new ActionTiming();
+        assertTrue(timing.canRetreat(-5_000_000_000L));
+        timing.retreatAttempted(-5_000_000_000L);
+        assertFalse(timing.canRetreat(4_999_999_999L));
+        assertTrue(timing.canRetreat(5_000_000_000L));
+    }
 }

@@ -1,7 +1,24 @@
 import { crc32 } from 'node:zlib';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { modBundleFiles } from '../src/bundle.js';
 
 export const archiveTest = { skip: spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status !== 0 && 'requires unzip' };
+
+const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+export const jarContents = modBundleFiles.map(({ name }) => [name, `bundle entry: ${name}`]);
+export const expectedFiles = jarContents.map(([name, bytes]) => ({ name, sha256: digest(bytes) }));
+
+export function candidateZip(build, { omit } = {}) {
+  const entries = [
+    ['BUILD.json', JSON.stringify(build)],
+    ['INSTALL.md', 'Install instructions'],
+    ['LICENSE', 'License'],
+    ['SHA256SUMS', expectedFiles.map(({ name, sha256 }) => `${sha256}  ${name}`).join('\n')],
+    ...jarContents.map(([name, bytes]) => [`mods/${name}`, bytes]),
+  ];
+  return zip(entries.filter(([name]) => name !== omit));
+}
 
 // Write a ZIP with stored entries so the fixture needs only the reader used by acceptance.
 export function zip(entries) {

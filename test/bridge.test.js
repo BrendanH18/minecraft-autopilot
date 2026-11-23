@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rm, stat } from 'node:fs/promises';
+import { access, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Harness } from '../src/harness.js';
 import { DemoDriver } from '../src/demo-driver.js';
@@ -35,6 +35,29 @@ test('bridge rejects missing credentials, browser origins, wrong methods, and ov
   );
   assert.equal((await fetch(`${url}/v1/actions`, { headers })).status, 405);
   assert.equal((await fetch(`${url}/v1/actions`, { method: 'POST', headers, body: 'x'.repeat(9000) })).status, 413);
+});
+
+test('bridge stops accepting requests and releases ownership even when its driver fails to close', async (t) => {
+  const directory = await testDirectory(t, 'bridge-close-');
+  const discoveryPath = join(directory, 'bridge.json');
+  const driver = new DemoDriver();
+  let finishClose;
+  const driverClosing = new Promise((_, reject) => {
+    finishClose = () => reject(new Error('Driver failed to close.'));
+  });
+  driver.close = () => driverClosing;
+  const bridge = await startBridge(new Harness(driver), { discoveryPath });
+  const adapter = await FabricAdapter.connect(discoveryPath);
+  assert.equal((await adapter.observe()).mode, 'manual');
+  const closing = assert.rejects(bridge.close(), /Driver failed to close/);
+  try {
+    await assert.rejects(adapter.observe(), /Cannot reach the Minecraft bridge/);
+  } finally {
+    finishClose();
+    await closing;
+  }
+  await assert.rejects(access(discoveryPath), { code: 'ENOENT' });
+  await assert.rejects(access(`${discoveryPath}.lock`), { code: 'ENOENT' });
 });
 
 test('adapter performs a round trip, additional collection, eating, and manual handoff', async (t) => {

@@ -90,7 +90,7 @@ Ctrl+C stops the current scenario, cleans up its fixture even with `--keep-serve
 | `craft-bootstrap` | Open ground, no crafting table; player holds 3 oak logs and 3 cobblestone. `craft oak_planks 12` → `crafting_table 1` → `stick 4` → `stone_pickaxe 1` → `wooden_pickaxe 1`. | Every craft `completed` and reports its amount; server inventory holds 1 stone pickaxe, 1 wooden pickaxe, and 3 planks with no logs, cobblestone, sticks, or crafting table left; `execute if block` finds no table on the eight blocks beside the start before, and exactly one after, at the block the `stone_pickaxe` job reported placing; the `wooden_pickaxe` job reuses it; bridge inventory agrees with the server. | Bot withdraw and craft, inventory-grid and table recipes and held-table placement. |
 | `craft-missing-ingredients` | Player holds 2 oak logs. `craft oak_planks 12` needs 3. | Job fails with `Missing ingredients`; the server still shows both logs and no planks. | Bot withdraw and craft, missing ingredients. |
 | `craft-full-inventory` | Player holds 2 oak logs and 35 full cobblestone stacks. `craft oak_planks 4` would consume one log, leaving every slot occupied. | Job fails with `Inventory full`; the server still shows all the starting items and no planks. | Bot withdraw and craft, full inventory. |
-| `withdraw-craft-model` | Player holds two sticks. A crafting table and a chest with 5 cobblestone and 20 oak logs are nearby. A local model (`--model`) withdraws 3 cobblestone and crafts one stone pickaxe. | Agent reports `criteria_met`. The server shows only one stone pickaxe in the player's inventory and exactly 2 cobblestone and 20 oak logs in the chest. Skipped without `--model`. | Bot withdraw and craft, real-model workflow. |
+| `withdraw-craft-model` | Player holds two sticks near a crafting table and a chest with 5 cobblestone and 20 oak logs. A local model (`--model`) withdraws 4 cobblestone and crafts one stone pickaxe. | Agent reports `criteria_met` for both `--verify-withdraw cobblestone:1` and `--verify-craft stone_pickaxe:1`. The server shows a pickaxe and one cobblestone in inventory and one cobblestone and 20 oak logs in the chest. A separate bridge observation shows manual control. Skipped without `--model`. | Bot withdraw and craft, real-model workflow. |
 | `deposit-barrel-exact` | Player holds 12 logs. `deposit oak_log 8` into a barrel holding logs and cobblestone. | The barrel gains exactly 8 logs, retains all cobblestone, and the player keeps 4 logs. | Bot storage verification, barrel. |
 | `deposit-full-chest` | Every chest slot holds a full cobblestone stack. `deposit oak_log 8`. | Job reports a full chest and zero moved. Inventory and chest contents stay the same. | Bot storage verification, full chest. |
 | `deposit-double-chest-omitted` | Each half of a double chest has one free slot. `deposit oak_log` with 80 held. | Both halves gain logs. Their combined gain is 80 and all cobblestone remains. | Bot storage verification, both chest halves and omitted count. |
@@ -124,7 +124,7 @@ summary: { pass, fail, skipped, error }, error
 
 `steps` record every console command, bridge/CLI action, and read with timing and outcome. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
 
-Cleanup failures fail the affected scenario. If the runner cannot stop the bot, it records the failure and skips the remaining scenarios. Failed runs include the last available bot output alongside the server log. A run exits unsuccessfully when it records zero passing scenarios, including a selection made up entirely of real-model scenarios without `--model`.
+Cleanup failures fail the affected scenario. If the runner cannot stop the bot, it records the failure and skips the remaining scenarios. Failed runs include the last available bot output alongside the server log. A run exits unsuccessfully if it cannot hash the server log after shutdown or records zero passing scenarios, including a selection made up entirely of real-model scenarios without `--model`.
 
 ## Reviewing a run
 
@@ -161,7 +161,7 @@ For each scenario, confirm in the results and `server.out` that the fixture buil
 - The pit fixture relies on mining fatigue slowing Mineflayer's digging so 64 logs cannot be reached in 180 s. If the bot exhausts the shaft or reaches the quota, `recovery-timeout` fails rather than passing.
 - The harness's overall `collect` deadline is the job limit + 75 s: the driver's 60 s return budget, which starts after the 180 s mining deadline, plus a 15 s margin. A `recovery-timeout` failure with "Action timed out." means the return overran that margin and should be reviewed as a finding.
 - Cancellation races: if the return trip finishes before the cancel lands, the cancel scenarios fail with "interrupt issued while recovery was running".
-- Server output is matched one command at a time; a reply that arrives after its command timed out could be attributed to the next command. Timeouts are recorded in `steps`.
+- Server output is matched one command at a time. If a command times out, the console reader stops issuing commands so a late reply cannot be attributed to a later read. Timeouts are recorded in `steps`.
 
 ## Fabric fixtures
 
@@ -183,21 +183,28 @@ npm run acceptance:fabric-fixtures -- --scenario deposit-double-chest --player Y
    Join `127.0.0.1:25567` from the packaged Fabric profile when prompted.
    Override the port with `--port` if needed. The helper waits up to five
    minutes for that player, teleports and equips them, and prints the
-   server's baseline reads.
+   server's baseline reads. It also saves the timestamped baseline to
+   `checkpoints.json` in the fixture run directory.
 3. Once it prints `Fixture ready`, use `mc-agent observe` in a separate
    terminal to confirm the CLI is attached to your Fabric profile. Follow the
    [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist), including any
-   additional player setup it calls for. Enter the printed server reads in
-   the fixture terminal at the checklist's observation points. After an
-   interruption, repeat the reads at the checklist's interval. Use a fresh
+   additional player setup it calls for. At each observation point, enter
+   `read <label>` in the fixture terminal to run and save the same independent
+   reads, for example `read after-f8` and `read five-seconds-later`. A checkpoint
+   records the time range, each command, and each value or error. Manual server
+   commands still work in the fixture terminal. Wait for the fixture command
+   confirmation in chat before starting the next observation. If the session
+   ends during a read, the checkpoint saves completed reads and marks itself
+   interrupted. Use a fresh
    run for each alternative or retry. Use a different `--port` for each run
    in the same client session, or restart the Minecraft client before
    reusing an address. Fabric remembers storage observations by server
    address while the client is open.
 4. Enter `stop` or press Ctrl+C to stop the server. The world and
    `server.out` are retained under `.runtime/live-fabric-fixtures/run-*/server/`.
-   Copy the relevant baseline and follow-up reads into the candidate's
-   acceptance session.
+   Keep `checkpoints.json` from the run directory alongside the server log.
+   Record the relevant checkpoint reads and the separate CLI observations in
+   the candidate's acceptance session.
 
 | Fixtures | Setup and reads |
 | --- | --- |

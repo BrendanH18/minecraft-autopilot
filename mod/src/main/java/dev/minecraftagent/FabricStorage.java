@@ -23,6 +23,8 @@ import net.minecraft.block.ShapeContext;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -65,6 +67,8 @@ final class FabricStorage {
 
     private final MinecraftClient client;
     private final Map<String, Map<BlockPos, JsonObject>> byIdentity = new LinkedHashMap<>();
+    private ClientWorld actionWorld;
+    private ClientPlayerEntity actionPlayer;
     private String identity;
     private ArrayDeque<BlockPos> targets;
     private BlockPos target;
@@ -78,7 +82,7 @@ final class FabricStorage {
 
     private final StorageOpening opening = new StorageOpening();
     private boolean agentOpening;
-    private Object openingWorld;
+    private ClientWorld openingWorld;
     private Item item;
     private int amount;
     private StorageTransfer transfer;
@@ -112,6 +116,8 @@ final class FabricStorage {
     }
 
     private void reset(String identity, Mode mode, Item item, int amount) {
+        actionWorld = client.world;
+        actionPlayer = client.player;
         transferContainer = null;
         crafting = null;
         placedTable = null;
@@ -243,6 +249,7 @@ final class FabricStorage {
     boolean ownsScreen() {
         return (phase == Phase.OPENING || phase == Phase.CRAFTING)
                 && owned != null
+                && client.player != null
                 && client.currentScreen instanceof HandledScreen<?> screen
                 && screen.getScreenHandler() == owned
                 && client.player.currentScreenHandler == owned;
@@ -493,11 +500,9 @@ final class FabricStorage {
             client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hit);
         } finally {
             agentOpening = false;
+            opening.discardIfUnsent();
         }
-        if (!opening.sent()) {
-            opening.reset();
-            throw new IllegalStateException(notSentMessage);
-        }
+        if (!opening.sent()) throw new IllegalStateException(notSentMessage);
     }
 
     private void nextTarget() {
@@ -555,13 +560,23 @@ final class FabricStorage {
 
     void cancel() {
         opening.cancel();
-        // Leftover ingredients go back to the inventory; closing a table also makes the server return them.
-        if (crafting != null && crafting.started()) crafting.returnGrid();
-        crafting = null;
-        closeOwned();
-        phase = null;
-        targets = null;
-        target = null;
+        boolean samePlayer = actionWorld == client.world && actionPlayer == client.player;
+        try {
+            // Leftover ingredients go back to the inventory; closing a table also makes the server return them.
+            if (samePlayer && crafting != null && crafting.started()) crafting.returnGrid();
+        } finally {
+            try {
+                if (samePlayer) closeOwned();
+            } finally {
+                crafting = null;
+                owned = null;
+                phase = null;
+                targets = null;
+                target = null;
+                actionWorld = null;
+                actionPlayer = null;
+            }
+        }
     }
 
     /**

@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { fixturePlan, parseOptions } from '../scripts/live-fabric-fixtures.js';
+import { ServerConsole } from '../scripts/live-acceptance/console.js';
+import {
+  fixturePlan,
+  parseOptions,
+  readFixtureCheckpoint,
+  sendFixtureCommand,
+} from '../scripts/live-fabric-fixtures.js';
 
 test('Fabric fixture dry run lists all setups and uses the named player without Java or a jar', () => {
   const plan = execFileSync(
@@ -71,6 +77,105 @@ test('the takeover fixture gives time to interrupt mining and prints independent
   assert.deepEqual(plan.verify, ['data get entity FixtureUser Inventory', 'data get entity FixtureUser Pos']);
   assert.ok(plan.actions.includes('mc-agent collect oak_log 8'));
   assert.match(plan.actions.join('\n'), /kill -9 <pid>.*\n.*cancelled goto job with a lease expired message/);
+});
+
+test('a checkpoint preserves read order and captures empty containers, rejected reads, and block test results', async () => {
+  const signal = new AbortController().signal;
+  const position = 'data get entity FixtureUser Pos';
+  const unloaded = 'data get entity FixtureUser Health';
+  const block = 'execute if block 98 -60 0 minecraft:chest';
+  const items = 'data get block 98 -60 0 Items';
+  const issued = [];
+  const serverConsole = {
+    async command(command, options) {
+      assert.equal(options.signal, signal);
+      issued.push(command);
+      if (command === unloaded) throw new Error('No entity was found');
+      return command === block ? 'Test failed' : 'FixtureUser has the following entity data: [96.5d, -60.0d, 0.5d]';
+    },
+    async blockData(x, y, z, path, options) {
+      assert.equal(options.signal, signal);
+      issued.push(`data get block ${x} ${y} ${z} ${path}`);
+      return [];
+    },
+  };
+  let tick = 0;
+  const commands = [position, items, unloaded, block];
+  const record = await readFixtureCheckpoint(serverConsole, commands, {
+    label: 'after-stop',
+    signal,
+    now: () => tick++ * 1000,
+  });
+  assert.deepEqual(issued, commands);
+  assert.deepEqual(record, {
+    label: 'after-stop',
+    startedAt: '1970-01-01T00:00:00.000Z',
+    finishedAt: '1970-01-01T00:00:01.000Z',
+    reads: [
+      { command: position, value: 'FixtureUser has the following entity data: [96.5d, -60.0d, 0.5d]' },
+      { command: items, value: [] },
+      { command: unloaded, error: 'No entity was found' },
+      { command: block, value: 'Test failed' },
+    ],
+  });
+});
+
+test('an interrupted checkpoint retains completed reads and sends no further reads', async () => {
+  const controller = new AbortController();
+  const issued = [];
+  const commands = ['data get entity FixtureUser Pos', 'data get entity FixtureUser Inventory'];
+  const serverConsole = {
+    async command(command) {
+      issued.push(command);
+      controller.abort(new Error('Fixture session ended.'));
+      return 'First read';
+    },
+  };
+  const checkpoint = await readFixtureCheckpoint(serverConsole, commands, {
+    label: 'interrupted',
+    signal: controller.signal,
+  });
+  assert.equal(checkpoint.interrupted, true);
+  assert.deepEqual(checkpoint.reads, [{ command: commands[0], value: 'First read' }]);
+  assert.deepEqual(issued, commands.slice(0, 1));
+});
+
+test('fixture commands drain their replies before the next checkpoint reads inventory', async () => {
+  const signal = new AbortController().signal;
+  const inventory = 'data get entity FixtureUser Inventory';
+  const command = 'data modify block 0 64 0 Items set value []';
+  let marker;
+  let reads = 0;
+  const serverConsole = new ServerConsole({
+    write(text) {
+      if (text === `${inventory}\n`) {
+        reads++;
+        serverConsole.push('FixtureUser has the following entity data: []\n');
+      } else {
+        assert.ok(text.startsWith(`${command}\nsay `));
+        marker = text.trimEnd().split('\n')[1].slice(4);
+      }
+    },
+  });
+  const checkpoint = sendFixtureCommand(serverConsole, command, signal).then(() =>
+    readFixtureCheckpoint(serverConsole, [inventory], { label: 'after-edit', signal }),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 0);
+  serverConsole.push('Modified block data of 0, 64, 0\n');
+  serverConsole.push(`[Server] ${marker}\n`);
+  assert.deepEqual((await checkpoint).reads, [
+    { command: inventory, value: 'FixtureUser has the following entity data: []' },
+  ]);
+});
+
+test('fixture refuses manual commands after the server console loses confirmation', async () => {
+  const signal = new AbortController().signal;
+  const serverConsole = new ServerConsole({ write: () => assert.fail('No command should reach the server.') });
+  serverConsole.end('Timed out waiting for fixture command confirmation.');
+  await assert.rejects(sendFixtureCommand(serverConsole, 'setblock 0 64 0 minecraft:stone', signal), {
+    message: /Fixture server console is closed: Timed out waiting/,
+  });
 });
 
 test('the dimension change targets the prepared floor and the named player', () => {

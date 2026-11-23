@@ -8,6 +8,7 @@ export async function startBridge(harness, { discoveryPath = bridgeFile, port = 
   await assertBridgeNotRunning(discoveryPath);
   const releaseClaim = await claimBridge(discoveryPath);
   const token = randomBytes(32).toString('hex');
+  let closing;
   const server = createServer(async (request, response) => {
     const respond = (status, value) => {
       response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -34,6 +35,7 @@ export async function startBridge(harness, { discoveryPath = bridgeFile, port = 
         chunks.push(chunk);
       }
       const body = size ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      if (closing) return respond(503, { error: 'Bridge is closing.' });
       respond(200, harness.request(path, body));
     } catch (error) {
       respond(400, { error: error.message });
@@ -68,20 +70,23 @@ export async function startBridge(harness, { discoveryPath = bridgeFile, port = 
     await releaseClaim();
     throw error;
   }
-  let closing;
   return {
     config,
     close() {
       closing ??= (async () => {
-        await harness.close();
-        await new Promise((resolve) => {
+        const listenerClosed = new Promise((resolve) => {
           server.close(resolve);
           server.closeAllConnections();
         });
         try {
-          if (JSON.parse(await readFile(discoveryPath, 'utf8')).token === token) await unlink(discoveryPath);
-        } catch {}
-        await releaseClaim();
+          await harness.close();
+        } finally {
+          await listenerClosed;
+          try {
+            if (JSON.parse(await readFile(discoveryPath, 'utf8')).token === token) await unlink(discoveryPath);
+          } catch {}
+          await releaseClaim();
+        }
       })();
       return closing;
     },
