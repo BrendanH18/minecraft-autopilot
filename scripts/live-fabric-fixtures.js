@@ -169,6 +169,20 @@ function craftInterruptionPlan(player) {
   };
 }
 
+function mcpCollectionPlan(player) {
+  const log = `98 ${STAND} 0`;
+  return {
+    fixture: ['forceload add 80 -16 112 16', `setblock ${log} minecraft:oak_log`],
+    prepare: [...preparePlayer(player), `give ${player} minecraft:iron_axe 1`],
+    verify: [...readCommands(player), `execute if block ${log} minecraft:oak_log`],
+    actions: [
+      'In an actual MCP client connected to mc-agent mcp, ask the agent to observe, take control, collect one oak log, and stop.',
+      'Record minecraft_observe, minecraft_take_control, minecraft_action with {"action":{"type":"collect","block":"oak_log","count":1}}, and minecraft_stop.',
+      'After the stop, record one oak log and manual mode from mc-agent observe. Confirm the log in the server inventory and check that the original block is gone.',
+    ],
+  };
+}
+
 function deathPlan(player) {
   return {
     fixture: ['gamerule keepInventory true', 'forceload add 80 -16 144 16'],
@@ -228,6 +242,15 @@ const fixtures = {
   },
   'craft-missing-ingredients': { botScenario: 'craft-missing-ingredients', actions: ['mc-agent craft oak_planks 12'] },
   'craft-full-inventory': { botScenario: 'craft-full-inventory', actions: ['mc-agent craft oak_planks 4'] },
+  'withdraw-craft-model': {
+    botScenario: 'withdraw-craft-model',
+    actions: [
+      'mc-agent models',
+      'mc-agent agent "Withdraw exactly four cobblestone from the nearby chest. Craft one stone pickaxe with three of them and your two sticks at the nearby crafting table. Keep the fourth cobblestone and report done." --model YOUR_LOCAL_MODEL --verify-withdraw cobblestone:1 --verify-craft stone_pickaxe:1',
+      'Check for criteria_met and confirm manual control with mc-agent observe. Read the chest and player inventory again. The chest should hold 20 oak logs and one cobblestone. The player should hold one stone pickaxe and one cobblestone.',
+    ],
+  },
+  'mcp-collection': { build: mcpCollectionPlan },
   'deposit-chest': {
     storage: 'chest',
     variations: ['removeStored', 'blockLid'],
