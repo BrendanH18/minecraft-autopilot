@@ -12,11 +12,15 @@ repositories { mavenCentral() }
 
 // Development only: `-PquickPlay=127.0.0.1:25565` joins a local test server on launch;
 // `-PquickPlayWorld=NAME` opens an existing single-player world from mod/run/saves.
+// The live acceptance runner also sets `-PdevUsername=NAME` (the offline player name) and
+// `-PclientRunDir=PATH` (relative to mod/; a game directory per run, so mod/run/options.txt is never touched).
 loom {
     runs {
         client {
             if (project.hasProperty('quickPlay')) programArgs '--quickPlayMultiplayer', project.property('quickPlay')
             if (project.hasProperty('quickPlayWorld')) programArgs '--quickPlaySingleplayer', project.property('quickPlayWorld')
+            if (project.hasProperty('devUsername')) programArgs '--username', project.property('devUsername')
+            if (project.hasProperty('clientRunDir')) runDir project.property('clientRunDir').toString()
         }
     }
 }

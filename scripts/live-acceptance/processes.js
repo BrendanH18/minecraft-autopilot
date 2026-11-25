@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { join } from 'node:path';
+import { basename, delimiter, dirname, join, relative } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { projectRoot } from '../../src/config.js';
@@ -137,10 +137,16 @@ const children = new Set();
 function track(child) {
   if (!children.size)
     process.once('exit', () => {
+      // Each child leads its own process group. A Fabric client's game JVM may sit in Gradle's single-use daemon
+      // instead, which stops it when the wrapper's Gradle client goes away (see startFabricClient).
       for (const running of children)
         try {
-          running.kill('SIGKILL');
-        } catch {}
+          process.kill(-running.pid, 'SIGKILL');
+        } catch {
+          try {
+            running.kill('SIGKILL');
+          } catch {}
+        }
     });
   children.add(child);
   child.once('exit', () => children.delete(child));
@@ -263,6 +269,153 @@ export async function startBot({
       detached: true,
     }),
   );
+  return waitForSession({
+    child,
+    label: 'bot',
+    bridge,
+    connect,
+    timeoutMs,
+    signal,
+    stopSteps: [
+      [() => child.kill('SIGINT'), 15_000],
+      [() => child.kill('SIGTERM'), 5_000],
+      [() => child.kill('SIGKILL'), 5_000],
+    ],
+  });
+}
+
+export const GRADLE = join(projectRoot, 'scripts/gradle.js');
+
+/**
+ * Client options that keep an unattended development client in the game: no pause on focus loss, no first-run
+ * screens, no sound or narrator, and a short render distance for software rendering.
+ */
+export const FABRIC_CLIENT_OPTIONS = [
+  // 1.21.1's data version, so the game reads these options without upgrading them.
+  'version:3955',
+  // Without this the first-run accessibility screen blocks quick play from joining.
+  'onboardAccessibility:false',
+  'pauseOnLostFocus:false',
+  'skipMultiplayerWarning:true',
+  'joinedFirstServer:true',
+  'tutorialStep:none',
+  'realmsNotifications:false',
+  'telemetryOptInExtra:false',
+  'narrator:0',
+  'soundCategory_master:0.0',
+  'fullscreen:false',
+  // Low settings cut an idle software-rendered client from about two cores to a fifth of one.
+  'renderDistance:2',
+  'simulationDistance:5',
+  'maxFps:10',
+  'enableVsync:false',
+  'graphicsMode:0',
+  'renderClouds:"false"',
+  'particles:2',
+  'ao:false',
+  'entityShadows:false',
+  'biomeBlendRadius:0',
+  'mipmapLevels:0',
+];
+
+/**
+ * `node scripts/gradle.js runClient` arguments that join the runner's server as `account` from `gameDir`. Loom
+ * resolves the run directory against the mod project, so it is passed relative to `mod/`.
+ */
+export function fabricClientArguments({ port, account, gameDir }) {
+  return [
+    GRADLE,
+    'runClient',
+    `-PquickPlay=127.0.0.1:${port}`,
+    `-PdevUsername=${account}`,
+    `-PclientRunDir=${relative(join(projectRoot, 'mod'), gameDir)}`,
+  ];
+}
+
+/** Creates the client's game directory with unattended options; Minecraft keeps its own logs under it. */
+export async function prepareFabricGameDirectory({ directory }) {
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, 'options.txt'), `${FABRIC_CLIENT_OPTIONS.join('\n')}\n`);
+}
+
+/**
+ * Starts the Fabric development client through Gradle (offline; the cached assets are checked first) and waits
+ * until the mod's bridge, written to `home`/bridge.json, reports a connected player. Each call is a fresh client,
+ * so session memory such as opened containers never leaks between scenarios. Output is appended to `log`.
+ */
+export async function startFabricClient({
+  port,
+  account,
+  bridge,
+  home,
+  gameDir,
+  log,
+  spawnImpl = spawn,
+  connect = FabricAdapter.connect,
+  timeoutMs = 600_000,
+  signal,
+  java = 'java',
+}) {
+  for (const stale of [bridge, `${bridge}.lock`, join(home, 'homes.json')]) await rm(stale, { force: true });
+  // Gradle runs on JAVA_HOME or PATH, so a --java JDK has to reach it that way.
+  const jdk =
+    basename(java) === java
+      ? {}
+      : { JAVA_HOME: dirname(dirname(java)), PATH: `${dirname(java)}${delimiter}${process.env.PATH ?? ''}` };
+  if (log) await mkdir(dirname(log), { recursive: true, mode: 0o700 });
+  const child = track(
+    spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir }), {
+      cwd: projectRoot,
+      // OpenAL's null driver: the client needs no sound device, and headless hosts have none.
+      env: { ALSOFT_DRIVERS: 'null', ...process.env, ...jdk, MC_AGENT_HOME: home },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    }),
+  );
+  let logStream = null;
+  if (log) {
+    logStream = createWriteStream(log, { flags: 'a' });
+    logStream.write(`--- ${new Date().toISOString()} start ${account} (pid ${child.pid}) ---\n`);
+    for (const stream of [child.stdout, child.stderr].filter(Boolean))
+      stream.on('data', (chunk) => logStream.write(chunk));
+    child.once('close', () => logStream.end());
+  }
+  // Signals go to the wrapper's whole process group. With org.gradle.jvmargs set, Gradle may run the build in a
+  // single-use daemon in its own session; that daemon cancels the build and stops the game JVM when the wrapper's
+  // Gradle client goes away. Boat runs of every --fast scenario left no game JVM behind.
+  const group = (signalName) => () => {
+    try {
+      process.kill(-child.pid, signalName);
+    } catch {
+      child.kill(signalName);
+    }
+  };
+  const session = await waitForSession({
+    child,
+    label: 'Fabric client',
+    bridge,
+    connect,
+    timeoutMs,
+    signal,
+    stopSteps: [
+      [group('SIGTERM'), 30_000],
+      [group('SIGKILL'), 5_000],
+    ],
+    // The wrapper can exit while Gradle or the game JVM lingers; nothing in the group may outlive the session.
+    afterStop: group('SIGKILL'),
+  });
+  if (logStream) {
+    const stop = session.stop;
+    session.stop = async () => {
+      await stop();
+      if (!logStream.closed) await finished(logStream).catch(() => {});
+    };
+  }
+  return session;
+}
+
+/** Waits until a freshly spawned session's bridge reports a connected player; stops it on failure. */
+async function waitForSession({ child, label, bridge, connect, timeoutMs, signal, stopSteps, afterStop }) {
   const output = [];
   for (const stream of [child.stdout, child.stderr].filter(Boolean))
     stream.on('data', (chunk) => {
@@ -276,11 +429,11 @@ export async function startBot({
     exited,
     output,
     async stop() {
-      await settle(child, exited, [
-        [() => child.kill('SIGINT'), 15_000],
-        [() => child.kill('SIGTERM'), 5_000],
-        [() => child.kill('SIGKILL'), 5_000],
-      ]);
+      try {
+        await settle(child, exited, stopSteps);
+      } finally {
+        afterStop?.();
+      }
     },
   };
   const deadline = Date.now() + timeoutMs;
@@ -291,8 +444,11 @@ export async function startBot({
         await bot.stop();
         signal.throwIfAborted();
       }
-      if (child.exitCode !== null || child.signalCode !== null)
-        throw new Error(`The bot exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        // The wrapper is gone, but anything it started in its process group must not reach the next scenario.
+        await bot.stop();
+        throw new Error(`The ${label} exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
+      }
       try {
         const adapter = await connect(bridge);
         try {
@@ -308,7 +464,7 @@ export async function startBot({
     }
     await bot.stop();
     throw new Error(
-      `The bot bridge was not ready after ${timeoutMs / 1000} s: ${lastError?.message ?? 'no player observed'}.`,
+      `The ${label} bridge was not ready after ${timeoutMs / 1000} s: ${lastError?.message ?? 'no player observed'}.`,
     );
   } catch (error) {
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {

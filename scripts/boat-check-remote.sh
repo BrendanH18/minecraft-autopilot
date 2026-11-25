@@ -112,5 +112,22 @@ if [ "$(cat "$cache/setup-key" 2>/dev/null || true)" != "$setup_key" ] || [ ! -f
     echo "$setup_key" > "$cache/setup-key"
 fi
 
+# The Fabric development-client acceptance runs headless: Xvfb with Mesa's llvmpipe
+# software OpenGL (4.5 core), and the client's assets cached in Gradle's user home.
+run=(bash -c "$cmd")
+# A dry run starts nothing, so it needs neither.
+if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) && ! $cmd =~ --dry-run ]]; then
+    if ! command -v xvfb-run >/dev/null; then
+        say "installing Xvfb and Mesa for the headless Fabric client"
+        sudo apt-get update -qq --allow-releaseinfo-change >/dev/null || true
+        sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y -qq --no-install-recommends \
+            xvfb xauth libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 >/dev/null
+    fi
+    # Loom checks every object and fetches only what is missing, so an interrupted download heals here.
+    say "checking the Minecraft client asset cache"
+    node scripts/gradle.js downloadAssets --allow-downloads >/dev/null
+    run=(xvfb-run -a -s "-screen 0 854x480x24 -nolisten tcp" "${run[@]}")
+fi
+
 say "$(git rev-parse --short HEAD 2>/dev/null || echo "no commit")$( [ -z "$(git status --porcelain 2>/dev/null)" ] || echo " (modified)"), Node $(node --version), $(javac -version 2>&1), $(nproc) vCPUs"
-bash -c "$cmd"
+"${run[@]}"

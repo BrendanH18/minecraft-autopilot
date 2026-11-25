@@ -132,8 +132,12 @@ final class FabricStorage {
     }
 
     /** Stores {@code amount} held items in the nearest chest, trapped chest, or barrel within 16 blocks. */
-    void beginDeposit(String identity, Item item, int amount) {
-        reset(identity, Mode.DEPOSIT, item, amount);
+    void beginDeposit(String identity, Item item, int requested, int held) {
+        // A requested count of 0 stores every held item. Reset first so a refusal never reports an earlier container.
+        reset(identity, Mode.DEPOSIT, item, requested == 0 ? held : requested);
+        String id = Registries.ITEM.getId(item).toString();
+        if (held == 0) throw new IllegalStateException(JobMessages.noneToDeposit(id));
+        if (requested > held) throw new IllegalStateException(JobMessages.depositShort(held, id, requested));
         List<BlockPos> nearby = nearby();
         if (nearby.isEmpty())
             throw new IllegalStateException("No chest or barrel within 16 blocks. Move near storage first.");
@@ -173,9 +177,7 @@ final class FabricStorage {
             observed.put(entry.getKey(), count);
         }
         BlockPos chosen = WithdrawTargets.choose(nearby(), observed);
-        if (chosen == null)
-            throw new IllegalStateException("No chest, trapped chest, or barrel within 16 blocks was last seen holding "
-                    + name + ", and none is unopened. Move near storage that holds it first.");
+        if (chosen == null) throw new IllegalStateException(JobMessages.noCandidate(name));
         // A full inventory is reported after reading the container, so the count and its contents are live.
         targets = new ArrayDeque<>(List.of(chosen));
         nextTarget();
@@ -197,7 +199,7 @@ final class FabricStorage {
         }
         BlockPos table = nearestCraftingTable();
         if (table == null) {
-            placeCraftingTable();
+            placeCraftingTable(recipe.output());
             return;
         }
         targets = new ArrayDeque<>(List.of(table));
@@ -265,7 +267,8 @@ final class FabricStorage {
         if (result == null || placedTable == null) return result;
         return new Result(
                 result.success(),
-                "Placed the held crafting table at " + describe(placedTable) + ". " + result.message());
+                CraftingRecipes.placedTableMessage(
+                        placedTable.getX(), placedTable.getY(), placedTable.getZ(), result.message()));
     }
 
     private Result step(long now) {
@@ -377,12 +380,12 @@ final class FabricStorage {
             else if (!transfer.confirm(stored, held, sent))
                 throw new IllegalStateException(
                         "Server did not confirm the requested transfer. Check inventory and storage before retrying.");
+            String itemId = Registries.ITEM.getId(item).toString();
             if (transfer.remaining() == 0)
-                return new Result(
-                        true,
-                        "Deposited " + transfer.confirmed() + " " + Registries.ITEM.getId(item) + " into storage.");
+                return new Result(true, JobMessages.deposited(transfer.confirmed(), itemId, where(canonical(target))));
             if (!transferStack(stacks, size, false))
-                throw new IllegalStateException("The container is full for the matching inventory items.");
+                return new Result(
+                        false, JobMessages.depositFull(where(canonical(target)), transfer.confirmed(), amount, itemId));
             reopen(now);
             return null;
         } catch (RuntimeException exception) {
@@ -407,11 +410,10 @@ final class FabricStorage {
     /** The first read of the withdrawal's container fixes how many items it can take. */
     private Result startWithdrawal(List<ItemStack> stacks, int size, int stored, int held, long now) {
         String name = Registries.ITEM.getId(item).toString();
-        String where = "The " + blockName(canonical(target)) + " at " + describe(canonical(target));
+        String where = where(canonical(target));
         withdrawTotal = withdrawRequested > 0 ? withdrawRequested : stored;
-        if (withdrawTotal == 0) return new Result(false, where + " holds no " + name + ".");
-        if (stored == 0)
-            return new Result(false, where + " holds no " + name + "; withdrew 0 of " + withdrawTotal + ".");
+        if (withdrawTotal == 0) return new Result(false, JobMessages.holdsNo(where, name, 0));
+        if (stored == 0) return new Result(false, JobMessages.holdsNo(where, name, withdrawTotal));
         // A deposit's destination is the container; a withdrawal's is the player, so the roles swap.
         transfer = new StorageTransfer(Math.min(withdrawTotal, stored), held, stored);
         return withdrawStack(stacks, size, now);
@@ -431,12 +433,9 @@ final class FabricStorage {
             if (transfer.confirmed() < withdrawTotal)
                 return new Result(
                         false,
-                        "The " + blockName(key) + " at " + describe(key) + " held only " + transfer.confirmed() + " "
-                                + name + "; withdrew " + transfer.confirmed() + " of " + withdrawTotal + ".");
-            return new Result(
-                    true,
-                    "Withdrew " + transfer.confirmed() + " " + name + " from the " + blockName(key) + " at "
-                            + describe(key) + ".");
+                        JobMessages.heldOnly(
+                                where(key), transfer.confirmed(), transfer.confirmed(), withdrawTotal, name));
+            return new Result(true, JobMessages.withdrew(transfer.confirmed(), name, where(key)));
         }
         if (!transferStack(stacks, size, true))
             return new Result(false, WithdrawTargets.fullMessage(transfer.confirmed(), withdrawTotal, name));
@@ -607,14 +606,12 @@ final class FabricStorage {
     }
 
     /** Places a held crafting table on a free block next to the player, without digging; fails before moving otherwise. */
-    private void placeCraftingTable() {
+    private void placeCraftingTable(String output) {
         PlayerInventory inventory = client.player.getInventory();
         int slot = -1;
         for (int index = 0; index < InventoryRoom.MAIN_SLOTS && slot < 0; index++)
             if (inventory.getStack(index).isOf(Items.CRAFTING_TABLE)) slot = index;
-        if (slot < 0)
-            throw new IllegalStateException(
-                    "No crafting table within 16 blocks, and none is held to place. Move near one or craft one first.");
+        if (slot < 0) throw new IllegalStateException(CraftingRecipes.noTableMessage(output));
         BlockPos spot = freeSpot();
         if (spot == null)
             throw new IllegalStateException("No crafting table within 16 blocks, and no free block next to the player"
@@ -839,6 +836,10 @@ final class FabricStorage {
             if (!stack.isEmpty())
                 totals.merge(Registries.ITEM.getId(stack.getItem()).toString(), stack.getCount(), Integer::sum);
         return items(totals);
+    }
+
+    private String where(BlockPos pos) {
+        return JobMessages.where(blockName(pos), pos.getX(), pos.getY(), pos.getZ());
     }
 
     private static String describe(BlockPos pos) {

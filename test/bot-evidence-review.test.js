@@ -213,3 +213,14 @@ test('review-bot rejects dirty, different-commit and malformed files without cou
   assert.equal(gate.realModel[0].status, 'pass');
   assert.equal(gate.realModel[0].file, files[6]);
 });
+
+test('review-bot never counts Fabric development-client pre-check results as bot evidence', async (t) => {
+  const passing = [{ id: 'withdraw', status: 'pass' }];
+  const { reports, parse } = await review(t, [
+    { ...run(1, passing), schema: 'minecraft-agent/live-fabric-acceptance/1', backend: 'fabric' },
+  ]);
+  await assert.rejects(parse, /1 bot result file\(s\) rejected/);
+  const [report] = reports;
+  assert.equal(report.runs.length, 0);
+  assert.equal(report.rejected.length, 1);
+});

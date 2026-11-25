@@ -118,9 +118,18 @@ share a sandbox at once.
 `--save` runs the full CONTRIBUTING.md list and, if it passes, saves the sandbox as the warm
 snapshot, without check directories. The sandbox remains available for this
 worktree's later checks. Re-run it after changes to dependencies or the
-toolchain. The Minecraft client, packaged Fabric acceptance, authenticated
-handoff and Ollama runs stay on the Mac, and the script refuses `dev:mod`,
-`runClient` and model options.
+toolchain. The interactive Minecraft client, packaged Fabric acceptance,
+authenticated handoff and Ollama runs stay on the Mac, and the script refuses
+`dev:mod`, `runClient` and model options.
+
+The one client run allowed in a sandbox is the headless
+[Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)
+of the live runner (`npm run acceptance:fabric`). For that command the remote
+script installs Xvfb and Mesa if they're missing, checks the client asset cache with
+`downloadAssets --allow-downloads`, which fetches only missing objects, and runs the command
+under `xvfb-run`. Mesa's llvmpipe gives OpenGL 4.5 core in software, which is
+enough for Minecraft 1.21.1. The client's low render settings keep it to about
+a fifth of a core when idle on the default 4 vCPU, 8 GB sandbox.
 
 ## Status
 

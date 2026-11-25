@@ -2,7 +2,7 @@
 
 `scripts/live-bot-acceptance.js` automates [roadmap](ROADMAP.md) step 4, "Recheck bot recovery and verification live", against a local vanilla 1.21.1 server. It starts the server, builds each fixture with console commands, drives the Mineflayer bot through the repository CLI and bridge client, checks every outcome with independent server `data get` reads, and writes a JSON results file.
 
-**Scope.** This covers the standalone **server bot** only. It does not cover the Fabric mod, a normal launcher, F8, or authenticated client → bot → client handoff; those [release](RELEASE.md) boxes stay open regardless of these results.
+**Scope.** This covers the standalone **server bot** only. It does not cover the Fabric mod, a normal launcher, F8, or authenticated client → bot → client handoff; those [release](RELEASE.md) boxes stay open regardless of these results. The same scenarios can also run against the Fabric development client as a pre-check; see [Fabric development client mode](#fabric-development-client-mode).
 
 **Results are not acceptance evidence by themselves.** A run produces machine-checked observations. They count toward a RELEASE.md box only after a person reviews the results file and `server.out`, confirms the fixtures behaved as intended, and records the commit, configuration, and outcome in [DEVELOPMENT.md](DEVELOPMENT.md#validation).
 
@@ -162,6 +162,59 @@ For each scenario, confirm in the results and `server.out` that the fixture buil
 - The harness's overall `collect` deadline is the job limit + 75 s: the driver's 60 s return budget, which starts after the 180 s mining deadline, plus a 15 s margin. A `recovery-timeout` failure with "Action timed out." means the return overran that margin and should be reviewed as a finding.
 - Cancellation races: if the return trip finishes before the cancel lands, the cancel scenarios fail with "interrupt issued while recovery was running".
 - Server output is matched one command at a time. If a command times out, the console reader stops issuing commands so a late reply cannot be attributed to a later read. Timeouts are recorded in `steps`.
+
+## Fabric development client mode
+
+`--backend fabric` (or `npm run acceptance:fabric --`) runs the same scenarios
+against the Fabric **development client** instead of the bot. It is a pre-check:
+it finds Fabric bugs before the packaged keyboard sessions, so those sessions are
+spent on what only a person can check.
+
+```sh
+npm run acceptance:fabric -- --dry-run --fast
+npm run acceptance:fabric -- --accept-eula --scenario craft-bootstrap
+npm run acceptance:fabric -- --accept-eula --fast
+```
+
+For each scenario the runner builds the fixture, then starts a fresh client with
+`node scripts/gradle.js runClient -PquickPlay=127.0.0.1:PORT -PdevUsername=LiveFabric -PclientRunDir=RUN/client`
+(the run directory is passed relative to `mod/`).
+The client joins the runner's server as the offline player `LiveFabric` (or
+`--account`). Its game directory is inside the run directory, with an
+`options.txt` that turns off pause on focus loss, first-run screens, sound and the
+narrator. `MC_AGENT_HOME` points at the run's `agent-home`, where the mod writes
+`bridge.json`. The checks and independent `data get` reads are the same as the
+bot's. The client is stopped after each scenario, so no scenario sees another's
+opened containers, saved home or last job.
+
+- **Not release evidence.** The results use their own schema,
+  `minecraft-agent/live-fabric-acceptance/1`, and each `release` entry starts with
+  `pre-check only`. `acceptance review-bot` rejects these files. The RELEASE.md
+  Fabric boxes still need the packaged jars in a normal launcher.
+- **Needs the cached client.** `scripts/gradle.js` runs offline and refuses if the
+  Minecraft assets aren't cached. Run `node scripts/gradle.js downloadAssets --allow-downloads`
+  once to cache them; on the Mac that needs approval first. The Boat check
+  caches them on its own.
+- **Needs a display.** On the Mac the client opens a window for each scenario.
+  Leave it in the background: the client doesn't pause when it loses focus, and
+  focusing it doesn't take over control. Don't press keys in it. In a Boat
+  sandbox, `scripts/boat-check.sh -- npm run acceptance:fabric -- --accept-eula --fast`
+  runs it headless under Xvfb with software OpenGL. See [Boat checks](DEVELOPMENT.md#boat-checks).
+- **Waits for the game to be playable.** After joining, Fabric reports
+  `paused` while the terrain-loading screen is open. Settling waits for that to
+  clear, because the mod refuses actions until it does.
+- **Output.** `client/client.out` collects every session's Gradle and game
+  output, and the results file records its path and SHA-256 under `client`.
+  Minecraft's own log is `client/logs/latest.log`, and it only covers the last
+  session.
+- **Slow starts.** Each scenario waits up to ten minutes for the bridge, because
+  Gradle starts again every time. Settling at the start position allows 60
+  seconds, not 15, because the client has to load the teleported chunks.
+- **Known failure.** `inspect-preserves-home` ends about five blocks from home
+  on Fabric ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)).
+  The other `--fast` scenarios passed on 25 November 2026.
+- **Not covered.** F8, menus, the packaged mods folder, the normal launcher and
+  handoff can't be scripted here. They stay in the [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist).
 
 ## Fabric fixtures
 

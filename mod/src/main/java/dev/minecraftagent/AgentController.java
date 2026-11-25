@@ -208,17 +208,11 @@ public final class AgentController {
             case "wait":
                 wait = number(requested, "seconds", 1, 3600);
                 break;
-            case "deposit": {
-                String name = string(requested, "item");
-                depositItem = item(name);
-                Identifier id = Registries.ITEM.getId(depositItem);
-                int held = inventoryCount(id.getPath());
-                double quantity = requested.has("count") ? number(requested, "count", 1, 2304) : held;
-                if (quantity < 1 || quantity > held || quantity != Math.floor(quantity))
-                    throw new IllegalArgumentException("Not enough matching items in inventory, or invalid count.");
-                count = (int) quantity;
+            case "deposit":
+                depositItem = item(string(requested, "item"));
+                // Omitted, it stores every held matching item. Too few held fails the job, as on the bot.
+                count = requested.has("count") ? integer(requested, "count", 1, 2304) : 0;
                 break;
-            }
             case "withdraw":
                 depositItem = item(string(requested, "item"));
                 // Omitted, it takes every matching item from the chosen container.
@@ -288,7 +282,11 @@ public final class AgentController {
                 case "wait":
                     break;
                 case "deposit":
-                    storage.beginDeposit(identity(), depositItem, count);
+                    storage.beginDeposit(
+                            identity(),
+                            depositItem,
+                            count,
+                            inventoryCount(Registries.ITEM.getId(depositItem).getPath()));
                     break;
                 case "withdraw":
                     storage.beginWithdraw(identity(), depositItem, count);
