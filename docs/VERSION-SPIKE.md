@@ -4,7 +4,7 @@ The month 2 spike from the [roadmap](ROADMAP.md#month-2-21-december--17-january-
 
 ## Recommendation
 
-**Go, targeting Minecraft Java 26.1.2.** It is the newest release that all three dependencies support in published releases today:
+**Go, targeting Minecraft Java 26.1.2.** It is the newest release with published Fabric API and Baritone builds whose protocol a published Mineflayer release covers. Mineflayer itself names only 26.1, so 26.1.2 support rests on the minecraft-data mapping (see *Unverified* below):
 
 - Fabric API `0.155.3+26.1.2` exists.
 - Baritone v1.18.0 ships `baritone-api-fabric-1.18.0.jar`. Its `fabric.mod.json` declares `minecraft: 26.1.*`, and it still nests `nether-pathfinder-1.6.jar`.
@@ -51,7 +51,7 @@ Sources: [Fabric API on maven](https://maven.fabricmc.net/net/fabricmc/fabric-ap
 
 Baritone and npm details were read from the published artifacts themselves: the `fabric.mod.json` inside the Baritone jars, and `lib/version.js`, `src/version.js` and `protocolVersions.json` inside the npm tarballs. The Baritone v1.18.0 Fabric API jar's SHA-256 is `beec850e73591ab1dc81cb359d1d224ef3230a35d21dc6e72f8e8d287e7b79d2`. Re-check it in `scripts/setup-mod.js` when pinning.
 
-*Unverified:* that a Mineflayer bot created with `version: '26.1.2'` actually plays on a 26.1.2 server. minecraft-data resolves it to the 26.1 data, but Mineflayer only tests `26.1`, and an open [node-minecraft-protocol PR for 26.1.2](https://github.com/PrismarineJS/node-minecraft-protocol/pull/1487) suggests something may still differ. The first port step on the bot side is one `acceptance:bot` scenario on a 26.1.2 server jar. If it fails, fall back to 26.1 for both sides; Baritone's `26.1.*` range and Fabric API `0.145.1+26.1` cover it.
+*Unverified:* that a Mineflayer bot created with `version: '26.1.2'` actually plays on a 26.1.2 server. minecraft-data resolves it to the 26.1 data, but Mineflayer only tests `26.1`, and an open [node-minecraft-protocol PR for 26.1.2](https://github.com/PrismarineJS/node-minecraft-protocol/pull/1487) suggests something may still differ. The first port step on the bot side is one `acceptance:bot` scenario on a 26.1.2 server jar. That needs runner changes first: `botArguments` in `scripts/live-acceptance/processes.js` always passes `MINECRAFT_VERSION` (1.21.1) as the bot's `--version`, and the default jar path and preflight are fixed to 1.21.1, so pass the tested version through and use `--server-jar`. Only a failure after the bot has joined counts as a compatibility result; a setup failure doesn't. If the bot really can't play, fall back to 26.1 for both sides; Baritone's `26.1.*` range and Fabric API `0.145.1+26.1` cover it.
 
 ## Toolchain impact (Java 25)
 

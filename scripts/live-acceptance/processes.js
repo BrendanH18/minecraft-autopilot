@@ -379,7 +379,9 @@ export async function startFabricClient({
       stream.on('data', (chunk) => logStream.write(chunk));
     child.once('close', () => logStream.end());
   }
-  // Gradle forks the game JVM into the same process group, so signals go to the whole group.
+  // Signals go to the wrapper's whole process group. With org.gradle.jvmargs set, Gradle may run the build in a
+  // single-use daemon in its own session; that daemon cancels the build and stops the game JVM when the wrapper's
+  // Gradle client goes away. Boat runs of every --fast scenario left no game JVM behind.
   const group = (signalName) => () => {
     try {
       process.kill(-child.pid, signalName);
