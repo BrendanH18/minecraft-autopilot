@@ -70,7 +70,8 @@ if [ -z "$cmd" ]; then
     # The hand-off checks, as CONTRIBUTING.md lists them.
     cmd="npm run lint && npm run lint:mod && npm run check && npm test && npm start -- demo --smoke && npm run build:mod && npm run verify:mod"
 elif [[ $cmd =~ (dev:mod|runClient|--model|--ollama) ]]; then
-    die 2 "the Minecraft client and Ollama runs stay on the Mac (AGENTS.md); Boat has no GPU or display for them"
+    # The headless Fabric acceptance runner (npm run acceptance:fabric) is the one client run allowed here.
+    die 2 "interactive Minecraft clients and Ollama runs stay on the Mac (AGENTS.md); use npm run acceptance:fabric for a headless client check"
 fi
 
 root=$(git rev-parse --show-toplevel)

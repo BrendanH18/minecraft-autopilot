@@ -193,10 +193,16 @@ opened containers, saved home or last job.
   Fabric boxes still need the packaged jars in a normal launcher.
 - **Needs the cached client.** `scripts/gradle.js` runs offline and refuses if the
   Minecraft assets aren't cached. Run `node scripts/gradle.js downloadAssets --allow-downloads`
-  once, after approval on the Mac, to cache them.
+  once to cache them; on the Mac that needs approval first. The Boat check
+  caches them on its own.
 - **Needs a display.** On the Mac the client opens a window for each scenario.
   Leave it in the background: the client doesn't pause when it loses focus, and
-  focusing it doesn't take over control. Don't press keys in it.
+  focusing it doesn't take over control. Don't press keys in it. In a Boat
+  sandbox, `scripts/boat-check.sh -- npm run acceptance:fabric -- --accept-eula --fast`
+  runs it headless under Xvfb with software OpenGL. See [Boat checks](DEVELOPMENT.md#boat-checks).
+- **Waits for the game to be playable.** After joining, Fabric reports
+  `paused` while the terrain-loading screen is open. Settling waits for that to
+  clear, because the mod refuses actions until it does.
 - **Output.** `client/client.out` collects every session's Gradle and game
   output, and the results file records its path and SHA-256 under `client`.
   Minecraft's own log is `client/logs/latest.log`, and it only covers the last
@@ -204,6 +210,9 @@ opened containers, saved home or last job.
 - **Slow starts.** Each scenario waits up to ten minutes for the bridge, because
   Gradle starts again every time. Settling at the start position allows 60
   seconds, not 15, because the client has to load the teleported chunks.
+- **Known failure.** `inspect-preserves-home` ends about five blocks from home
+  on Fabric ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)).
+  The other `--fast` scenarios passed on 25 November 2026.
 - **Not covered.** F8, menus, the packaged mods folder, the normal launcher and
   handoff can't be scripted here. They stay in the [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist).
 

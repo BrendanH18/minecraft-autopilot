@@ -285,4 +285,21 @@ class CraftingRecipesTest {
                 CraftingRecipes.fill(furnace, CraftingRecipes.layout(furnace, 3), sources),
                 "stone materials mix within one craft");
     }
+
+    @Test
+    void jobMessagesMatchTheBotWording() {
+        // src/mineflayer-driver.js and src/demo-driver.js: the live runner's craft checks read these sentences.
+        assertEquals("Crafted 12 oak_planks.", CraftingRecipes.craftedMessage(12, OAK));
+        assertEquals(
+                "Placed a crafting table at 735 -60 0. Crafted 1 stone_pickaxe.",
+                CraftingRecipes.placedTableMessage(
+                        735, -60, 0, CraftingRecipes.craftedMessage(1, "minecraft:stone_pickaxe")));
+    }
+
+    @Test
+    void noTableMessageMatchesTheBotWording() {
+        assertEquals(
+                "Crafting stone_pickaxe needs a crafting table; none is within 16 blocks and none is held.",
+                CraftingRecipes.noTableMessage("minecraft:stone_pickaxe"));
+    }
 }

@@ -1785,3 +1785,30 @@ test('the Fabric client starts through Gradle with its own home, clears stale st
   assert.match(written, /start LiveFabric \(pid 424242\)/);
   assert.match(written, /Connecting to 127\.0\.0\.1, 25570/);
 });
+
+test('settling waits until the client stops reporting paused, as Fabric does while terrain loads', async () => {
+  const world = fakeWorld({ start: { x: 96.5, y: -60, z: 0.5 } });
+  let pausedReads = 2;
+  const state = world.state;
+  world.state = () => ({ ...state(), paused: pausedReads-- > 0 });
+  const scenario = {
+    id: 'stub-paused',
+    lane: 0,
+    title: 'stub',
+    release: ['RELEASE.md: stub'],
+    actions: ['a'],
+    expect: ['e'],
+    plan: () => ({
+      points: { start: { x: 96.5, y: -60, z: 0.5 } },
+      fixture: [],
+      prepare: [`tp ${BOT} 96.5 -60 0.5`],
+      cleanup: [`clear ${BOT}`],
+    }),
+    run: async (ctx) => ctx.check('ran after settling', true),
+  };
+  const record = await runScenario(scenario, env(world, fakeDeps(world)));
+  assert.equal(record.status, 'pass', record.reason);
+  const settled = record.steps.find(({ name }) => /^wait for bridge and server/.test(name));
+  assert.equal(settled.detail.paused, false);
+  assert.ok(pausedReads < 0, 'the paused observations were read and waited out');
+});

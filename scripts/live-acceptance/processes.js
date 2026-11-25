@@ -285,20 +285,31 @@ export const GRADLE = join(projectRoot, 'scripts/gradle.js');
  * screens, no sound or narrator, and a short render distance for software rendering.
  */
 export const FABRIC_CLIENT_OPTIONS = [
-  'pauseOnLostFocus:false',
+  // 1.21.1's data version, so the game reads these options without upgrading them.
+  'version:3955',
+  // Without this the first-run accessibility screen blocks quick play from joining.
   'onboardAccessibility:false',
+  'pauseOnLostFocus:false',
   'skipMultiplayerWarning:true',
   'joinedFirstServer:true',
   'tutorialStep:none',
+  'realmsNotifications:false',
+  'telemetryOptInExtra:false',
   'narrator:0',
   'soundCategory_master:0.0',
-  'renderDistance:4',
+  'fullscreen:false',
+  // Low settings cut an idle software-rendered client from about two cores to a fifth of one.
+  'renderDistance:2',
   'simulationDistance:5',
-  'maxFps:30',
+  'maxFps:10',
   'enableVsync:false',
   'graphicsMode:0',
   'renderClouds:"false"',
   'particles:2',
+  'ao:false',
+  'entityShadows:false',
+  'biomeBlendRadius:0',
+  'mipmapLevels:0',
 ];
 
 /**
@@ -338,13 +349,13 @@ export async function startFabricClient({
   timeoutMs = 600_000,
   signal,
 }) {
-  await rm(bridge, { force: true });
-  await rm(join(home, 'homes.json'), { force: true });
+  for (const stale of [bridge, `${bridge}.lock`, join(home, 'homes.json')]) await rm(stale, { force: true });
   if (log) await mkdir(dirname(log), { recursive: true, mode: 0o700 });
   const child = track(
     spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir }), {
       cwd: projectRoot,
-      env: { ...process.env, MC_AGENT_HOME: home },
+      // OpenAL's null driver: the client needs no sound device, and headless hosts have none.
+      env: { ALSOFT_DRIVERS: 'null', ...process.env, MC_AGENT_HOME: home },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     }),

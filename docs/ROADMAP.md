@@ -64,6 +64,8 @@ Strict acceptance start verifies the installable ZIP and its pinned dependencies
 
 ### Week 2 (30 November – 6 December): bot gates and the first Fabric session
 
+Before packaged Fabric session 1, run `npm run acceptance:fabric -- --accept-eula --fast` on the candidate in Boat. Then the keyboard session starts from the known Fabric failures, not from finding them.
+
 | Item | Done when | Who and where |
 | --- | --- | --- |
 | Build a clean candidate in Boat and run `acceptance:bot --all`. | Every offline scenario passes on the candidate commit. | Agent, Boat. |
@@ -125,7 +127,7 @@ Human time is short over the holidays, so this month is mostly headless and buil
 | Item | Done when | Who and where |
 | --- | --- | --- |
 | Fix v0.1.0 bugs reported by users, and ship v0.1.1 if any are serious. | Each fix has a regression test; a patch release follows the same release checklist. | Agents in Boat; a person to release. |
-| Add a Fabric mode to the live acceptance runner. It starts the development client with `-PquickPlay` against the runner's offline server, then reuses the fixtures and independent `data get` checks. | Storage, withdraw, craft, pit, eating, and full-inventory scenarios run against Fabric with no one at the keyboard. | Agent, on the Mac (the client needs a GPU). **Brought forward:** `npm run acceptance:fabric` ([Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)) runs every bot scenario on the development client. Eating and full-inventory scenarios are still to add. |
+| Add a Fabric mode to the live acceptance runner. It starts the development client with `-PquickPlay` against the runner's offline server, then reuses the fixtures and independent `data get` checks. | Storage, withdraw, craft, pit, eating, and full-inventory scenarios run against Fabric with no one at the keyboard. | Agent, on the Mac (the client needs a GPU). **Brought forward:** `npm run acceptance:fabric` ([Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)) runs every bot scenario on the development client, headless in Boat (Xvfb with software OpenGL), so it doesn't need the Mac. The first runs (25 November) found and fixed four Fabric bugs: dropped `null` fields in bridge state, which broke every storage verification, and job messages that differed from the bot's. 24 of the 25 `--fast` scenarios now pass; `inspect-preserves-home` fails ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)). Eating and full-inventory scenarios are still to add. |
 | Load offline tool groups lazily. | `stop`, `observe`, and `mcp` import no `planning-*.js` module, with a test that checks it. | Agents in Boat. |
 | Move the offline planners into a separate workspace package (or repository; owner decision). The core keeps no planner imports. | The core's tests, docs, and CLI run without the planner package installed; the planner package has its own tests and CI job. | Agents in Boat. |
 | Spike: the target Minecraft version. Check that Fabric API, Baritone, and Mineflayer support it, and list the protocol and mapping changes. | A short written go/no-go with the chosen version. | Agent. **Done early:** [VERSION-SPIKE.md](VERSION-SPIKE.md) recommends 26.1.2, to be re-checked on 18 January, and lists open questions for the owner. |

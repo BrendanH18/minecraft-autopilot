@@ -154,6 +154,22 @@ final class CraftingRecipes {
                 + describeMissing(missing) + ".";
     }
 
+    /** The success sentence, worded as the bot and the demo word it, so agents see one format on every backend. */
+    static String craftedMessage(int crafted, String output) {
+        return "Crafted " + crafted + " " + output.replaceFirst("^minecraft:", "") + ".";
+    }
+
+    /** Prefixes a held crafting table's placement, worded as the bot and the demo word it. */
+    static String placedTableMessage(int x, int y, int z, String message) {
+        return "Placed a crafting table at " + x + " " + y + " " + z + ". " + message;
+    }
+
+    /** A table recipe with no table within 16 blocks and none held, worded as the bot words it. */
+    static String noTableMessage(String output) {
+        return "Crafting " + output.replaceFirst("^minecraft:", "")
+                + " needs a crafting table; none is within 16 blocks and none is held.";
+    }
+
     /** The failure sentence when the crafted output has nowhere to go. */
     static String fullMessage(int crafted, int requested, String output) {
         return "Inventory full; crafted " + Math.max(0, crafted) + " of " + requested + " "

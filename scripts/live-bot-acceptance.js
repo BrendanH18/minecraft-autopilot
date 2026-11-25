@@ -364,8 +364,10 @@ async function settle(ctx, { points: { start }, marker }, timeoutMs = 15_000) {
       state.blocks?.some(
         (block) => block.name === marker.name && block.x === marker.x && block.y === marker.y && block.z === marker.z,
       );
-    last = { bridge: state.player?.position ?? null, server, held, bridgeHeld, markerSeen };
+    // Fabric reports paused while the terrain-loading screen is still open after joining; actions are refused then.
+    last = { bridge: state.player?.position ?? null, server, held, bridgeHeld, markerSeen, paused: !!state.paused };
     if (
+      !state.paused &&
       state.player?.position &&
       distance(state.player.position, start) <= 1 &&
       distance(server, start) <= 1 &&

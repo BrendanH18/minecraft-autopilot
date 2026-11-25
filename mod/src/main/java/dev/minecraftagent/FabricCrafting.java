@@ -100,7 +100,7 @@ final class FabricCrafting {
             case FILL: {
                 int crafted = crafted();
                 if (crafted >= requested)
-                    return new FabricStorage.Result(true, "Crafted " + crafted + " " + outputName + ".");
+                    return new FabricStorage.Result(true, CraftingRecipes.craftedMessage(crafted, outputName));
                 if (!handler.getCursorStack().isEmpty())
                     throw new IllegalStateException("The crafting cursor is occupied; take control to clear it.");
                 if (!gridEmpty(handler)) throw new IllegalStateException("Items appeared in the crafting grid.");

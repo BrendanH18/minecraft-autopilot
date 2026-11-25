@@ -1,6 +1,5 @@
 package dev.minecraftagent;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpExchange;
@@ -22,7 +21,6 @@ import java.util.concurrent.TimeoutException;
 import net.minecraft.client.MinecraftClient;
 
 public final class BridgeServer implements AutoCloseable {
-    private final Gson gson = new Gson();
     private final String token = UUID.randomUUID().toString() + UUID.randomUUID();
     private HttpServer server;
     private ExecutorService workers;
@@ -55,7 +53,7 @@ public final class BridgeServer implements AutoCloseable {
             } catch (UnsupportedOperationException ignored) {
                 /* Windows uses the user's directory ACL. */
             }
-            Files.writeString(temporary, gson.toJson(config));
+            Files.writeString(temporary, BridgeJson.write(config));
             Files.move(temporary, discovery, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             server.start();
         } catch (IOException | RuntimeException exception) {
@@ -124,7 +122,7 @@ public final class BridgeServer implements AutoCloseable {
     }
 
     private void respond(HttpExchange exchange, int status, JsonObject object) throws IOException {
-        byte[] bytes = gson.toJson(object).getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = BridgeJson.write(object).getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(status, bytes.length);
