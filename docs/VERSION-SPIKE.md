@@ -71,7 +71,7 @@ Baritone and npm details were read from the published artifacts themselves: the 
   - `modImplementation` and `modRuntimeOnly` become `implementation` and `runtimeOnly`;
   - `remapJar` becomes `jar`.
 
-  Fabric's [porting guide](https://docs.fabricmc.net/26.1/develop/porting) has the details. `scripts/package-mod.js` and `scripts/verify-mod.js` check exact jar names, so check them against the new task outputs.
+  Fabric's [porting guide](https://docs.fabricmc.net/26.1.2/develop/porting) has the details. `scripts/package-mod.js` and `scripts/verify-mod.js` check exact jar names, so check them against the new task outputs.
 - *Unverified:* whether palantir-java-format 2.102.0 (Spotless) runs on JDK 25, and whether Loom still caches the server jar at `.gradle-user/caches/fabric-loom/<version>/minecraft-server.jar`. `scripts/live-acceptance/processes.js:30`, `docs/LIVE-ACCEPTANCE.md` and `docs/DEVELOPMENT.md` depend on that path.
 
 ## Expected breakages
