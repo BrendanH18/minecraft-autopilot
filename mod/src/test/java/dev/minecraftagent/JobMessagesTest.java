@@ -27,8 +27,7 @@ class JobMessagesTest {
     @Test
     void withdrawalSentences() {
         assertEquals(
-                "Withdrew 8 oak_log from the chest at 674 -60 0.",
-                JobMessages.withdrew(8, "minecraft:oak_log", CHEST));
+                "Withdrew 8 oak_log from the chest at 674 -60 0.", JobMessages.withdrew(8, "minecraft:oak_log", CHEST));
         assertEquals(
                 "The chest at 674 -60 0 held only 20 oak_log; withdrew 20 of 24 oak_log.",
                 JobMessages.heldOnly(CHEST, 20, 20, 24, "minecraft:oak_log"));

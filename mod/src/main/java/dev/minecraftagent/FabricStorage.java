@@ -177,8 +177,7 @@ final class FabricStorage {
             observed.put(entry.getKey(), count);
         }
         BlockPos chosen = WithdrawTargets.choose(nearby(), observed);
-        if (chosen == null)
-            throw new IllegalStateException(JobMessages.noCandidate(name));
+        if (chosen == null) throw new IllegalStateException(JobMessages.noCandidate(name));
         // A full inventory is reported after reading the container, so the count and its contents are live.
         targets = new ArrayDeque<>(List.of(chosen));
         nextTarget();
@@ -386,8 +385,7 @@ final class FabricStorage {
                 return new Result(true, JobMessages.deposited(transfer.confirmed(), itemId, where(canonical(target))));
             if (!transferStack(stacks, size, false))
                 return new Result(
-                        false,
-                        JobMessages.depositFull(where(canonical(target)), transfer.confirmed(), amount, itemId));
+                        false, JobMessages.depositFull(where(canonical(target)), transfer.confirmed(), amount, itemId));
             reopen(now);
             return null;
         } catch (RuntimeException exception) {
@@ -613,8 +611,7 @@ final class FabricStorage {
         int slot = -1;
         for (int index = 0; index < InventoryRoom.MAIN_SLOTS && slot < 0; index++)
             if (inventory.getStack(index).isOf(Items.CRAFTING_TABLE)) slot = index;
-        if (slot < 0)
-            throw new IllegalStateException(CraftingRecipes.noTableMessage(output));
+        if (slot < 0) throw new IllegalStateException(CraftingRecipes.noTableMessage(output));
         BlockPos spot = freeSpot();
         if (spot == null)
             throw new IllegalStateException("No crafting table within 16 blocks, and no free block next to the player"
