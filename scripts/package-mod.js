@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -38,7 +38,10 @@ for (const [source, name] of files) {
   await copyFile(`${root}/${source}`, `${output}/${name}`);
   hashes.push(`${checksum(await readFile(`${output}/${name}`))}  ${name}`);
 }
-await rm(`${output}/fabric-api-0.116.17+1.21.1.jar`, { force: true });
+for (const entry of await readdir(output, { withFileTypes: true })) {
+  if (entry.isFile() && entry.name !== fabricName && /^fabric-api-[0-9][\w.+-]*\.jar$/.test(entry.name))
+    await rm(`${output}/${entry.name}`, { force: true });
+}
 await writeFile(`${root}/dist/SHA256SUMS`, `${hashes.join('\n')}\n`);
 await copyFile(`${root}/LICENSE`, `${root}/dist/LICENSE`);
 await writeFile(
