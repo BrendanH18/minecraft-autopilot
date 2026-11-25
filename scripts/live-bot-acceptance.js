@@ -419,7 +419,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
     const session = { port: options.port, account: options.account, bridge: where.bridge, home: where.home, signal };
     bot = await ctx.step(backend.startStep, () =>
       options.backend === 'fabric'
-        ? deps.startFabricClient({ ...session, gameDir: where.client, log: where.clientLog })
+        ? deps.startFabricClient({ ...session, gameDir: where.client, log: where.clientLog, java: options.java })
         : deps.startBot(session),
     );
     for (const command of plan.prepare) await ctx.step(`prepare: ${command}`, () => ctx.server.command(command));

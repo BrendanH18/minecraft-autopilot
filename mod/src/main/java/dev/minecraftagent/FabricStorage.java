@@ -132,8 +132,12 @@ final class FabricStorage {
     }
 
     /** Stores {@code amount} held items in the nearest chest, trapped chest, or barrel within 16 blocks. */
-    void beginDeposit(String identity, Item item, int amount) {
-        reset(identity, Mode.DEPOSIT, item, amount);
+    void beginDeposit(String identity, Item item, int requested, int held) {
+        // A requested count of 0 stores every held item. Reset first so a refusal never reports an earlier container.
+        reset(identity, Mode.DEPOSIT, item, requested == 0 ? held : requested);
+        String id = Registries.ITEM.getId(item).toString();
+        if (held == 0) throw new IllegalStateException(JobMessages.noneToDeposit(id));
+        if (requested > held) throw new IllegalStateException(JobMessages.depositShort(held, id, requested));
         List<BlockPos> nearby = nearby();
         if (nearby.isEmpty())
             throw new IllegalStateException("No chest or barrel within 16 blocks. Move near storage first.");

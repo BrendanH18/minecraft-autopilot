@@ -1669,6 +1669,7 @@ test('a Fabric run starts a fresh client per scenario and records a separate sch
         home: '/fake/run/agent-home',
         gameDir: '/fake/run/client',
         log: '/fake/run/client/client.out',
+        java: 'java',
         signal: undefined,
       },
     );
@@ -1746,6 +1747,7 @@ test('the Fabric client starts through Gradle with its own home, clears stale st
   process.kill = (pid, signal) => {
     if (pid !== -424242) return realKill(pid, signal);
     signals.push(signal);
+    if (child.signalCode) return true;
     child.signalCode = signal;
     child.emit('exit', null, signal);
     child.emit('close');
@@ -1759,6 +1761,7 @@ test('the Fabric client starts through Gradle with its own home, clears stale st
     home,
     gameDir,
     log,
+    java: '/opt/jdk-21/bin/java',
     timeoutMs: 5_000,
     spawnImpl: (command, args, spawnOptions) => {
       spawned = { command, args, spawnOptions };
@@ -1776,11 +1779,13 @@ test('the Fabric client starts through Gradle with its own home, clears stale st
   assert.equal(spawned.command, process.execPath);
   assert.deepEqual(spawned.args, fabricClientArguments({ port: 25570, account: 'LiveFabric', gameDir }));
   assert.equal(spawned.spawnOptions.env.MC_AGENT_HOME, home);
+  assert.equal(spawned.spawnOptions.env.JAVA_HOME, '/opt/jdk-21', 'Gradle runs on the --java JDK');
+  assert.ok(spawned.spawnOptions.env.PATH.startsWith('/opt/jdk-21/bin'));
   assert.equal(spawned.spawnOptions.detached, true);
   await assert.rejects(readFile(bridge), { code: 'ENOENT' }, 'a stale bridge file from the last client is removed');
   await assert.rejects(readFile(join(home, 'homes.json')), { code: 'ENOENT' });
   await session.stop();
-  assert.deepEqual(signals, ['SIGTERM']);
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'], 'the whole group is killed once the wrapper exits');
   const written = await readFile(log, 'utf8');
   assert.match(written, /start LiveFabric \(pid 424242\)/);
   assert.match(written, /Connecting to 127\.0\.0\.1, 25570/);

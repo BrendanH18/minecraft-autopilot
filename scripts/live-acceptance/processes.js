@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { dirname, join, relative } from 'node:path';
+import { basename, delimiter, dirname, join, relative } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { projectRoot } from '../../src/config.js';
@@ -137,10 +137,15 @@ const children = new Set();
 function track(child) {
   if (!children.size)
     process.once('exit', () => {
+      // Each child leads its own process group; Gradle's game JVM is in the client wrapper's group.
       for (const running of children)
         try {
-          running.kill('SIGKILL');
-        } catch {}
+          process.kill(-running.pid, 'SIGKILL');
+        } catch {
+          try {
+            running.kill('SIGKILL');
+          } catch {}
+        }
     });
   children.add(child);
   child.once('exit', () => children.delete(child));
@@ -348,14 +353,20 @@ export async function startFabricClient({
   connect = FabricAdapter.connect,
   timeoutMs = 600_000,
   signal,
+  java = 'java',
 }) {
   for (const stale of [bridge, `${bridge}.lock`, join(home, 'homes.json')]) await rm(stale, { force: true });
+  // Gradle runs on JAVA_HOME or PATH, so a --java JDK has to reach it that way.
+  const jdk =
+    basename(java) === java
+      ? {}
+      : { JAVA_HOME: dirname(dirname(java)), PATH: `${dirname(java)}${delimiter}${process.env.PATH ?? ''}` };
   if (log) await mkdir(dirname(log), { recursive: true, mode: 0o700 });
   const child = track(
     spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir }), {
       cwd: projectRoot,
       // OpenAL's null driver: the client needs no sound device, and headless hosts have none.
-      env: { ALSOFT_DRIVERS: 'null', ...process.env, MC_AGENT_HOME: home },
+      env: { ALSOFT_DRIVERS: 'null', ...process.env, ...jdk, MC_AGENT_HOME: home },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     }),
@@ -387,6 +398,8 @@ export async function startFabricClient({
       [group('SIGTERM'), 30_000],
       [group('SIGKILL'), 5_000],
     ],
+    // The wrapper can exit while Gradle or the game JVM lingers; nothing in the group may outlive the session.
+    afterStop: group('SIGKILL'),
   });
   if (logStream) {
     const stop = session.stop;
@@ -399,7 +412,7 @@ export async function startFabricClient({
 }
 
 /** Waits until a freshly spawned session's bridge reports a connected player; stops it on failure. */
-async function waitForSession({ child, label, bridge, connect, timeoutMs, signal, stopSteps }) {
+async function waitForSession({ child, label, bridge, connect, timeoutMs, signal, stopSteps, afterStop }) {
   const output = [];
   for (const stream of [child.stdout, child.stderr].filter(Boolean))
     stream.on('data', (chunk) => {
@@ -413,7 +426,11 @@ async function waitForSession({ child, label, bridge, connect, timeoutMs, signal
     exited,
     output,
     async stop() {
-      await settle(child, exited, stopSteps);
+      try {
+        await settle(child, exited, stopSteps);
+      } finally {
+        afterStop?.();
+      }
     },
   };
   const deadline = Date.now() + timeoutMs;

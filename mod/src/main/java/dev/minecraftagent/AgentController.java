@@ -281,14 +281,13 @@ public final class AgentController {
                     break;
                 case "wait":
                     break;
-                case "deposit": {
-                    String id = Registries.ITEM.getId(depositItem).toString();
-                    int held = inventoryCount(Registries.ITEM.getId(depositItem).getPath());
-                    if (held == 0) throw new IllegalStateException(JobMessages.noneToDeposit(id));
-                    if (count > held) throw new IllegalStateException(JobMessages.depositShort(held, id, count));
-                    storage.beginDeposit(identity(), depositItem, count == 0 ? held : count);
+                case "deposit":
+                    storage.beginDeposit(
+                            identity(),
+                            depositItem,
+                            count,
+                            inventoryCount(Registries.ITEM.getId(depositItem).getPath()));
                     break;
-                }
                 case "withdraw":
                     storage.beginWithdraw(identity(), depositItem, count);
                     break;
