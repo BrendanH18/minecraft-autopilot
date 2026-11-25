@@ -115,7 +115,8 @@ fi
 # The Fabric development-client acceptance runs headless: Xvfb with Mesa's llvmpipe
 # software OpenGL (4.5 core), and the client's assets cached in Gradle's user home.
 run=(bash -c "$cmd")
-if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) ]]; then
+# A dry run starts nothing, so it needs neither.
+if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) && ! $cmd =~ --dry-run ]]; then
     if ! command -v xvfb-run >/dev/null; then
         say "installing Xvfb and Mesa for the headless Fabric client"
         sudo apt-get update -qq --allow-releaseinfo-change >/dev/null || true
