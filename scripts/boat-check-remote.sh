@@ -122,10 +122,9 @@ if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) ]]; then
         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y -qq --no-install-recommends \
             xvfb xauth libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 >/dev/null
     fi
-    if [ ! -f .gradle-user/caches/fabric-loom/assets/indexes/1.21.1-17.json ]; then
-        say "caching the Minecraft client assets"
-        node scripts/gradle.js downloadAssets --allow-downloads
-    fi
+    # Loom checks every object and fetches only what is missing, so an interrupted download heals here.
+    say "checking the Minecraft client asset cache"
+    node scripts/gradle.js downloadAssets --allow-downloads >/dev/null
     run=(xvfb-run -a -s "-screen 0 854x480x24 -nolisten tcp" "${run[@]}")
 fi
 
