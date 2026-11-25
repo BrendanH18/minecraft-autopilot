@@ -1817,3 +1817,46 @@ test('settling waits until the client stops reporting paused, as Fabric does whi
   assert.equal(settled.detail.paused, false);
   assert.ok(pausedReads < 0, 'the paused observations were read and waited out');
 });
+
+test('a Fabric wrapper that exits before its bridge is ready still has its process group killed', async (t) => {
+  await mkdir(RUNTIME, { recursive: true });
+  const root = await mkdtemp(join(RUNTIME, 'test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const signals = [];
+  const realKill = process.kill;
+  t.after(() => {
+    process.kill = realKill;
+  });
+  const child = new EventEmitter();
+  child.pid = 434343;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.stdout = new EventEmitter();
+  process.kill = (pid, signal) => {
+    if (pid !== -434343) return realKill(pid, signal);
+    signals.push(signal);
+    return true;
+  };
+  await assert.rejects(
+    startFabricClient({
+      port: 25570,
+      account: 'LiveFabric',
+      bridge: join(root, 'agent-home', 'bridge.json'),
+      home: join(root, 'agent-home'),
+      gameDir: join(root, 'client'),
+      timeoutMs: 5_000,
+      spawnImpl: () => {
+        setImmediate(() => {
+          child.exitCode = 1;
+          child.emit('exit', 1, null);
+        });
+        return child;
+      },
+      connect: async () => {
+        throw new Error('bridge unavailable');
+      },
+    }),
+    /exited before its bridge was ready/,
+  );
+  assert.deepEqual(signals, ['SIGKILL']);
+});

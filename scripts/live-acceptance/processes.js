@@ -441,8 +441,11 @@ async function waitForSession({ child, label, bridge, connect, timeoutMs, signal
         await bot.stop();
         signal.throwIfAborted();
       }
-      if (child.exitCode !== null || child.signalCode !== null)
+      if (child.exitCode !== null || child.signalCode !== null) {
+        // The wrapper is gone, but anything it started in its process group must not reach the next scenario.
+        await bot.stop();
         throw new Error(`The ${label} exited before its bridge was ready: ${output.join('').trim().slice(-800)}`);
+      }
       try {
         const adapter = await connect(bridge);
         try {

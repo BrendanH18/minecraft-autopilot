@@ -9,7 +9,7 @@
  * client, not the packaged jars, so its results are never evidence for a RELEASE.md box.
  */
 import { parseArgs } from 'node:util';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createInterface } from 'node:readline';
@@ -173,7 +173,7 @@ export function buildPlan(options) {
     backend: options.backend ?? 'bot',
     ...(options.backend === 'fabric'
       ? {
-          clientCommand: `MC_AGENT_HOME=${where.home} ${process.execPath} ${fabricClientArguments({ port: options.port, account: options.account, gameDir: where.client }).join(' ')}`,
+          clientCommand: `${basename(options.java) === options.java ? '' : `JAVA_HOME=${dirname(dirname(options.java))} `}MC_AGENT_HOME=${where.home} ${process.execPath} ${fabricClientArguments({ port: options.port, account: options.account, gameDir: where.client }).join(' ')}`,
           clientLog: where.clientLog,
           reviewNote: FABRIC_REVIEW_NOTE,
         }
