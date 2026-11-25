@@ -434,6 +434,15 @@ test('backend rules: demo rehearses, mismatches are refused, both-backend gates 
     '2026-11-14T11:00:00Z',
   );
   assert.deepEqual(eligibilityProblems(fabric), []);
+  const currentFabric = modBundleFiles.find(({ name }) => name.startsWith('fabric-api-')).name;
+  const previousFabric = 'fabric-api-0.116.17+1.21.1.jar';
+  const older = structuredClone(fabric);
+  older.provenance.mods.jars.find(({ name }) => name === currentFabric).name = previousFabric;
+  assert.deepEqual(eligibilityProblems(older), [
+    `recorded candidate used ${previousFabric} but the current bundle requires ${currentFabric}`,
+  ]);
+  older.provenance.mods.jars = older.provenance.mods.jars.filter(({ name }) => name !== previousFabric);
+  assert.deepEqual(eligibilityProblems(older), [`archive hash missing for ${currentFabric}`]);
   let status = acceptanceStatus([fabric]).gates.find((gate) => gate.id === 'collection-pit-recovery');
   assert.equal(status.eligible, false);
   assert.deepEqual(

@@ -77,7 +77,7 @@ npm run verify:mod
 Later builds run offline with `npm run build:mod`.
 
 1. Create a Minecraft Java **1.21.1** profile and install [Fabric Loader](https://fabricmc.net/use/installer/) for it.
-2. Copy all three jars from `dist/mods/` into that profile's `mods` folder: `minecraft-agent-0.1.0.jar`, `fabric-api-0.116.17+1.21.1.jar`, and `baritone-api-fabric-1.11.3.jar`.
+2. Copy all three jars from `dist/mods/` into that profile's `mods` folder: `minecraft-agent-0.1.0.jar`, `fabric-api-0.116.18+1.21.1.jar`, and `baritone-api-fabric-1.11.3.jar`.
 3. Launch the game and enter a world or server.
 4. Attach the CLI to the running game and look around:
 

@@ -88,7 +88,7 @@ test('textile has exactly 25 distinct fixture-covered planners', () => {
 
 for (const [name, args, expected] of cases) {
   testStudyWorkflows(textileGroup.name, name, args, expected);
-  test('textile ' + name, () => assert.deepEqual(run(name, ...args), expected));
+  test(`textile ${name}`, () => assert.deepEqual(run(name, ...args), expected));
 }
 
 test('textile validates swatches, stock and expanded output', () => {

@@ -12,8 +12,8 @@ export const modBundleFiles = [
     sha256: 'f9a9b17a41d7d7ad22c759058b14fd01e3319663282e66f99e18153237fa6767',
   },
   {
-    name: 'fabric-api-0.116.17+1.21.1.jar',
-    sha256: '79ac44b40780acbd884b34c50be1e39af682847e5f5cb3b1fddeeaa768dce800',
+    name: 'fabric-api-0.116.18+1.21.1.jar',
+    sha256: '1cb46442dda6d3be9979a2619610eb1c1f6641cd7ed7cb3eec058589ce9eed46',
   },
 ];
 

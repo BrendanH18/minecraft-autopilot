@@ -526,8 +526,16 @@ function launcherModProblems({ mods, archive }) {
   const problems = [];
   for (const name of modJarNames) {
     const jar = mods.jars.find((entry) => entry.name === name);
-    if (!jar?.expectedSha256) problems.push(`archive hash missing for ${name}`);
-    else if (!jar.sha256) problems.push(`launcher mod jar missing or unreadable: ${name}`);
+    if (!jar?.expectedSha256) {
+      const previousFabric = name.startsWith('fabric-api-')
+        ? mods.jars.find((entry) => entry.expectedSha256 && /^fabric-api-[0-9][\w.+-]*\.jar$/.test(entry.name))
+        : null;
+      problems.push(
+        previousFabric
+          ? `recorded candidate used ${previousFabric.name} but the current bundle requires ${name}`
+          : `archive hash missing for ${name}`,
+      );
+    } else if (!jar.sha256) problems.push(`launcher mod jar missing or unreadable: ${name}`);
     else if (jar.sha256 !== jar.expectedSha256) problems.push(`launcher mod jar differs from the archive: ${name}`);
   }
   return problems;
