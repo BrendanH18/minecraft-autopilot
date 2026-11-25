@@ -1,8 +1,8 @@
 package dev.minecraftagent;
 
 import baritone.api.BaritoneAPI;
+import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalGetToBlock;
-import baritone.api.pathing.goals.GoalNear;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -294,16 +294,21 @@ final class FabricStorage {
             }
             if (phase == Phase.CRAFTING) return crafting.tick(now);
             if (phase == Phase.RETURN) {
-                if (client.player.getPos().distanceTo(start) <= 1.75)
-                    return new Result(
-                            true,
-                            scoped
-                                    ? "Refreshed the requested storage from the server."
-                                    : "Refreshed previously opened storage from the server and returned to inspection"
-                                            + " start.");
-                if (now - phaseStarted > 3_000_000_000L && !pathing())
-                    throw new IllegalStateException("Storage refreshed, but could not return to inspection start.");
-                return null;
+                // Back in the start block, not merely near it: a step below counted as near, and repeated inspections
+                // crept away from a completed return home (#78).
+                return switch (Arrival.state(
+                        atStart(), client.player.isOnGround(), pathing(), false, now - phaseStarted > 3_000_000_000L)) {
+                    case ARRIVED ->
+                        new Result(
+                                true,
+                                scoped
+                                        ? "Refreshed the requested storage from the server."
+                                        : "Refreshed previously opened storage from the server and returned to"
+                                                + " inspection start.");
+                    case STOPPED ->
+                        throw new IllegalStateException("Storage refreshed, but could not return to inspection start.");
+                    case WALKING -> null;
+                };
             }
             if (target == null) return new Result(true, "No previously opened storage to refresh.");
             if (mode == Mode.CRAFT ? !isCraftingTable(target) : !isContainer(target))
@@ -509,11 +514,11 @@ final class FabricStorage {
         phaseStarted = System.nanoTime();
         if (target == null) {
             phase = Phase.RETURN;
-            if (client.player.getPos().distanceTo(start) > 1.75)
+            if (!atStart())
                 BaritoneAPI.getProvider()
                         .getPrimaryBaritone()
                         .getCustomGoalProcess()
-                        .setGoalAndPath(new GoalNear(BlockPos.ofFloored(start), 1));
+                        .setGoalAndPath(new GoalBlock(BlockPos.ofFloored(start)));
         } else {
             phase = Phase.APPROACH;
             BaritoneAPI.getSettings().allowBreak.value = false;
@@ -523,6 +528,12 @@ final class FabricStorage {
                         .getCustomGoalProcess()
                         .setGoalAndPath(new GoalGetToBlock(target));
         }
+    }
+
+    private boolean atStart() {
+        BlockPos block = BlockPos.ofFloored(start);
+        Vec3d pos = client.player.getPos();
+        return Arrival.inBlock(pos.x, pos.y, pos.z, block.getX(), block.getY(), block.getZ());
     }
 
     private boolean pathing() {

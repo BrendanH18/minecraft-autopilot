@@ -1198,24 +1198,39 @@ async function runInspectHome(ctx, plan, variant) {
     { type: 'home' },
     { type: 'done', reason: 'Scripted acceptance run finished.' },
   ];
+  // Server Pos before each planner request shows where each step, and each retried final inspection, left the player.
+  const positions = [];
+  const beforeRequest = Object.fromEntries(
+    [0, 1, 2, 3, 4].map((request) => [
+      request,
+      async () => {
+        positions.push({ request, ...(await ctx.server.position()) });
+        if (variant === 'blocked' && request === 2) await removeStep();
+      },
+    ]),
+  );
   const result = await ctx.step(
     'agent with scripted planner (no model): deposit 8 → home → done (final inspection walks 9 blocks)',
     () =>
       ctx.agent({
         goal: 'Store eight oak logs in the chest, then return home.',
         criteria: { deposit: { item: 'oak_log', count: 8 }, returnHome: true },
-        fetchImpl: scriptedPlanner(decisions, { before: variant === 'blocked' ? { 2: removeStep } : {} }),
+        fetchImpl: scriptedPlanner(decisions, { before: beforeRequest }),
       }),
   );
   ctx.note('agent', { status: result.status, steps: result.steps, verification: result.verification ?? null });
+  ctx.note('serverPosBeforePlannerRequests', positions);
   const after = await ctx.step('independent final state', () => snapshot(ctx, chest));
   ctx.note('final', after);
   const checks = result.verification?.checks || {};
   const serverDistance = distance(after.position, start);
+  // Measured from the agent's own home target: Fabric saves home as its block (480 -58 0), the bot as the exact
+  // position (480.5 -58 0.5), and that half-block offset alone can exceed the tolerance.
+  const targetDistance = distance(after.position, checks.home?.target ?? start);
   ctx.check(
     'agent home distance agrees with server Pos (± 0.5)',
-    Number.isFinite(checks.home?.distance) && Math.abs(checks.home.distance - serverDistance) <= 0.5,
-    { agent: checks.home?.distance ?? null, server: serverDistance },
+    Number.isFinite(checks.home?.distance) && Math.abs(checks.home.distance - targetDistance) <= 0.5,
+    { agent: checks.home?.distance ?? null, server: targetDistance, target: checks.home?.target ?? null },
   );
   if (variant === 'preserve') {
     ctx.check('agent reports criteria_met', result.status === 'criteria_met', { status: result.status });
