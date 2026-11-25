@@ -51,6 +51,8 @@ Strict acceptance start verifies the installable ZIP and its pinned dependencies
 
 ### Week 1 (23–29 November): harden and prepare (headless, Boat)
 
+**Done (25 November).** All six items landed in #72–#75. Two month 2 items were also brought forward to reduce risk in the week 2 keyboard session: the Fabric mode of the live runner and the version spike (see month 2).
+
 | Item | Done when |
 | --- | --- |
 | Defer automatic eating while a Fabric storage or craft action owns the inventory, and wait for the server to confirm a placed crafting table. | Java helper tests cover both. `npm run build:mod` and `npm run lint:mod` pass. |
@@ -123,10 +125,10 @@ Human time is short over the holidays, so this month is mostly headless and buil
 | Item | Done when | Who and where |
 | --- | --- | --- |
 | Fix v0.1.0 bugs reported by users, and ship v0.1.1 if any are serious. | Each fix has a regression test; a patch release follows the same release checklist. | Agents in Boat; a person to release. |
-| Add a Fabric mode to the live acceptance runner. It starts the development client with `-PquickPlay` against the runner's offline server, then reuses the fixtures and independent `data get` checks. | Storage, withdraw, craft, pit, eating, and full-inventory scenarios run against Fabric with no one at the keyboard. | Agent, on the Mac (the client needs a GPU). |
+| Add a Fabric mode to the live acceptance runner. It starts the development client with `-PquickPlay` against the runner's offline server, then reuses the fixtures and independent `data get` checks. | Storage, withdraw, craft, pit, eating, and full-inventory scenarios run against Fabric with no one at the keyboard. | Agent, on the Mac (the client needs a GPU). **Brought forward:** `npm run acceptance:fabric` ([Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)) runs every bot scenario on the development client. Eating and full-inventory scenarios are still to add. |
 | Load offline tool groups lazily. | `stop`, `observe`, and `mcp` import no `planning-*.js` module, with a test that checks it. | Agents in Boat. |
 | Move the offline planners into a separate workspace package (or repository; owner decision). The core keeps no planner imports. | The core's tests, docs, and CLI run without the planner package installed; the planner package has its own tests and CI job. | Agents in Boat. |
-| Spike: the target Minecraft version. Check that Fabric API, Baritone, and Mineflayer support it, and list the protocol and mapping changes. | A short written go/no-go with the chosen version. | Agent. |
+| Spike: the target Minecraft version. Check that Fabric API, Baritone, and Mineflayer support it, and list the protocol and mapping changes. | A short written go/no-go with the chosen version. | Agent. **Done early:** [VERSION-SPIKE.md](VERSION-SPIKE.md) recommends 26.1.2, to be re-checked on 18 January, and lists open questions for the owner. |
 
 ### Month 3 (18 January – 14 February): move to a current Minecraft release
 

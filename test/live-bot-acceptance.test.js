@@ -30,6 +30,10 @@ import {
   ShutdownError,
   settle,
   startBot,
+  startFabricClient,
+  fabricClientArguments,
+  prepareFabricGameDirectory,
+  FABRIC_CLIENT_OPTIONS,
   startServer,
 } from '../scripts/live-acceptance/processes.js';
 import {
@@ -39,6 +43,7 @@ import {
   runAcceptance,
   runScenario,
   main,
+  formatSummary,
   WORLD_SETUP,
 } from '../scripts/live-bot-acceptance.js';
 
@@ -1586,4 +1591,197 @@ test('asynchronous server stdin errors fail pending commands and allow signal sh
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('--backend fabric selects the development client with its own default player name', () => {
+  assert.throws(() => parseOptions(['--all', '--backend', 'forge']), /--backend must be bot or fabric/);
+  assert.equal(parseOptions(['--all']).backend, 'bot');
+  assert.equal(parseOptions(['--all']).account, 'LiveBot');
+  const fabric = parseOptions(['--fast', '--backend', 'fabric']);
+  assert.equal(fabric.backend, 'fabric');
+  assert.equal(fabric.account, 'LiveFabric');
+  assert.equal(parseOptions(['--all', '--backend', 'fabric', '--account', 'Tester']).account, 'Tester');
+  assert.deepEqual(
+    fabric.scenarios.map(({ id }) => id),
+    parseOptions(['--fast']).scenarios.map(({ id }) => id),
+  );
+});
+
+test('the Fabric dry-run plan names the client command, its own bridge, and never claims release evidence', () => {
+  const plan = buildPlan(parseOptions(['--scenario', 'withdraw', '--backend', 'fabric', '--port', '25570']));
+  assert.equal(plan.backend, 'fabric');
+  assert.equal(plan.botCommand, undefined);
+  assert.match(plan.clientCommand, /^MC_AGENT_HOME=\S+agent-home \S+ \S+scripts\/gradle\.js runClient /);
+  assert.match(
+    plan.clientCommand,
+    / -PquickPlay=127\.0\.0\.1:25570 -PdevUsername=LiveFabric -PclientRunDir=\S+\/client$/,
+  );
+  assert.match(plan.clientLog, /client\/client\.out$/);
+  for (const text of plan.scenarios[0].release)
+    assert.match(text, /^pre-check only \(Fabric development client\): RELEASE\.md/);
+  assert.ok(plan.scenarios[0].fixture.every((command) => !/LiveBot/.test(command)));
+  assert.ok(plan.scenarios[0].prepare.some((command) => /LiveFabric/.test(command)));
+  const text = formatPlan(plan);
+  assert.match(text, /^Live Fabric acceptance \(development client\) plan/);
+  assert.match(text, /never evidence for a RELEASE\.md box/);
+  assert.match(text, /start the Fabric client, then prepare:/);
+  assert.doesNotMatch(text, /Bot \(per scenario\)/);
+  assert.doesNotMatch(formatPlan(buildPlan(parseOptions(['--scenario', 'withdraw']))), /Fabric client/);
+});
+
+test('a Fabric run starts a fresh client per scenario and records a separate schema and client log', async () => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  const starts = [];
+  const prepared = [];
+  deps.startBot = async () => assert.fail('the bot must not start in a Fabric run');
+  deps.prepareFabricGameDirectory = async (options) => prepared.push(options);
+  deps.startFabricClient = async (options) => {
+    starts.push(options);
+    return {
+      stop: async () => {
+        deps.calls.botStops++;
+        world.console.push(`${LOG_PREFIX}${BOT} left the game\n`);
+      },
+    };
+  };
+  const options = parseOptions([
+    '--scenario',
+    'craft-rounds-up',
+    '--scenario',
+    'craft-no-table',
+    '--accept-eula',
+    '--backend',
+    'fabric',
+    '--account',
+    BOT,
+  ]);
+  const results = await runAcceptance(options, deps);
+  assert.deepEqual(prepared, [{ directory: '/fake/run/client' }]);
+  assert.equal(starts.length, 2);
+  for (const start of starts)
+    assert.deepEqual(
+      { ...start, signal: undefined },
+      {
+        port: 25566,
+        account: BOT,
+        bridge: '/fake/run/agent-home/bridge.json',
+        home: '/fake/run/agent-home',
+        gameDir: '/fake/run/client',
+        log: '/fake/run/client/client.out',
+        signal: undefined,
+      },
+    );
+  assert.equal(deps.calls.botStops, 2);
+  assert.equal(results.schema, 'minecraft-agent/live-fabric-acceptance/1');
+  assert.equal(results.backend, 'fabric');
+  assert.match(results.scope, /not the packaged jars/);
+  assert.match(results.review.note, /never evidence for a RELEASE\.md box/);
+  assert.deepEqual(results.client, {
+    log: '/fake/run/client/client.out',
+    logSha256: 'f'.repeat(64),
+    gameDirectory: '/fake/run/client',
+  });
+  for (const scenario of results.scenarios) {
+    assert.ok(scenario.steps.some(({ name }) => /fresh Fabric development client/.test(name)));
+    assert.ok(scenario.cleanup.some(({ command, ok }) => command === 'stop Fabric client' && ok));
+    for (const text of scenario.release) assert.match(text, /^pre-check only/);
+  }
+  const summary = formatSummary(results, '/fake/results.json');
+  assert.match(summary, /^Live Fabric acceptance \(development client\): /);
+  assert.match(summary, /Client log: \/fake\/run\/client\/client\.out/);
+});
+
+test('a Fabric client that cannot be stopped skips the remaining scenarios', async () => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  deps.prepareFabricGameDirectory = async () => {};
+  deps.startFabricClient = async () => {
+    throw new ShutdownError('Client remained running after bridge startup timed out.');
+  };
+  const options = parseOptions([
+    '--scenario',
+    'craft-rounds-up',
+    '--scenario',
+    'craft-no-table',
+    '--accept-eula',
+    '--backend',
+    'fabric',
+  ]);
+  const results = await runAcceptance(options, deps);
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.ok(results.scenarios[0].cleanup.some(({ command, ok }) => command === 'stop Fabric client' && !ok));
+  assert.equal(results.scenarios[1].status, 'skipped');
+  assert.match(results.error, /Could not stop the Fabric client/);
+});
+
+test('the Fabric client starts through Gradle with its own home, clears stale state, and stops its process group', async (t) => {
+  await mkdir(RUNTIME, { recursive: true });
+  const root = await mkdtemp(join(RUNTIME, 'test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const home = join(root, 'agent-home');
+  const gameDir = join(root, 'client');
+  const bridge = join(home, 'bridge.json');
+  const log = join(root, 'client', 'client.out');
+  await mkdir(home, { recursive: true });
+  await writeFile(bridge, '{"stale":true}');
+  await writeFile(join(home, 'homes.json'), '{}');
+  await prepareFabricGameDirectory({ directory: gameDir });
+  const options = (await readFile(join(gameDir, 'options.txt'), 'utf8')).trim().split('\n');
+  assert.deepEqual(options, FABRIC_CLIENT_OPTIONS);
+  assert.ok(options.includes('pauseOnLostFocus:false'));
+
+  let spawned;
+  const signals = [];
+  const realKill = process.kill;
+  t.after(() => {
+    process.kill = realKill;
+  });
+  const child = new EventEmitter();
+  child.pid = 424242;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  process.kill = (pid, signal) => {
+    if (pid !== -424242) return realKill(pid, signal);
+    signals.push(signal);
+    child.signalCode = signal;
+    child.emit('exit', null, signal);
+    child.emit('close');
+    return true;
+  };
+  let observed = 0;
+  const session = await startFabricClient({
+    port: 25570,
+    account: 'LiveFabric',
+    bridge,
+    home,
+    gameDir,
+    log,
+    timeoutMs: 5_000,
+    spawnImpl: (command, args, spawnOptions) => {
+      spawned = { command, args, spawnOptions };
+      setImmediate(() => child.stdout.emit('data', '[Render thread/INFO]: Connecting to 127.0.0.1, 25570\n'));
+      return child;
+    },
+    connect: async (path) => {
+      assert.equal(path, bridge);
+      return {
+        observe: async () => (++observed < 2 ? { connected: false } : { connected: true, player: { position: {} } }),
+        close: async () => {},
+      };
+    },
+  });
+  assert.equal(spawned.command, process.execPath);
+  assert.deepEqual(spawned.args, fabricClientArguments({ port: 25570, account: 'LiveFabric', gameDir }));
+  assert.equal(spawned.spawnOptions.env.MC_AGENT_HOME, home);
+  assert.equal(spawned.spawnOptions.detached, true);
+  await assert.rejects(readFile(bridge), { code: 'ENOENT' }, 'a stale bridge file from the last client is removed');
+  await assert.rejects(readFile(join(home, 'homes.json')), { code: 'ENOENT' });
+  await session.stop();
+  assert.deepEqual(signals, ['SIGTERM']);
+  const written = await readFile(log, 'utf8');
+  assert.match(written, /start LiveFabric \(pid 424242\)/);
+  assert.match(written, /Connecting to 127\.0\.0\.1, 25570/);
 });

@@ -3,6 +3,10 @@
  * Scripted live acceptance for the Mineflayer server bot (roadmap step 4). Starts the cached vanilla 1.21.1 server,
  * builds fixtures with console commands, drives the bot through the repo CLI and bridge client, verifies with
  * independent `data get` reads, and writes a JSON results file. Results need human review before they count.
+ *
+ * `--backend fabric` runs the same scenarios against the Fabric development client instead (a fresh `runClient`
+ * per scenario, joined with quick play). That is a pre-check for the keyboard sessions; it uses the development
+ * client, not the packaged jars, so its results are never evidence for a RELEASE.md box.
  */
 import { parseArgs } from 'node:util';
 import { basename, join, resolve } from 'node:path';
@@ -31,6 +35,9 @@ import {
   startServer,
   startBot,
   botArguments,
+  startFabricClient,
+  fabricClientArguments,
+  prepareFabricGameDirectory,
   runCli,
   environment,
 } from './live-acceptance/processes.js';
@@ -38,9 +45,38 @@ import {
 export { SEED, WORLD_SETUP };
 const REVIEW_NOTE =
   'Machine-checked observations only. These results become acceptance evidence for RELEASE.md only after a person reviews them, including server.out.';
+const FABRIC_REVIEW_NOTE =
+  'Fabric development-client pre-check. These results find bugs before the keyboard sessions; they are never evidence for a RELEASE.md box, which needs the packaged jars in a normal launcher.';
+
+/** What differs between the server bot and the Fabric development client. */
+export const BACKENDS = {
+  bot: {
+    label: 'bot',
+    title: 'Live bot acceptance',
+    schema: 'minecraft-agent/live-bot-acceptance/1',
+    scope: 'Mineflayer server bot only; does not cover Fabric or authenticated handoff.',
+    account: 'LiveBot',
+    startStep: 'start a fresh bot session via the repo CLI',
+    stopStep: 'stop bot process',
+    reviewNote: REVIEW_NOTE,
+  },
+  fabric: {
+    label: 'Fabric client',
+    title: 'Live Fabric acceptance (development client)',
+    schema: 'minecraft-agent/live-fabric-acceptance/1',
+    scope:
+      'Fabric development client (runClient with quick play) only; not the packaged jars, a normal launcher, the bot, or authenticated handoff.',
+    account: 'LiveFabric',
+    startStep: 'start a fresh Fabric development client via Gradle runClient',
+    stopStep: 'stop Fabric client',
+    reviewNote: FABRIC_REVIEW_NOTE,
+  },
+};
 const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
-  [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
+  [--backend bot|fabric] [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
 --fast runs offline scenarios without the long pit recovery cases.
+--backend fabric starts a fresh Fabric development client per scenario instead of the bot (npm run acceptance:fabric);
+  it needs a display (xvfb-run on a headless host) and the cached Minecraft assets, and is a pre-check, not release evidence.
 Scenarios: ${scenarioIds.join(', ')}`;
 
 export function parseOptions(argv) {
@@ -51,6 +87,7 @@ export function parseOptions(argv) {
       scenario: { type: 'string', multiple: true },
       all: { type: 'boolean' },
       fast: { type: 'boolean' },
+      backend: { type: 'string' },
       'server-jar': { type: 'string' },
       'dry-run': { type: 'boolean' },
       json: { type: 'boolean' },
@@ -69,7 +106,9 @@ export function parseOptions(argv) {
   const port = values.port === undefined ? 25566 : Number(values.port);
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
     throw new Error('--port must be an integer from 1024 to 65535.');
-  const account = values.account ?? 'LiveBot';
+  const backend = values.backend ?? 'bot';
+  if (!Object.hasOwn(BACKENDS, backend)) throw new Error('--backend must be bot or fabric.');
+  const account = values.account ?? BACKENDS[backend].account;
   if (!/^[A-Za-z0-9_]{3,16}$/.test(account))
     throw new Error('--account must be a 3–16 character offline username (letters, digits, _).');
   const java = values.java ?? 'java';
@@ -93,6 +132,7 @@ export function parseOptions(argv) {
     json: !!values.json,
     keepServer: !!values['keep-server'],
     acceptEula: !!values['accept-eula'],
+    backend,
     port,
     account,
     jar: resolve(values['server-jar'] ?? DEFAULT_JAR),
@@ -105,13 +145,17 @@ export function parseOptions(argv) {
   };
 }
 
+// The Fabric mod writes its bridge file into MC_AGENT_HOME; the bot is told where to write it.
 const paths = (options, directory) => ({
   server: join(directory, 'server'),
   serverLog: join(directory, 'server', 'server.out'),
-  bridge: join(directory, 'bridge.json'),
+  bridge: options.backend === 'fabric' ? join(directory, 'agent-home', 'bridge.json') : join(directory, 'bridge.json'),
   home: join(directory, 'agent-home'),
+  client: join(directory, 'client'),
+  clientLog: join(directory, 'client', 'client.out'),
   out: options.out ?? join(directory, 'results.json'),
 });
+const backendOf = (options) => BACKENDS[options.backend ?? 'bot'];
 
 /** Everything the run would do, without starting anything. */
 export function buildPlan(options) {
@@ -126,11 +170,20 @@ export function buildPlan(options) {
     serverProperties: serverProperties({ port: options.port, seed: SEED }).trim().split('\n'),
     serverCommand: `${options.java} -Xmx2G -jar server.jar nogui   (cwd ${where.server}; console on stdin, readiness on "Done (")`,
     worldSetup: WORLD_SETUP,
-    botCommand: `MC_AGENT_HOME=${where.home} ${process.execPath} ${botArguments({ port: options.port, account: options.account, bridge: where.bridge }).join(' ')}`,
+    backend: options.backend ?? 'bot',
+    ...(options.backend === 'fabric'
+      ? {
+          clientCommand: `MC_AGENT_HOME=${where.home} ${process.execPath} ${fabricClientArguments({ port: options.port, account: options.account, gameDir: where.client }).join(' ')}`,
+          clientLog: where.clientLog,
+          reviewNote: FABRIC_REVIEW_NOTE,
+        }
+      : {
+          botCommand: `MC_AGENT_HOME=${where.home} ${process.execPath} ${botArguments({ port: options.port, account: options.account, bridge: where.bridge }).join(' ')}`,
+        }),
     scenarios: options.scenarios.map((scenario) => ({
       id: scenario.id,
       title: scenario.title,
-      release: scenario.release,
+      release: releaseFor(options, scenario),
       requiresModel: !!scenario.requiresModel,
       willSkip: !!scenario.requiresModel && !options.model,
       ...scenarioPlan(scenario, { bot: options.account }),
@@ -138,9 +191,16 @@ export function buildPlan(options) {
   };
 }
 
+/** Fabric development-client runs only pre-check a release box; the text says so wherever it appears. */
+function releaseFor(options, scenario) {
+  if (options.backend !== 'fabric') return scenario.release;
+  return scenario.release.map((text) => `pre-check only (Fabric development client): ${text}`);
+}
+
 export function formatPlan(plan) {
+  const fabric = plan.backend === 'fabric';
   const lines = [
-    'Live bot acceptance plan (dry run; nothing is started)',
+    `${fabric ? BACKENDS.fabric.title : BACKENDS.bot.title} plan (dry run; nothing is started)`,
     `Server: ${plan.serverCommand}`,
     `Jar: ${plan.serverJar}`,
     `Server log: ${plan.serverLog}`,
@@ -148,7 +208,9 @@ export function formatPlan(plan) {
     `server.properties: ${plan.serverProperties.join(', ')}`,
     'World setup:',
     ...plan.worldSetup.map((command) => `  > ${command}`),
-    `Bot (per scenario): ${plan.botCommand}`,
+    ...(fabric
+      ? [`Fabric client (fresh per scenario): ${plan.clientCommand}`, `Client log: ${plan.clientLog}`, plan.reviewNote]
+      : [`Bot (per scenario): ${plan.botCommand}`]),
   ];
   for (const scenario of plan.scenarios) {
     lines.push(
@@ -157,7 +219,7 @@ export function formatPlan(plan) {
       ...scenario.release.map((text) => `  maps to ${text}`),
       '  fixture:',
       ...scenario.fixture.map((command) => `    > ${command}`),
-      '  start the bot, then prepare:',
+      `  start the ${fabric ? 'Fabric client' : 'bot'}, then prepare:`,
       ...scenario.prepare.map((command) => `    > ${command}`),
       '  actions:',
       ...scenario.actions.map((text) => `    - ${text}`),
@@ -317,11 +379,11 @@ async function settle(ctx, { points: { start }, marker }, timeoutMs = 15_000) {
   }
 }
 
-function scenarioRecord(scenario, reason = null) {
+function scenarioRecord(scenario, reason = null, options = {}) {
   return {
     id: scenario.id,
     title: scenario.title,
-    release: scenario.release,
+    release: releaseFor(options, scenario),
     requiresModel: !!scenario.requiresModel,
     status: 'skipped',
     reason,
@@ -334,15 +396,16 @@ function scenarioRecord(scenario, reason = null) {
   };
 }
 
-/** Fixture → fresh bot session → prepare → run → stop job → cleanup → stop bot. Cleanup always runs. */
+/** Fixture → fresh bot or client session → prepare → run → stop job → cleanup → stop session. Cleanup always runs. */
 export async function runScenario(scenario, { options, deps, serverConsole, signal, where }) {
+  const backend = backendOf(options);
   if (scenario.requiresModel && !options.model) {
-    return scenarioRecord(scenario, 'Requires a real local model; pass --model NAME to run it.');
+    return scenarioRecord(scenario, 'Requires a real local model; pass --model NAME to run it.', options);
   }
   if (signal.aborted) {
-    return scenarioRecord(scenario, 'Interrupted before this scenario started.');
+    return scenarioRecord(scenario, 'Interrupted before this scenario started.', options);
   }
-  const record = scenarioRecord(scenario);
+  const record = scenarioRecord(scenario, null, options);
   const plan = scenarioPlan(scenario, { bot: options.account });
   record.startedAt = new Date(deps.now()).toISOString();
   if (scenario.requiresModel) record.observations.model = options.model;
@@ -351,11 +414,17 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   let bot = null;
   try {
     for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
-    bot = await ctx.step('start a fresh bot session via the repo CLI', () =>
-      deps.startBot({ port: options.port, account: options.account, bridge: where.bridge, home: where.home, signal }),
+    const session = { port: options.port, account: options.account, bridge: where.bridge, home: where.home, signal };
+    bot = await ctx.step(backend.startStep, () =>
+      options.backend === 'fabric'
+        ? deps.startFabricClient({ ...session, gameDir: where.client, log: where.clientLog })
+        : deps.startBot(session),
     );
     for (const command of plan.prepare) await ctx.step(`prepare: ${command}`, () => ctx.server.command(command));
-    await ctx.step('wait for bridge and server to agree on start position and inventory', () => settle(ctx, plan));
+    await ctx.step('wait for bridge and server to agree on start position and inventory', () =>
+      // Software-rendered Fabric clients load teleported chunks more slowly than the bot.
+      settle(ctx, plan, options.backend === 'fabric' ? 60_000 : 15_000),
+    );
     await scenario.run(ctx, plan);
     const failed = record.checks.filter((check) => !check.pass);
     record.status = failed.length || !record.checks.length ? 'fail' : 'pass';
@@ -369,7 +438,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     if (error.botOutput) ctx.note('botOutput', error.botOutput);
     if (error instanceof ShutdownError)
-      record.cleanup.push({ command: 'stop bot process', ok: false, error: error.message });
+      record.cleanup.push({ command: backend.stopStep, ok: false, error: error.message });
   } finally {
     // Cleanup ignores the run signal so an interrupted scenario still leaves no bot activity or fixtures behind.
     const clean = async (command, fn) => {
@@ -395,13 +464,13 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
       else await runCleanup(command);
     }
     if (bot) {
-      await clean('stop bot process', async () => {
+      await clean(backend.stopStep, async () => {
         const wait = new AbortController();
         const left = serverConsole
           .waitFor((message) => message === `${options.account} left the game`, {
             timeoutMs: 20_000,
             signal: wait.signal,
-            label: 'the bot to leave',
+            label: `the ${backend.label} to leave`,
           })
           .catch(() => null);
         try {
@@ -436,21 +505,24 @@ export function summarize(results) {
 }
 
 export function formatSummary(results, out) {
+  const backend = BACKENDS[results.backend ?? 'bot'];
   const lines = [
-    `Live bot acceptance: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
+    `${backend.title}: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
   ];
   for (const scenario of results.scenarios)
     lines.push(
       `  ${scenario.status.toUpperCase().padEnd(7)} ${scenario.id}${scenario.reason ? ` — ${scenario.reason}` : ''}`,
     );
-  lines.push(`Results: ${out}`, `Server log: ${results.minecraft.serverLog}`, REVIEW_NOTE);
+  lines.push(`Results: ${out}`, `Server log: ${results.minecraft.serverLog}`);
+  if (results.client) lines.push(`Client log: ${results.client.log}`);
+  lines.push(backend.reviewNote);
   return lines.join('\n');
 }
 
 /** Keeps the server for inspection; console lines typed here are forwarded until Ctrl+C or end of input. */
 async function keepAlive(server, signal) {
   console.error(
-    'Server left running for inspection (bot stopped). Type console commands here; Ctrl+C or end of input stops the server.',
+    'Server left running for inspection (session stopped). Type console commands here; Ctrl+C or end of input stops the server.',
   );
   const lines = createInterface({ input: process.stdin });
   lines.on('line', (line) => {
@@ -477,6 +549,8 @@ export const defaultDeps = {
   prepareServerDirectory,
   startServer,
   startBot,
+  startFabricClient,
+  prepareFabricGameDirectory,
   runCli: (args, options) => runCli(args, options),
   environment,
   writeResults: (path, value) => writePrivateJson(path, value),
@@ -491,12 +565,15 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
   if (!(await deps.portIsFree(options.port)))
     throw new Error(`Port ${options.port} on 127.0.0.1 is in use. Stop the other server or pass --port.`);
   const where = paths(options, await deps.createRunDirectory());
+  const backend = backendOf(options);
+  const fabric = options.backend === 'fabric';
   const results = {
-    schema: 'minecraft-agent/live-bot-acceptance/1',
+    schema: backend.schema,
+    ...(fabric && { backend: 'fabric' }),
     startedAt: new Date(deps.now()).toISOString(),
     finishedAt: null,
-    review: { reviewed: false, note: REVIEW_NOTE },
-    scope: 'Mineflayer server bot only; does not cover Fabric or authenticated handoff.',
+    review: { reviewed: false, note: backend.reviewNote },
+    scope: backend.scope,
     environment: { ...deps.environment({ java: options.java }), javaPreflight: javaInfo?.banner ?? null },
     minecraft: {
       expectedVersion: MINECRAFT_VERSION,
@@ -516,6 +593,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       noThinking: !!options.noThinking,
       scenarios: options.scenarios.map((scenario) => scenario.id),
     },
+    ...(fabric && { client: { log: where.clientLog, logSha256: null, gameDirectory: where.client } }),
     scenarios: [],
     summary: null,
     error: null,
@@ -531,6 +609,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       acceptEula: options.acceptEula,
     });
     results.minecraft.jarSha256 = await deps.sha256File(join(where.server, 'server.jar'));
+    if (fabric) await deps.prepareFabricGameDirectory({ directory: where.client });
     server = deps.startServer({ directory: where.server, java: options.java });
     await server.console.ready({ signal });
     results.minecraft.serverVersion = server.console.version;
@@ -545,8 +624,8 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       results.scenarios.push(record);
       deps.warn(`[${scenario.id}] ${record.status}${record.reason ? `: ${record.reason}` : ''}`);
       signal.throwIfAborted();
-      if (record.cleanup.some(({ command, ok }) => command === 'stop bot process' && !ok))
-        throw new Error(`Could not stop the bot after ${scenario.id}. Remaining scenarios were skipped.`);
+      if (record.cleanup.some(({ command, ok }) => command === backend.stopStep && !ok))
+        throw new Error(`Could not stop the ${backend.label} after ${scenario.id}. Remaining scenarios were skipped.`);
     }
     if (options.keepServer) {
       inspecting = true;
@@ -555,7 +634,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
   } catch (error) {
     results.error = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     const remaining = options.scenarios.slice(results.scenarios.length);
-    results.scenarios.push(...remaining.map((scenario) => scenarioRecord(scenario, results.error)));
+    results.scenarios.push(...remaining.map((scenario) => scenarioRecord(scenario, results.error, options)));
   } finally {
     if (server) {
       try {
@@ -568,6 +647,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
         results.error ??= `Server stop failed: ${error.message}`;
       }
     }
+    if (fabric) results.client.logSha256 = await deps.sha256File(where.clientLog).catch(() => null);
     if (signal.aborted && !inspecting) results.error ??= `Interrupted: ${signal.reason?.message ?? 'aborted'}`;
     const { commit, dirty } = deps.environment({ java: options.java });
     results.environment.sourceAtFinish = { commit, dirty };
@@ -603,7 +683,9 @@ export async function main(argv = process.argv.slice(2), deps = defaultDeps) {
       deps.warn('Second interrupt: exiting without waiting for cleanup.');
       process.exit(130);
     }
-    deps.warn('Interrupted: stopping the bot, cleaning fixtures, and stopping the server (Ctrl+C again to force).');
+    deps.warn(
+      `Interrupted: stopping the ${backendOf(options).label}, cleaning fixtures, and stopping the server (Ctrl+C again to force).`,
+    );
     controller.abort(new Error('Interrupted by user.'));
   };
   process.on('SIGINT', onSignal);

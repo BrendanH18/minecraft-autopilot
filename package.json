@@ -31,6 +31,7 @@
     "dev:mod": "npm run setup:mod && node scripts/gradle.js runClient",
     "demo": "node src/cli.js demo",
     "acceptance:bot": "node scripts/live-bot-acceptance.js",
+    "acceptance:fabric": "node scripts/live-bot-acceptance.js --backend fabric",
     "acceptance:fabric-fixtures": "node scripts/live-fabric-fixtures.js"
   },
   "engines": {

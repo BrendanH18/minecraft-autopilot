@@ -57,7 +57,12 @@ const child = spawn(wrapper, ['-p', join(root, 'mod'), '--no-daemon', ...argumen
   cwd: root,
   stdio: 'inherit',
   shell: windows,
-  env: { ...process.env, GRADLE_USER_HOME: join(root, '.gradle-user'), MC_AGENT_HOME: join(root, '.runtime') },
+  env: {
+    ...process.env,
+    GRADLE_USER_HOME: join(root, '.gradle-user'),
+    // The live acceptance runner gives each client session its own home; development runs default to .runtime.
+    MC_AGENT_HOME: process.env.MC_AGENT_HOME || join(root, '.runtime'),
+  },
 });
 process.once('SIGINT', () => child.kill('SIGINT'));
 process.once('SIGTERM', () => child.kill('SIGTERM'));
