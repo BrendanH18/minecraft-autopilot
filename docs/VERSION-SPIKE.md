@@ -4,7 +4,7 @@ The month 2 spike from the [roadmap](ROADMAP.md#month-2-21-december--17-january-
 
 ## Recommendation
 
-**Go, targeting Minecraft Java 26.1.2.** It is the newest release with published Fabric API and Baritone builds whose protocol a published Mineflayer release covers. Mineflayer itself names only 26.1, so 26.1.2 support rests on the minecraft-data mapping (see *Unverified* below):
+**Go, targeting Minecraft Java 26.1.2, provided the first bot check on a 26.1.2 server passes; otherwise 26.1.** 26.1.2 is the newest release with published Fabric API and Baritone builds whose protocol a published Mineflayer release covers. Mineflayer itself names only 26.1, so 26.1.2 support rests on the minecraft-data mapping (see *Unverified* below):
 
 - Fabric API `0.155.3+26.1.2` exists.
 - Baritone v1.18.0 ships `baritone-api-fabric-1.18.0.jar`. Its `fabric.mod.json` declares `minecraft: 26.1.*`, and it still nests `nether-pathfinder-1.6.jar`.

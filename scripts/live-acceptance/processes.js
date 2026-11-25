@@ -137,7 +137,8 @@ const children = new Set();
 function track(child) {
   if (!children.size)
     process.once('exit', () => {
-      // Each child leads its own process group; Gradle's game JVM is in the client wrapper's group.
+      // Each child leads its own process group. A Fabric client's game JVM may sit in Gradle's single-use daemon
+      // instead, which stops it when the wrapper's Gradle client goes away (see startFabricClient).
       for (const running of children)
         try {
           process.kill(-running.pid, 'SIGKILL');
