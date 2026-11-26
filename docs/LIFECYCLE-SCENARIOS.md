@@ -40,6 +40,12 @@ Fabric needs a person at the keyboard. Use the packaged mod in a normal launcher
 
 Use the [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) for repeatable takeover, cobblestone, hostile observation, dimension change, pit, deposit, withdrawal, and crafting setups.
 
+### Scripted pre-checks
+
+Most items below also run without a person as `npm run acceptance:fabric -- --takeover`, in Boat on the headless development client ([takeover scenarios](LIVE-ACCEPTANCE.md#takeover-scenarios)). Each scenario has the item's id, takes its expected outcome from this table, presses real keys with `xdotool` on the Xvfb display, and checks the outcome with the same independent server reads. Run them on the candidate before the keyboard session, so it starts from known results. They don't replace the session: key presses on Xvfb reach a development client, not the packaged mod in a normal launcher.
+
+On 25 November 2026, 29 of the 31 scripted items passed on the development client. `menu-storage-close` and `menu-storage-close-withdraw` can't be observed against a local server: the agent's container screen opens and closes within one frame, so Escape always lands between stacks, which the scenarios check instead. A person on a slower server may still reach the screen. `disconnect-collect` stops short of rejoining. The three `takeover-while-stopping-*` items aren't scripted, because a loopback server answers container openings within a tick.
+
 <!-- fabric-checklist:start -->
 
 1. **F8 while the agent waits for model inference** (`f8-idle`; f8 during idle)
@@ -158,7 +164,7 @@ Use the [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) for repeatab
     - Expected: mode stays `agent`; the job ends `cancelled` with a message matching `/Cancelled by agent/i`; no further movement; the same session can start its next action once `stopping` is `false`.
     - Observe: `mc-agent job` shows `agent`; the next `minecraft_action` is accepted without taking control again. Independently: two `data get entity <player> Pos` reads 5 s apart match.
 24. **Agent cancel during eating** (`cancel-eat`; cancel during eat)
-    - Setup: Lower food to about 10; from an MCP client take control and call `minecraft_action` with `{"type":"eat"}`.
+    - Setup: Lower food to 17 or 18, not lower: the session keeps control after a cancel, and at 16 or less automatic eating starts at once. From an MCP client take control and call `minecraft_action` with `{"type":"eat"}`.
     - Action: Cancel that call (or call `minecraft_cancel`) during the eating animation.
     - Expected: mode stays `agent`; the job ends `cancelled` with a message matching `/Cancelled by agent/i`; no food consumed after the transition; the same session can start its next action once `stopping` is `false`.
     - Observe: Bread count and `foodLevel` before and 5 s after the cancel. Independently: `data get entity <player> Inventory` keeps the food count and `foodLevel` does not rise.

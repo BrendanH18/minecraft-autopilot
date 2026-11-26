@@ -44,6 +44,7 @@ export const REPLIES = {
   kill: /^(?:Killed |No entity was found)/,
   data: /has the following (?:block|entity) data:|^Modified (?:block|entity) data of|^Nothing changed/,
   list: /^There are \d+ of a max of \d+ players online/,
+  kick: /^Kicked /,
   gamemode: /^(?:Set .+ game mode to|Set own game mode to)/,
   summon: /^Summoned new /,
   'save-all': /^Saved the game/,
