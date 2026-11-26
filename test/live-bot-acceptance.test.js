@@ -1137,6 +1137,27 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
   assert.equal(skip.status, 'skipped');
 });
 
+test('a phase that fails still records how long it ran', async () => {
+  const world = fakeWorld();
+  const clock = { now: 0 };
+  const deps = fakeDeps(world, { clock });
+  world.console.command = async () => {
+    clock.now += 15_000;
+    throw new Error('No reply within 15000 ms.');
+  };
+  const options = {
+    ...parseOptions(['--all', '--accept-eula']),
+    scenarios: [byId('stale-removal')],
+    out: '/fake/results.json',
+  };
+  const results = await runAcceptance(options, deps);
+  assert.match(results.error, /No reply/);
+  assert.equal(results.timings.worldSetupMs, 15_000);
+  assert.equal(results.timings.scenariosMs, null, 'never reached');
+  assert.equal(typeof results.timings.serverStopMs, 'number');
+  assert.equal(results.timings.totalMs, 15_000);
+});
+
 test('an interrupt during a scenario cleans up, skips the rest, and still stops everything', async () => {
   const world = fakeWorld({ start: { x: 96.5, y: -60, z: 0.5 } });
   const controller = new AbortController();

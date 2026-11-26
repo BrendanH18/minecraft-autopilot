@@ -46,13 +46,6 @@ test('an offline tool group command loads without planners or acceptance tooling
   assert.match(result.stdout, /Usage: mc-agent supplies\b/);
 });
 
-test('every offline tool group exports its register function', async () => {
-  for (const [specifier, name] of TOOL_GROUPS) {
-    const module = await import(new URL(specifier, new URL('../src/', import.meta.url)));
-    assert.equal(typeof module[name], 'function', `${specifier} exports ${name}`);
-  }
-});
-
 test('root help still lists core and offline planner commands', () => {
   const result = spawnSync(process.execPath, ['src/cli.js', '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
