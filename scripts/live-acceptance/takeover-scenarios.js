@@ -697,6 +697,8 @@ function transition(ctx, expect, jobId, { timeoutMs }) {
 }
 
 const MENU = /game menu was opened/i;
+// Only the pause menu, not another screen the agent doesn't own (that would be an unrelated cancellation).
+const PAUSE_MENU = /game menu was opened \((?:GameMenuScreen|pause)\)/i;
 
 /**
  * Escape cancelled this storage job: through the storage screen, or through the pause menu between stacks. The
@@ -707,7 +709,7 @@ export function escapeCancelledStorage(jobId, job, storageMessage) {
     !!jobId &&
     job?.id === jobId &&
     job.status === 'cancelled' &&
-    (MENU.test(job.message ?? '') || storageMessage.test(job.message ?? ''))
+    (PAUSE_MENU.test(job.message ?? '') || storageMessage.test(job.message ?? ''))
   );
 }
 
