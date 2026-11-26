@@ -125,7 +125,7 @@ authenticated handoff and Ollama runs stay on the Mac, and the script refuses
 The one client run allowed in a sandbox is the headless
 [Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)
 of the live runner (`npm run acceptance:fabric`). For that command the remote
-script installs Xvfb and Mesa if they're missing, checks the client asset cache with
+script installs Xvfb, Mesa and xdotool (which presses keys for the `--takeover` scenarios) if they're missing, checks the client asset cache with
 `downloadAssets --allow-downloads`, which fetches only missing objects, and runs the command
 under `xvfb-run`. Mesa's llvmpipe gives OpenGL 4.5 core in software, which is
 enough for Minecraft 1.21.1. The client's low render settings keep it to about
@@ -156,10 +156,21 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **Automated tests:**
 - Node tests cover bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, independent inventory/home criteria, Mineflayer driver races, partial collection recovery and failed returns, and a Minecraft protocol fixture. Run `npm test` for the current test count.
-- Java tests: leases, bridge ownership, runtime paths, isolated action/retreat deadlines and failed-eating backoff, storage transfer/slot selection, and pending-opening cancellation/acknowledgements. The controller enforces deadlines before food handling; these helper tests do not replace game integration checks.
+- Java tests: leases, bridge ownership, runtime paths, isolated action/retreat deadlines and failed-eating backoff, storage transfer/slot selection, pending-opening cancellation/acknowledgements, and when a walk home or back to an inspection start has arrived. The controller enforces deadlines before food handling; these helper tests do not replace game integration checks.
 - `npm run build:mod` compiles against the pinned Minecraft, Fabric, and Baritone APIs.
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
+
+**Fabric development-client pre-checks (25 November 2026).** In Boat, the
+development client of clean commit `88dc26d` passed all 25
+`npm run acceptance:fabric -- --fast` scenarios in 9 min 28 s, and all three
+`recovery-*` scenarios. The mining timeout stopped at 18 of 64 logs and
+returned to within 1.4 blocks of the start. A lease cancel during the return settled in 300 ms and
+an emergency stop in 601 ms; server positions didn't move afterwards. Before
+the fix for [#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78),
+`inspect-preserves-home` failed every run; with it, it passed three runs out
+of three and the `--fast` run, ending 0.75 blocks from home. These are pre-checks, not
+release evidence: the packaged Fabric boxes in [RELEASE.md](RELEASE.md) stay open.
 
 **Acceptance tooling follow-up (21 November 2026).** All 11 new bot scenarios
 passed in Boat on vanilla Minecraft 1.21.1 with Mineflayer 4.39.0, Node 24.22.1,

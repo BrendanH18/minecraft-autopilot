@@ -359,7 +359,7 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
 });
 
 test('options require an explicit selection and validate ids, ports, and names', () => {
-  assert.throws(() => parseOptions([]), /--scenario <id> \(repeatable\), --all, or --fast/);
+  assert.throws(() => parseOptions([]), /--scenario <id> \(repeatable\), --all, --fast, or --takeover/);
   assert.throws(() => parseOptions(['--scenario', 'nope']), /Unknown scenario "nope"/);
   assert.throws(() => parseOptions(['--all', '--scenario', 'blocked-lid']), /Choose only one/);
   assert.throws(() => parseOptions(['--all', '--port', '80']), /--port/);
@@ -1859,4 +1859,31 @@ test('a Fabric wrapper that exits before its bridge is ready still has its proce
     /exited before its bridge was ready/,
   );
   assert.deepEqual(signals, ['SIGKILL']);
+});
+
+test('an expected failure counts only when the checks it names are all that failed', async () => {
+  const run = async (checks) => {
+    const base = byId('withdraw');
+    const lane = laneOrigin(base.lane);
+    const world = fakeWorld({ start: { x: lane.x + 0.5, y: -60, z: 0.5 } });
+    const scenario = {
+      ...base,
+      expectedFailure: 'Not observable here.',
+      expectedChecks: ['the key press reached the game'],
+      run: async (ctx) => {
+        for (const [name, pass] of checks) ctx.check(name, pass);
+      },
+    };
+    return runScenario(scenario, env(world, fakeDeps(world)));
+  };
+  const explained = await run([
+    ['the key press reached the game (the bridge shows the transition)', false],
+    ['mode becomes manual and stays manual', true],
+  ]);
+  assert.equal(explained.status, 'xfail', explained.reason);
+  const unexplained = await run([
+    ['the key press reached the game (the bridge shows the transition)', false],
+    ['mode becomes manual and stays manual', false],
+  ]);
+  assert.equal(unexplained.status, 'fail');
 });

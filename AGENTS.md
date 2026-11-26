@@ -67,8 +67,9 @@ don't run the full `scripts/boat-check.sh` before handing work back.
   2026-11-25). When a change touches Fabric behaviour in `mod/`, run the
   affected scenarios before handing back:
   `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fabric -- --accept-eula --scenario <scenario>`
-  (or `--fast`). The script installs Xvfb and Mesa, caches the client assets
-  and runs the client on software OpenGL. Its results are pre-checks, never
+  (or `--fast`; `--takeover` for the scripted F8, menu, stop, expiry, death and
+  dimension items). The script installs Xvfb, Mesa and xdotool, caches the client
+  assets and runs the client on software OpenGL. Its results are pre-checks, never
   release evidence.
 - Exceptions (run on this Mac): the interactive Minecraft client (`npm run dev:mod`, a hand-run `runClient`, the normal launcher), packaged Fabric acceptance, Microsoft-authenticated handoff and Ollama local-model runs. Boat has no GPU, and Microsoft account credentials never go into a sandbox. For packaged acceptance, build the bundle in a sandbox and copy it back: `scripts/boat-check.sh --fetch dist -- npm run build:mod` puts it in `.runtime/boat-check/<check>/dist`.
 - The ask-first rule below covers this Mac only. In a sandbox, `npm ci`, `--allow-downloads` and other installs need no approval.

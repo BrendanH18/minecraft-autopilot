@@ -3,6 +3,8 @@ package dev.minecraftagent;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
+import baritone.api.pathing.goals.Goal;
+import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.utils.input.Input;
 import com.google.gson.JsonArray;
@@ -19,6 +21,8 @@ import net.minecraft.block.Block;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.GameMenuScreen;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.AbstractInventoryScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.world.ClientWorld;
@@ -34,6 +38,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.WorldSavePath;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 
 /** State, player access, and Baritone commands are confined to Minecraft's thread. */
 public final class AgentController {
@@ -263,7 +268,7 @@ public final class AgentController {
                 case "goto":
                 case "home":
                     BaritoneAPI.getSettings().allowBreak.value = false;
-                    baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(goal, 1));
+                    baritone().getCustomGoalProcess().setGoalAndPath(travelGoal());
                     break;
                 case "collect":
                     targetCount = inventoryCount(COLLECT_DROPS.get(block)) + count;
@@ -427,12 +432,29 @@ public final class AgentController {
         String type = string(action, "type");
         switch (type) {
             case "goto":
-            case "home":
-                if (nearDestination()) finish("completed", "Reached destination.");
-                else if (now - jobStarted > 3_000_000_000L
-                        && !baritone().getCustomGoalProcess().isActive()
-                        && !baritone().getPathingBehavior().isPathing()) finish("failed", "No path to destination.");
+            case "home": {
+                // Stopping as soon as the player was near cut Baritone off half way up a step, and momentum carried the
+                // player off a home platform (#78). Stopping short of the block is accepted only once Baritone stops.
+                Vec3d position = client.player.getPos();
+                switch (Arrival.state(
+                        Arrival.inBlock(
+                                position.x,
+                                position.y,
+                                position.z,
+                                destination.getX(),
+                                destination.getY(),
+                                destination.getZ()),
+                        client.player.isOnGround(),
+                        baritone().getCustomGoalProcess().isActive()
+                                || baritone().getPathingBehavior().isPathing(),
+                        nearDestination(),
+                        now - jobStarted > 3_000_000_000L)) {
+                    case ARRIVED -> finish("completed", "Reached destination.");
+                    case STOPPED -> finish("failed", "No path to destination.");
+                    case WALKING -> {}
+                }
                 break;
+            }
             case "collect": {
                 if (returning) {
                     if (nearDestination()) finishCollectionReturn(true, "Returned to the starting point.");
@@ -526,7 +548,7 @@ public final class AgentController {
         resumeAfterEating = false;
         if (recovering || (running() && Set.of("goto", "home").contains(string(action, "type")))) {
             BaritoneAPI.getSettings().allowBreak.value = recovering && collecting();
-            baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(destination, 1));
+            baritone().getCustomGoalProcess().setGoalAndPath(travelGoal());
         } else if (collecting()) {
             BaritoneAPI.getSettings().allowBreak.value = true;
             if (returning) baritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(collectStart, 1));
@@ -622,6 +644,14 @@ public final class AgentController {
         return lease.active();
     }
 
+    /** The pause menu and the player's own inventory only ever open from the player's keys during a session. */
+    void playerScreenOpened(Screen screen) {
+        if (lease.active() && (screen instanceof GameMenuScreen || screen instanceof AbstractInventoryScreen<?>))
+            // A readable label: class names are intermediary names (class_433) in the packaged mod.
+            release("A game menu was opened (" + (screen instanceof GameMenuScreen ? "pause menu" : "inventory")
+                    + "). Control returned to the player.");
+    }
+
     boolean playerStorageInteraction() {
         if (storage.agentOpening()) return true;
         // Navigation opens doors/gates with Baritone's forced use input, not physical player input.
@@ -674,6 +704,13 @@ public final class AgentController {
             AgentClient.LOGGER.warn("Cannot confirm Baritone block data is loaded", exception);
             return false; // Refuse mining rather than risk freezing the game.
         }
+    }
+
+    /** home walks into the saved block, which was standable when saved; goto and a survival retreat stop beside it. */
+    private Goal travelGoal() {
+        return !recovering && running() && string(action, "type").equals("home")
+                ? new GoalBlock(destination)
+                : new GoalNear(destination, 1);
     }
 
     private boolean nearDestination() {

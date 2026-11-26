@@ -441,7 +441,7 @@ const SCENARIOS = [
     },
     fabric: {
       setup:
-        'Lower food to about 10; from an MCP client take control and call `minecraft_action` with `{"type":"eat"}`.',
+        'Lower food to 17 or 18, not lower: the session keeps control after a cancel, and at 16 or less automatic eating starts at once. From an MCP client take control and call `minecraft_action` with `{"type":"eat"}`.',
       action: 'Cancel that call (or call `minecraft_cancel`) during the eating animation.',
       observe: 'Bread count and `foodLevel` before and 5 s after the cancel.',
     },

@@ -17,7 +17,9 @@ import { writePrivateJson } from '../src/config.js';
 import { FabricAdapter } from '../src/fabric-adapter.js';
 import { runAgent } from '../src/agent.js';
 import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from './live-acceptance/nbt-parse.js';
-import { scenarios, scenarioIds, scenarioPlan } from './live-acceptance/scenarios.js';
+import { scenarios as sharedScenarios, scenarioPlan } from './live-acceptance/scenarios.js';
+import { takeoverIds, takeoverScenarios } from './live-acceptance/takeover-scenarios.js';
+import { pressKey, startCli, startFakeModel } from './live-acceptance/takeover-tools.js';
 import {
   DEFAULT_JAR,
   RUNTIME,
@@ -43,6 +45,10 @@ import {
 } from './live-acceptance/processes.js';
 
 export { SEED, WORLD_SETUP };
+// The shared table runs on both backends; the takeover scenarios press keys in the client and run only on Fabric.
+const scenarios = [...sharedScenarios, ...takeoverScenarios];
+const scenarioIds = scenarios.map((scenario) => scenario.id);
+const runsOn = (scenario, backend) => !scenario.backends || scenario.backends.includes(backend);
 const REVIEW_NOTE =
   'Machine-checked observations only. These results become acceptance evidence for RELEASE.md only after a person reviews them, including server.out.';
 const FABRIC_REVIEW_NOTE =
@@ -72,12 +78,15 @@ export const BACKENDS = {
     reviewNote: FABRIC_REVIEW_NOTE,
   },
 };
-const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
+const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast | --takeover) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
   [--backend bot|fabric] [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
---fast runs offline scenarios without the long pit recovery cases.
+--fast runs offline scenarios without the long pit recovery cases or the takeover scenarios.
 --backend fabric starts a fresh Fabric development client per scenario instead of the bot (npm run acceptance:fabric);
   it needs a display (xvfb-run on a headless host) and the cached Minecraft assets, and is a pre-check, not release evidence.
-Scenarios: ${scenarioIds.join(', ')}`;
+--takeover (Fabric only) runs the scripted Fabric checklist items: F8, menus, stop, cancel, expiry, death, dimension
+  change and full inventory. They press keys with xdotool on the X display, so run them under Xvfb (Boat).
+Scenarios: ${sharedScenarios.map(({ id }) => id).join(', ')}
+Fabric takeover scenarios: ${takeoverIds.join(', ')}`;
 
 export function parseOptions(argv) {
   const { values } = parseArgs({
@@ -87,6 +96,7 @@ export function parseOptions(argv) {
       scenario: { type: 'string', multiple: true },
       all: { type: 'boolean' },
       fast: { type: 'boolean' },
+      takeover: { type: 'boolean' },
       backend: { type: 'string' },
       'server-jar': { type: 'string' },
       'dry-run': { type: 'boolean' },
@@ -115,15 +125,22 @@ export function parseOptions(argv) {
   const model = values.model?.trim();
   if (values.model !== undefined && !model) throw new Error('--model must name an installed Ollama model.');
   if (values.json && !values['dry-run']) throw new Error('--json requires --dry-run.');
-  if ([values.scenario, values.all, values.fast].filter(Boolean).length > 1)
-    throw new Error('Choose only one of --scenario, --all, and --fast.');
-  for (const id of values.scenario ?? [])
+  if ([values.scenario, values.all, values.fast, values.takeover].filter(Boolean).length > 1)
+    throw new Error('Choose only one of --scenario, --all, --fast, and --takeover.');
+  if (values.takeover && backend !== 'fabric')
+    throw new Error('--takeover runs only with --backend fabric (npm run acceptance:fabric).');
+  for (const id of values.scenario ?? []) {
     if (!scenarioIds.includes(id))
       throw new Error(`Unknown scenario ${JSON.stringify(id)}. Choose from: ${scenarioIds.join(', ')}.`);
-  if (!values.help && !values.all && !values.fast && !values.scenario && !values['dry-run'])
-    throw new Error(`Choose --scenario <id> (repeatable), --all, or --fast.\n${USAGE}`);
+    const scenario = scenarios.find((entry) => entry.id === id);
+    if (!runsOn(scenario, backend)) throw new Error(`Scenario ${id} runs only with --backend fabric.`);
+  }
+  if (!values.help && !values.all && !values.fast && !values.takeover && !values.scenario && !values['dry-run'])
+    throw new Error(`Choose --scenario <id> (repeatable), --all, --fast, or --takeover.\n${USAGE}`);
   const selected = scenarios.filter((scenario) => {
-    if (values.fast) return !scenario.longRunning && !scenario.requiresModel;
+    if (!runsOn(scenario, backend)) return false;
+    if (values.fast) return !scenario.longRunning && !scenario.requiresModel && !scenario.takeover;
+    if (values.takeover) return !!scenario.takeover;
     return !values.scenario || values.scenario.includes(scenario.id);
   });
   return {
@@ -251,6 +268,7 @@ const compact = (value) => {
 export function createContext({ record, options, serverConsole, bridge, deps, signal }) {
   let actor = null,
     observer = null;
+  const extra = new Set();
   const agentLog = [];
   const ctx = {
     options,
@@ -315,16 +333,28 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       },
     },
     cliStop: () => deps.runCli(['stop'], { bridge }),
-    async agent({ goal, criteria, fetchImpl, model }) {
-      await ctx.bridge.release();
+    // A bridge client of the scenario's own (its lease stays visible to the scenario); closed with the context.
+    async connect() {
       const adapter = await deps.connect(bridge);
+      extra.add(adapter);
+      return adapter;
+    },
+    cli: {
+      run: (args) => deps.runCli(args, { bridge }),
+      start: (args) => deps.startCli(args, { bridge }),
+    },
+    keys: { press: (key) => deps.pressKey(key) },
+    fakeModel: (decisions) => deps.startFakeModel(decisions),
+    async agent({ goal, criteria, fetchImpl, model, adapter: given, maxSteps = 20 }) {
+      await ctx.bridge.release();
+      const adapter = given ?? (await deps.connect(bridge));
       try {
         return await deps.runAgent(adapter, goal, {
           model: model ?? 'scripted-acceptance-planner',
           ollamaUrl: options.ollama,
           fetchImpl,
           criteria,
-          maxSteps: 20,
+          maxSteps,
           minutes: 10,
           think: options.noThinking ? false : undefined,
           signal,
@@ -334,7 +364,7 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
           },
         });
       } finally {
-        await adapter.close();
+        if (!given) await adapter.close();
       }
     },
     async close() {
@@ -342,6 +372,8 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       observer = null;
       try {
         await ctx.bridge.release();
+        for (const adapter of extra) await adapter.close().catch(() => {});
+        extra.clear();
       } finally {
         await current?.close();
       }
@@ -414,6 +446,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   const started = deps.now();
   const ctx = createContext({ record, options, serverConsole, bridge: where.bridge, deps, signal });
   let bot = null;
+  let threw = false;
   try {
     for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
     const session = { port: options.port, account: options.account, bridge: where.bridge, home: where.home, signal };
@@ -436,6 +469,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         ? null
         : 'No checks ran.';
   } catch (error) {
+    threw = true;
     record.status = 'fail';
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     if (error.botOutput) ctx.note('botOutput', error.botOutput);
@@ -496,6 +530,16 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         .join(' | ');
     }
     if (record.status === 'fail' && bot?.output?.length) ctx.note('botOutput', bot.output.join('').trim().slice(-3000));
+    // A failure the scenario table explains is reported as such, but only when the checks it names are all that failed.
+    const failedChecks = record.checks.filter((check) => !check.pass);
+    const explained =
+      !threw &&
+      failedChecks.length > 0 &&
+      failedChecks.every(({ name }) => scenario.expectedChecks?.some((prefix) => name.startsWith(prefix)));
+    if (record.status === 'fail' && scenario.expectedFailure && explained && !failures.length && !signal.aborted) {
+      record.status = 'xfail';
+      record.expectedFailure = scenario.expectedFailure;
+    }
     record.durationMs = deps.now() - started;
   }
   return record;
@@ -503,17 +547,24 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
 
 export function summarize(results) {
   const count = (status) => results.scenarios.filter((scenario) => scenario.status === status).length;
-  return { pass: count('pass'), fail: count('fail'), skipped: count('skipped'), error: results.error ?? null };
+  const expected = count('xfail');
+  return {
+    pass: count('pass'),
+    fail: count('fail'),
+    skipped: count('skipped'),
+    ...(expected && { expectedFail: expected }),
+    error: results.error ?? null,
+  };
 }
 
 export function formatSummary(results, out) {
   const backend = BACKENDS[results.backend ?? 'bot'];
   const lines = [
-    `${backend.title}: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
+    `${backend.title}: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.expectedFail ? `${results.summary.expectedFail} expected failures, ` : ''}${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
   ];
   for (const scenario of results.scenarios)
     lines.push(
-      `  ${scenario.status.toUpperCase().padEnd(7)} ${scenario.id}${scenario.reason ? ` — ${scenario.reason}` : ''}`,
+      `  ${scenario.status.toUpperCase().padEnd(7)} ${scenario.id}${scenario.reason ? ` — ${scenario.reason}` : ''}${scenario.expectedFailure ? ` (expected: ${scenario.expectedFailure})` : ''}`,
     );
   lines.push(`Results: ${out}`, `Server log: ${results.minecraft.serverLog}`);
   if (results.client) lines.push(`Client log: ${results.client.log}`);
@@ -554,6 +605,9 @@ export const defaultDeps = {
   startFabricClient,
   prepareFabricGameDirectory,
   runCli: (args, options) => runCli(args, options),
+  startCli,
+  pressKey,
+  startFakeModel,
   environment,
   writeResults: (path, value) => writePrivateJson(path, value),
   keepAlive,
@@ -694,7 +748,7 @@ export async function main(argv = process.argv.slice(2), deps = defaultDeps) {
   process.on('SIGTERM', onSignal);
   try {
     const results = await runAcceptance(options, deps, controller.signal);
-    return results.summary.fail || results.error || !results.summary.pass ? 1 : 0;
+    return results.summary.fail || results.error || !(results.summary.pass || results.summary.expectedFail) ? 1 : 0;
   } catch (error) {
     deps.warn(`Error: ${error.message}`);
     if (!/See docs\/DEVELOPMENT\.md/.test(error.message)) deps.warn(HELP);
