@@ -34,6 +34,11 @@ export const RELEASE = {
     'RELEASE.md: "Validate bot withdraw and craft against a local server with the same cases ..." (crafting cases)',
   cobblestone:
     'RELEASE.md: "Validate cobblestone with a pickaxe, hostile observations, and release on dimension change." (bot half)',
+  // Fabric gates. On the bot these scenarios are supplemental: they check the bot's own survival behaviour.
+  eating:
+    'RELEASE.md: "With the packaged Fabric mod, force failed food consumption while hungry and low on health. Verify eating backoff, retreat, and action/retreat deadlines ..." (Fabric gate; the interruption cases are the takeover scenarios)',
+  fullInventory:
+    'docs/LIFECYCLE-SCENARIOS.md: inventory-full-collect (the job fails on its own and the session keeps control; Fabric checklist item)',
 };
 
 const at = (o, dx, y, dz) => `${o.x + dx} ${y} ${o.z + dz}`;
@@ -1261,6 +1266,518 @@ async function runInspectHome(ctx, plan, variant) {
   }
 }
 
+// Survival scenarios: eating, low-health retreat, and a collection that fills the inventory.
+// Bread that takes 30 s to eat: the Fabric mod gives up on consumption after 5 s, so every attempt there fails.
+export const SLOW_BREAD = 'minecraft:bread[food={nutrition:5,saturation:6,eat_seconds:30}]';
+const BREAD = 'minecraft:bread';
+const AXE = 'minecraft:iron_axe';
+// Food is lowered to this or less; automatic eating starts at 16.
+const HUNGRY = 12;
+// Fabric timing policy (ActionTiming.java, AgentController.java): consumption gives up after 5 s, automatic eating
+// then backs off for 10 s, and a survival retreat has 60 s. The bot's retreat has the same 60 s.
+export const EAT_TIMEOUT_MS = 5000;
+// Mineflayer's consume stops waiting for the server after 2.5 s (its CONSUME_TIMEOUT); the bot then backs off as Fabric.
+export const BOT_CONSUME_TIMEOUT_MS = 2500;
+export const EAT_BACKOFF_MS = 10_000;
+export const RETREAT_BUDGET_MS = 60_000;
+const RETREATING = /Low health: retreating home/;
+const INTERRUPTED_FOR_SURVIVAL = /Action interrupted for survival/;
+/** A bedrock shell around the lane's start, so a home saved there can be neither reached nor dug into. */
+export const enclosure = (o) => `fill ${at(o, -2, STAND - 1, -2)} ${at(o, 2, STAND + 3, 2)} minecraft:bedrock hollow`;
+
+/**
+ * Open ground for vitals: easy difficulty (peaceful refills food and heals) and no natural regeneration, so food and
+ * health change only through the fixture and the agent. `away` is a walk target east of the start; `enclose` adds a
+ * hook that walls the start in bedrock.
+ */
+function vitalsPlan({ bot, lane }, { bread = 0, away = 0, enclose = false } = {}) {
+  const o = laneOrigin(lane);
+  const start = center(point(o, 0, STAND, 0));
+  const reach = Math.max(away + 4, 6);
+  const area = `${at(o, -3, STAND, -3)} ${at(o, reach, STAND + 3, 3)}`;
+  const loaded = (verb) => `forceload ${verb} ${o.x - 16} ${o.z - 16} ${o.x + reach + 16} ${o.z + 16}`;
+  // Instant effects: full health and food for this scenario, and again for the next one.
+  const restore = [
+    `effect give ${bot} minecraft:instant_health 1 10 true`,
+    `effect give ${bot} minecraft:saturation 1 10 true`,
+  ];
+  const shell = enclose ? enclosure(o) : null;
+  const wall = point(o, 2, STAND, 0);
+  return {
+    origin: o,
+    points: { start, ...(away && { away: point(o, away, STAND, 0) }), ...(shell && { wall }) },
+    hooks: {
+      hunger: `effect give ${bot} minecraft:hunger 120 255 true`,
+      sated: `effect clear ${bot} minecraft:hunger`,
+      wound: `damage ${bot} 13 minecraft:generic`,
+      ...(shell && { enclose: shell }),
+    },
+    reads: [
+      `data get entity ${bot} foodLevel`,
+      `data get entity ${bot} Health`,
+      ...(shell ? [`execute if block ${wall.x} ${wall.y} ${wall.z} minecraft:bedrock`] : []),
+    ],
+    fixture: [loaded('add'), `fill ${area} air`, 'difficulty easy', 'gamerule naturalRegeneration false'],
+    prepare: [
+      ...resetPlayer(bot),
+      ...restore,
+      teleport(bot, start),
+      ...(bread ? [`give ${bot} ${SLOW_BREAD} ${bread}`] : []),
+    ],
+    cleanup: [
+      ...resetPlayer(bot),
+      ...restore,
+      'gamerule naturalRegeneration true',
+      'difficulty peaceful',
+      ...(shell
+        ? [
+            `fill ${at(o, -2, STAND, -2)} ${at(o, 2, STAND + 3, 2)} air`,
+            // The shell's floor replaced the grass under the start.
+            `fill ${at(o, -2, STAND - 1, -2)} ${at(o, 2, STAND - 1, 2)} minecraft:grass_block`,
+          ]
+        : []),
+      `fill ${area} air`,
+      killDrops(o),
+      loaded('remove'),
+    ],
+  };
+}
+
+/** An oak-log patch five blocks west; the player holds an axe, 34 cobblestone stacks, and 58 logs in the last slot. */
+function fullInventoryPlan({ bot, lane }) {
+  const o = laneOrigin(lane);
+  const start = center(point(o, 0, STAND, 0));
+  const area = `${at(o, -8, STAND, -3)} ${at(o, 3, STAND + 3, 3)}`;
+  return {
+    origin: o,
+    points: { start },
+    held: { [AXE]: 1, [COBBLESTONE]: 34 * 64, [LOG]: 58 },
+    fixture: [
+      forceload(o, 'add'),
+      `fill ${area} air`,
+      `fill ${at(o, -6, STAND, -1)} ${at(o, -4, STAND + 1, 1)} oak_log`,
+    ],
+    // Given in this order: the axe, then 34 stacks, then the logs in the 36th main slot, six short of a stack.
+    prepare: [
+      ...resetPlayer(bot),
+      teleport(bot, start),
+      `give ${bot} ${AXE} 1`,
+      `give ${bot} ${COBBLESTONE} ${34 * 64}`,
+      `give ${bot} ${LOG} 58`,
+    ],
+    cleanup: [...resetPlayer(bot), `fill ${area} air`, killDrops(o), forceload(o, 'remove')],
+  };
+}
+
+const serverValue = async (ctx, command) => parseDataReply(await ctx.server.command(command))?.value;
+
+/** Server reads of the player's bread, vitals, and position. */
+async function vitals(ctx) {
+  const inventory = await ctx.server.inventory();
+  return {
+    bread: itemCount(inventory, BREAD),
+    food: await serverValue(ctx, `data get entity ${ctx.bot} foodLevel`),
+    health: await serverValue(ctx, `data get entity ${ctx.bot} Health`),
+    position: await ctx.server.position(),
+  };
+}
+
+/** Hunger effect until the server's foodLevel is at most `target`, then clear it; returns the level after clearing. */
+async function lowerFood(ctx, plan, target) {
+  const food = () => serverValue(ctx, `data get entity ${ctx.bot} foodLevel`);
+  await ctx.server.command(plan.hooks.hunger);
+  try {
+    const deadline = ctx.now() + 60_000;
+    for (let level = await food(); !(level <= target); level = await food()) {
+      if (ctx.now() >= deadline) throw new Error(`foodLevel did not fall to ${target}: ${level}.`);
+      await ctx.sleep(100);
+    }
+  } finally {
+    await ctx.server.command(plan.hooks.sated);
+  }
+  return food();
+}
+
+/** Observes the bridge until `test` passes or the time runs out; returns the passing state or null. */
+async function pollBridge(ctx, test, { timeoutMs, intervalMs = 100 }) {
+  const deadline = ctx.now() + timeoutMs;
+  while (true) {
+    const state = await ctx.bridge.observe();
+    if (test(state)) return state;
+    if (ctx.now() >= deadline) return null;
+    await ctx.sleep(intervalMs);
+  }
+}
+
+/**
+ * Polls the bridge in the background and records every change of survival status, mode, and job, timed from
+ * `origin`. `done` settles once `until(state, changes)` passes or `timeoutMs` runs out.
+ */
+export function watchBridge(ctx, { origin = ctx.now(), timeoutMs, until, intervalMs = 100 }) {
+  const changes = [];
+  const done = (async () => {
+    const deadline = ctx.now() + timeoutMs;
+    let last = null;
+    while (true) {
+      const state = await ctx.bridge.observe();
+      const { type, status, message } = state.job ?? {};
+      const entry = {
+        survival: state.survival ?? null,
+        mode: state.mode ?? null,
+        job: state.job ? { type, status, message } : null,
+      };
+      const key = JSON.stringify(entry);
+      if (key !== last) {
+        last = key;
+        changes.push({ atMs: ctx.now() - origin, ...entry });
+      }
+      if (until(state, changes)) return { state, timedOut: false };
+      if (ctx.now() >= deadline) return { state, timedOut: true };
+      await ctx.sleep(intervalMs);
+    }
+  })();
+  return { changes, done };
+}
+
+/** Eating attempts in a recorded timeline: each change to `Eating`, and what the status changed to next. */
+export function eatingAttempts(changes) {
+  const attempts = [];
+  let previous = null;
+  for (const { atMs, survival } of changes) {
+    if (survival === previous) continue;
+    const open = attempts.at(-1);
+    if (previous === 'Eating' && open) Object.assign(open, { endMs: atMs, outcome: survival });
+    if (survival === 'Eating') attempts.push({ startMs: atMs, endMs: null, outcome: null });
+    previous = survival;
+  }
+  return attempts;
+}
+
+/**
+ * The time from each failed eating attempt to the next attempt. `failedAtMs` is an earlier failure seen outside the
+ * timeline (the explicit eat), or null.
+ */
+export function eatingGaps(attempts, failedAtMs = null) {
+  const gaps = [];
+  let failed = failedAtMs;
+  for (const attempt of attempts) {
+    if (failed !== null) gaps.push(attempt.startMs - failed);
+    failed = attempt.outcome === 'Could not eat.' ? attempt.endMs : null;
+  }
+  return gaps;
+}
+
+const within = (value, low, high) => Number.isFinite(value) && value >= low && value <= high;
+const waitEnded = (state) => state.job?.type === 'wait' && state.job.status !== 'running';
+const firstAt = (changes, test) => changes.find(test)?.atMs ?? null;
+const retreatStart = (changes) => firstAt(changes, ({ job }) => RETREATING.test(job?.message ?? ''));
+const waitEnd = (changes) => firstAt(changes, ({ job }) => job?.type === 'wait' && job.status !== 'running');
+
+async function runEatTimeout(ctx, plan) {
+  const fabric = ctx.options.backend === 'fabric';
+  // How long each backend waits for the server to finish eating before it gives up.
+  const timeoutMs = fabric ? EAT_TIMEOUT_MS : BOT_CONSUME_TIMEOUT_MS;
+  const before = await ctx.step('independent baseline (Inventory, foodLevel, Health)', () => vitals(ctx));
+  ctx.check(
+    'server starts with eight slow bread and full food and health',
+    before.bread === 8 && before.food === 20 && before.health === 20,
+    before,
+  );
+  const hungry = await ctx.step(`lower food to ${HUNGRY} or less (hunger effect, then effect clear)`, () =>
+    lowerFood(ctx, plan, HUNGRY),
+  );
+  const started = ctx.now();
+  const eaten = await ctx.step('bridge: eat (the bread takes 30 s to consume)', () =>
+    settledAction(ctx, { type: 'eat' }),
+  );
+  const failedAt = ctx.now();
+  const explicitMs = failedAt - started;
+  const afterEat = await ctx.step('independent reads after the eat job', () => vitals(ctx));
+  ctx.note('explicitEat', { ...eaten, durationMs: explicitMs, hungry, after: afterEat });
+  ctx.check(
+    `explicit eat fails with "Eating timed out." after ${timeoutMs / 1000} s`,
+    eaten.settled === 'rejected' &&
+      /^Eating timed out\./.test(eaten.message) &&
+      within(explicitMs, timeoutMs - 200, timeoutMs + 2500),
+    { eaten, durationMs: explicitMs },
+  );
+  ctx.check('server shows no bread eaten and food not raised', afterEat.bread === 8 && afterEat.food <= hungry, {
+    hungry,
+    after: afterEat,
+  });
+
+  // Automatic eating while a wait job runs, and after it under the same lease: two attempts, each a backoff apart.
+  const wait = settledAction(ctx, { type: 'wait', seconds: 20 });
+  const watched = watchBridge(ctx, {
+    origin: failedAt,
+    timeoutMs: 40_000,
+    until: (state, changes) => eatingAttempts(changes).length >= 2 && (waitEnded(state) || !state.job),
+  });
+  const { timedOut } = await ctx.step('watch automatic eating for two attempts', () => watched.done);
+  const waited = await wait;
+  await ctx.step('bridge: release control (ends automatic eating)', () => ctx.bridge.release());
+  const after = await ctx.step('independent final reads', () => vitals(ctx));
+  const attempts = eatingAttempts(watched.changes);
+  const gaps = eatingGaps(attempts, 0);
+  ctx.note('automaticEating', { changes: watched.changes, attempts, gaps, timedOut, wait: waited });
+  ctx.check('two automatic attempts were seen', attempts.length >= 2 && !timedOut, {
+    attempts: attempts.length,
+    timedOut,
+  });
+  const finished = attempts.filter((attempt) => attempt.endMs !== null);
+  ctx.check(
+    `each attempt gives up after about ${timeoutMs / 1000} s ("Could not eat.")`,
+    finished.length >= 1 &&
+      finished.every(
+        (attempt) =>
+          attempt.outcome === 'Could not eat.' &&
+          within(attempt.endMs - attempt.startMs, timeoutMs - 500, timeoutMs + 1500),
+      ),
+    { attempts },
+  );
+  ctx.check(
+    'each attempt starts 10 s after the previous failure (the backoff)',
+    // The first gap starts when the client saw the explicit eat fail, up to one 250 ms job poll (plus a request) late.
+    gaps.length >= 2 &&
+      gaps.every((gap, index) => within(gap, EAT_BACKOFF_MS - (index ? 500 : 1000), EAT_BACKOFF_MS + 2000)),
+    { gaps },
+  );
+  // Fabric pauses the job to eat and then resumes it. The bot interrupts the job to eat and leaves replanning to the
+  // agent, so its failed attempt ends the job.
+  ctx.check(
+    fabric
+      ? 'the wait job paused to eat and still finished on its own'
+      : 'bot: the wait job was interrupted to eat and failed when eating failed',
+    fabric
+      ? waited.settled === 'completed' &&
+          watched.changes.some(({ job }) => job?.type === 'wait' && /Paused to eat/.test(job.message ?? ''))
+      : waited.settled === 'rejected' &&
+          /^Interrupted to eat, but could not eat \(Eating timed out\.\)/.test(waited.message),
+    { wait: waited },
+  );
+  ctx.check('server shows no bread eaten and food not raised', after.bread === 8 && after.food <= hungry, {
+    hungry,
+    after,
+  });
+}
+
+/** Saves home at the start and walks to the plan's `away` point. */
+async function walkAway(ctx, plan) {
+  const { away, start } = plan.points;
+  await ctx.step('bridge: set_home at the start', () => ctx.bridge.execute({ type: 'set_home' }));
+  const walked = await ctx.step(`bridge: goto ${away.x} ${away.y} ${away.z}`, () =>
+    settledAction(ctx, { type: 'goto', ...away }),
+  );
+  const position = await ctx.step('independent Pos after the walk', () => ctx.server.position());
+  const minimum = Math.floor(distance(away, start)) - 3;
+  ctx.check(
+    `the walk ended at least ${minimum} blocks from home`,
+    walked.settled === 'completed' && distance(position, start) >= minimum,
+    { walked, position, distance: distance(position, start) },
+  );
+}
+
+/**
+ * Starts a wait job under the scenario's lease and waits until the bridge shows it running. Returns the job's
+ * settlement in an object, since returning the pending promise itself would wait for the job to end.
+ */
+async function startWait(ctx, seconds) {
+  const job = settledAction(ctx, { type: 'wait', seconds });
+  const running = await ctx.step(`bridge: wait ${seconds} is running`, () =>
+    pollBridge(ctx, (state) => state.job?.type === 'wait' && state.job.status === 'running', { timeoutMs: 10_000 }),
+  );
+  if (!running) throw new Error('The wait job did not start.');
+  return { job };
+}
+
+async function wound(ctx, plan) {
+  await ctx.step(`server: ${plan.hooks.wound}`, () => ctx.server.command(plan.hooks.wound));
+  return serverValue(ctx, `data get entity ${ctx.bot} Health`);
+}
+
+async function runLowHealthRetreat(ctx, plan) {
+  const { start } = plan.points;
+  const before = await ctx.step('independent baseline (Inventory, foodLevel, Health, Pos)', () => vitals(ctx));
+  ctx.check('server starts with full food and health', before.food === 20 && before.health === 20, before);
+  await walkAway(ctx, plan);
+  const { job } = await startWait(ctx, 60);
+  const origin = ctx.now();
+  const health = await wound(ctx, plan);
+  const watched = watchBridge(ctx, { origin, timeoutMs: RETREAT_BUDGET_MS + 15_000, until: waitEnded });
+  const { timedOut } = await ctx.step('watch the retreat until the wait job ends', () => watched.done);
+  const outcome = await job;
+  const after = await ctx.step('independent final reads', () => vitals(ctx));
+  const state = await ctx.bridge.observe();
+  const retreatMs = retreatStart(watched.changes);
+  const endMs = waitEnd(watched.changes);
+  ctx.note('retreat', { health, changes: watched.changes, outcome, timedOut, after });
+  ctx.check('server Health is at most 8 after the damage', health <= 8, { health });
+  ctx.check('the wait job reported the retreat home', retreatMs !== null, { retreatMs });
+  ctx.check(
+    'the job failed on its own with the survival interruption',
+    outcome.settled === 'rejected' && INTERRUPTED_FOR_SURVIVAL.test(outcome.message) && state.job?.status === 'failed',
+    { outcome, job: state.job },
+  );
+  ctx.check('the retreat ended within its 60 s budget', !timedOut && endMs !== null && endMs <= RETREAT_BUDGET_MS, {
+    endMs,
+  });
+  ctx.check('server Pos is within 2 blocks of home', distance(after.position, start) <= 2, {
+    distance: distance(after.position, start),
+  });
+  ctx.check('server Health did not regenerate', after.health === health, { before: health, after: after.health });
+  ctx.check('the session kept control (mode agent)', state.mode === 'agent', { mode: state.mode });
+}
+
+async function runEatRetreatTimeout(ctx, plan) {
+  const fabric = ctx.options.backend === 'fabric';
+  const { start, wall } = plan.points;
+  const before = await ctx.step('independent baseline (Inventory, foodLevel, Health, Pos)', () => vitals(ctx));
+  ctx.check(
+    'server starts with eight slow bread and full food and health',
+    before.bread === 8 && before.food === 20 && before.health === 20,
+    before,
+  );
+  await walkAway(ctx, plan);
+  await ctx.step(`server (home walled in): ${plan.hooks.enclose}`, () => ctx.server.command(plan.hooks.enclose));
+  const { job } = await startWait(ctx, 120);
+  const origin = ctx.now();
+  const health = await wound(ctx, plan);
+  const watched = watchBridge(ctx, { origin, timeoutMs: RETREAT_BUDGET_MS + 30_000, until: waitEnded });
+  // Food falls only once the retreat is under way, so on Fabric the eating attempts interrupt the retreat.
+  await ctx.step('wait for the retreat to start', () =>
+    pollBridge(ctx, (state) => RETREATING.test(state.job?.message ?? '') || waitEnded(state), { timeoutMs: 10_000 }),
+  );
+  const hungry = await ctx.step(`lower food to ${HUNGRY} or less during the retreat`, () =>
+    lowerFood(ctx, plan, HUNGRY),
+  );
+  const { timedOut } = await ctx.step('watch the retreat until the wait job ends', () => watched.done);
+  const outcome = await job;
+  const after = await ctx.step('independent reads when the job ended', async () => ({
+    ...(await vitals(ctx)),
+    enclosed: await ctx.server.testBlock(wall, 'minecraft:bedrock'),
+  }));
+  await ctx.step('bridge: release control (ends automatic eating and retreats)', () => ctx.bridge.release());
+  const retreatMs = retreatStart(watched.changes);
+  const endMs = waitEnd(watched.changes);
+  const attempts = eatingAttempts(watched.changes).filter(({ startMs }) => retreatMs !== null && startMs >= retreatMs);
+  const gap = distance(after.position, start);
+  ctx.note('retreat', { health, hungry, changes: watched.changes, attempts, outcome, timedOut, after });
+  ctx.check('server Health is at most 8 after the damage', health <= 8, { health });
+  ctx.check('server foodLevel fell to 16 or less during the retreat', hungry <= 16, { hungry });
+  ctx.check('the wait job reported the retreat home', retreatMs !== null, { retreatMs });
+  ctx.check('server Pos is outside the walled-in home (more than 2 blocks away)', gap > 2, { distance: gap });
+  ctx.check('the bedrock walls are intact', after.enclosed, { wall });
+  ctx.check('server shows no bread eaten and food not raised', after.bread === 8 && after.food <= hungry, {
+    hungry,
+    after,
+  });
+  const retreatToEndMs = retreatMs === null || endMs === null ? null : endMs - retreatMs;
+  if (fabric) {
+    ctx.check(
+      'the job failed when the 60 s retreat budget ran out',
+      outcome.settled === 'rejected' &&
+        /^Survival retreat timed out\./.test(outcome.message) &&
+        !timedOut &&
+        within(retreatToEndMs, RETREAT_BUDGET_MS - 2000, RETREAT_BUDGET_MS + 2000),
+      { outcome, retreatToEndMs },
+    );
+    ctx.check(
+      'eating attempts continued during the retreat and each failed',
+      attempts.length >= 2 && attempts.every(({ outcome }) => outcome === null || outcome === 'Could not eat.'),
+      { attempts },
+    );
+    return;
+  }
+  // The bot's action guard stops once the retreat starts, so it does not eat during the retreat. Its retreat ends
+  // when the pathfinder gives up ("Could not reach ...; stopped N blocks away") or at the 60 s budget.
+  const failure = watched.changes
+    .map(({ survival }) => survival ?? '')
+    .find((survival) => /^Retreat failed: /.test(survival));
+  const reported = /stopped (\d+(?:\.\d+)?) blocks away/.exec(failure ?? '');
+  ctx.check(
+    'bot: the job failed with the survival interruption within the 60 s retreat budget',
+    outcome.settled === 'rejected' &&
+      INTERRUPTED_FOR_SURVIVAL.test(outcome.message) &&
+      !timedOut &&
+      within(retreatToEndMs, 0, RETREAT_BUDGET_MS + 5000),
+    { outcome, retreatToEndMs },
+  );
+  ctx.check(
+    'bot: the failed retreat is reported, and any distance it gives agrees with server Pos (± 1 block)',
+    !!failure && (!reported || Math.abs(Number(reported[1]) - gap) <= 1),
+    { reported: failure ?? null, server: gap },
+  );
+}
+
+async function runCollectFullInventory(ctx, plan) {
+  const { start } = plan.points;
+  const read = async () => {
+    const inventory = await ctx.server.inventory();
+    return { totals: itemTotals(inventory), stacks: inventory.length, position: await ctx.server.position() };
+  };
+  const before = await ctx.step('independent baseline (Inventory, Pos)', read);
+  ctx.check(
+    'server inventory holds the axe, 34 cobblestone stacks, and 58 logs: no empty slot, room for six logs',
+    sameTotals(before.totals, plan.held) && before.stacks === 36,
+    before,
+  );
+  // One bridge client throughout, so the follow-up action shows the same lease goes on.
+  const adapter = await ctx.connect();
+  const progress = [];
+  const started = ctx.now();
+  const outcome = await ctx.step('bridge: collect oak_log 8', async () => {
+    try {
+      const job = await adapter.execute(
+        { type: 'collect', block: 'oak_log', count: 8 },
+        { onProgress: (job) => progress.push({ atMs: ctx.now() - started, message: job.message }) },
+      );
+      return { settled: 'completed', message: job.message };
+    } catch (error) {
+      return { settled: 'rejected', message: error.message };
+    }
+  });
+  const durationMs = ctx.now() - started;
+  const leaseId = adapter.leaseId;
+  const state = await ctx.bridge.observe();
+  const after = await ctx.step('independent final state (Inventory, Pos)', read);
+  ctx.note('progress', progress);
+  ctx.note('outcome', { ...outcome, durationMs, job: state.job, mode: state.mode });
+  ctx.check(
+    'job failed on its own with the inventory-full outcome after six logs',
+    outcome.settled === 'rejected' &&
+      state.job?.status === 'failed' &&
+      /^Inventory full; collected 6 of 8 oak_log\. Inventory: 64\/66\./.test(outcome.message),
+    { outcome, job: state.job },
+  );
+  ctx.check('the job ended long before the 180 s mining deadline', durationMs <= 90_000, { durationMs });
+  ctx.check(
+    'server inventory holds exactly 64 logs with the axe and cobblestone unchanged',
+    sameTotals(after.totals, { ...plan.held, [LOG]: 64 }) && after.stacks === 36,
+    { after: after.totals, stacks: after.stacks },
+  );
+  const gap = distance(after.position, start);
+  if (/(?:Returned to|At) the starting point/.test(outcome.message))
+    ctx.check('reported return agrees with server Pos (≤ 2.5 blocks)', gap <= 2.5, { distance: gap });
+  else ctx.check('reported failed return agrees with server Pos (> 2 blocks)', gap > 2, { distance: gap });
+  ctx.check('bridge inventory agrees with the server', sameTotals(bridgeItemTotals(state.inventory), after.totals), {
+    bridge: bridgeItemTotals(state.inventory),
+    server: after.totals,
+  });
+  ctx.check('the session kept control (mode agent)', state.mode === 'agent' && !!leaseId, { mode: state.mode });
+  const next = await ctx.step('bridge: wait 1 under the same lease', async () => {
+    try {
+      const job = await adapter.execute({ type: 'wait', seconds: 1 });
+      return { settled: 'completed', message: job.message, leaseId: adapter.leaseId };
+    } catch (error) {
+      return { settled: 'rejected', message: error.message, leaseId: adapter.leaseId };
+    }
+  });
+  ctx.check('the same lease runs the next action', next.settled === 'completed' && next.leaseId === leaseId, {
+    next,
+    leaseId,
+  });
+}
+
 /** The scenario table. plan() is pure so --dry-run prints exactly what run() sends. */
 export const scenarios = [
   {
@@ -1675,6 +2192,89 @@ export const scenarios = [
       'server inventory holds at least four cobblestone and the pickaxe',
       'the same goto is cancelled because the dimension changed; bridge is manual and settled',
       'server and bridge show a stationary player on the Nether landing pad',
+    ],
+  },
+  {
+    id: 'eat-timeout',
+    lane: 30,
+    longRunning: true,
+    title: 'Food that takes 30 s to eat: the 5 s eating timeout and the 10 s automatic-eating backoff',
+    release: [RELEASE.eating],
+    plan: (args) => vitalsPlan(args, { bread: 8 }),
+    run: runEatTimeout,
+    during: (plan) => [plan.hooks.hunger, plan.hooks.sated],
+    actions: [
+      `lower food to ${HUNGRY} or less (hunger effect, then effect clear) before taking control`,
+      'bridge: eat with eight slow bread held (30 s to consume)',
+      'bridge: wait 20 straight after the failed eat, recording each automatic attempt until the second starts, then release control',
+    ],
+    expect: [
+      'eat fails with "Eating timed out." after the backend\'s consumption timeout (Fabric 5 s, bot 2.5 s)',
+      'each automatic attempt ends "Could not eat." after that timeout and starts 10 s after the previous failure',
+      'Fabric: the wait pauses to eat and still finishes; bot: the wait is interrupted to eat and fails with the failed attempt',
+      'server bread count stays 8 and foodLevel does not rise',
+    ],
+  },
+  {
+    id: 'low-health-retreat',
+    lane: 31,
+    title: 'Low health during a wait: retreat to the saved home and fail the job',
+    release: [RELEASE.eating],
+    plan: (args) => vitalsPlan(args, { away: 16 }),
+    run: runLowHealthRetreat,
+    during: (plan) => [plan.hooks.wound],
+    actions: (plan) => [
+      'bridge: set_home at the start (full health and food, natural regeneration off)',
+      `bridge: goto ${plan.points.away.x} ${STAND} ${plan.points.away.z} (16 blocks east)`,
+      'bridge: wait 60',
+      `while it runs: > ${plan.hooks.wound}`,
+    ],
+    expect: [
+      'server Health at most 8 and never regenerates',
+      'the wait job reports "Low health: retreating home" and fails with "Action interrupted for survival" within 60 s',
+      'server Pos within 2 blocks of home; the session keeps control',
+    ],
+  },
+  {
+    id: 'eat-retreat-timeout',
+    lane: 32,
+    longRunning: true,
+    title: 'Retreat to a walled-in home while slow food cannot be eaten: the 60 s retreat budget',
+    release: [RELEASE.eating],
+    plan: (args) => vitalsPlan(args, { bread: 8, away: 24, enclose: true }),
+    run: runEatRetreatTimeout,
+    during: (plan) => [plan.hooks.enclose, plan.hooks.wound, plan.hooks.hunger, plan.hooks.sated],
+    actions: (plan) => [
+      'bridge: set_home at the start with eight slow bread held',
+      `bridge: goto ${plan.points.away.x} ${STAND} ${plan.points.away.z} (24 blocks east)`,
+      `> ${plan.hooks.enclose}`,
+      'bridge: wait 120',
+      `while it runs: > ${plan.hooks.wound}`,
+      `once the retreat starts, lower food to ${HUNGRY} or less (hunger effect, then effect clear)`,
+      'record the retreat, each eating attempt, and the job outcome; release control when the job ends',
+    ],
+    expect: [
+      'Fabric: eating attempts keep failing during the retreat, and the job fails with "Survival retreat timed out." 60 s after the retreat starts',
+      'bot: the job fails with "Action interrupted for survival" within 60 s; any distance the failed retreat reports agrees with server Pos',
+      'server Pos outside the bedrock walls, the walls intact, bread count 8 and foodLevel not raised',
+    ],
+  },
+  {
+    id: 'collect-full-inventory',
+    lane: 33,
+    title: 'The last inventory slot fills during collection: the job fails on its own and the session keeps control',
+    release: [RELEASE.fullInventory],
+    plan: fullInventoryPlan,
+    run: runCollectFullInventory,
+    actions: [
+      'bridge: collect oak_log 8 with an iron axe, 34 cobblestone stacks, and 58 logs (room for six more)',
+      'bridge: wait 1 under the same lease',
+    ],
+    expect: [
+      'job fails with "Inventory full; collected 6 of 8 oak_log. Inventory: 64/66." well before the 180 s mining deadline',
+      'the reported return agrees with server Pos',
+      'server inventory holds exactly 64 logs, the axe, and all cobblestone; the bridge agrees',
+      'mode stays agent and the same lease runs wait 1',
     ],
   },
 ];

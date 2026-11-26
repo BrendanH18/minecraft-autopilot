@@ -51,9 +51,10 @@ don't run the full `scripts/boat-check.sh` before handing work back.
   requests that touch `src/`, the scenario runner or the server jar setup
   (owner decision, 2026-11-22). It isn't a required check, so treat a failing
   `bot-acceptance` run like a failing `node` or `mod` job: fix it before the
-  pull request merges. It leaves out the three long-running
-  `recovery-*` scenarios; when a change affects recovery, cancel or stop, run
-  them on Boat before handing back:
+  pull request merges. It leaves out the five long-running scenarios (the
+  three `recovery-*` pits, `eat-timeout` and `eat-retreat-timeout`); when a
+  change affects recovery, cancel, stop, eating or retreat, run the affected
+  ones on Boat before handing back:
   `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario <scenario>`
   (results come back to `.runtime/boat-check/<check>/`). The live and manual
   steps in [LIVE-ACCEPTANCE.md](docs/LIVE-ACCEPTANCE.md) and

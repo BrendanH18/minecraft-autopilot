@@ -29,8 +29,10 @@ node scripts/live-bot-acceptance.js --accept-eula --scenario withdraw-craft-mode
 ```
 
 Choose one of `--scenario ID` (repeatable), `--all`, or `--fast`. The fast preset
-runs offline collection, storage, withdrawal, crafting, and dimension-change scenarios. It
-omits the three pit recovery scenarios and scenarios that require a real model.
+runs offline collection, storage, withdrawal, crafting, dimension-change, low-health
+retreat and full-inventory scenarios. It omits the long-running scenarios (the three pit
+recovery scenarios, `eat-timeout` and `eat-retreat-timeout`) and scenarios that require a
+real model.
 Use `--dry-run --json` to read the selected fixtures, actions, and checks as structured data.
 
 Other options include `--port N`, `--out FILE` (default `results.json` in the run
@@ -42,17 +44,19 @@ runs.
 Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks),
 which also copies the results back:
 `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --fast`.
-A `--fast` run takes about 4.5 minutes in Boat, and a full offline `--all`
-run (28 scenarios) takes about 13.5 minutes. The three pit
-scenarios each wait out the bot's 180-second mining deadline. See the
+A `--fast` run (27 scenarios) takes about 4.5 minutes in Boat (4 min 12 s on
+26 November 2026). A full offline `--all` run took about 13.5 minutes with 28
+scenarios; the four survival scenarios add about a minute to it. The three pit scenarios each wait out the bot's 180-second
+mining deadline; `eat-timeout` and `eat-retreat-timeout` take about 30 and 20
+seconds on the bot and about 1 and 1.5 minutes on Fabric. See the
 [observed results](DEVELOPMENT.md#validation).
 
 The [Bot acceptance workflow](../.github/workflows/bot-acceptance.yml) runs
 `--fast` weekly on a GitHub-hosted `ubuntu-24.04` runner, and on pull requests
 that change `src/`, the scenario runner (`scripts/live-bot-acceptance.js`,
 `scripts/live-acceptance/`), the server jar setup (including the `mod/` Gradle files), the npm dependencies or the
-workflow itself. `--fast` leaves out the three long-running `recovery-*`
-scenarios. To run it on demand, select **Bot
+workflow itself. `--fast` leaves out the five long-running scenarios: the
+three `recovery-*` pits, `eat-timeout` and `eat-retreat-timeout`. To run it on demand, select **Bot
 acceptance** in GitHub Actions and choose **Run workflow**. Download the
 `bot-acceptance` artifact to review `results.json` and `server.out`. The artifact
 is kept for seven days, including when a scenario fails and produces evidence.
@@ -66,7 +70,7 @@ is kept for seven days, including when a scenario fails and produces evidence.
 5. Runs the scenario, then always sends a bridge emergency stop, removes the fixture, and stops the bot process — also after a failed check, an exception, or Ctrl+C.
 6. Stops the server (`stop`, then SIGTERM/SIGKILL if needed), captures the final Git state, writes the results file, and prints the paths to it and `server.out`. The report includes the log path even when `--out` puts the report elsewhere. Run directories are retained for review and accumulate on disk.
 
-Independent verification uses only server console reads: `data get block X Y Z Items`, `data get entity NAME Inventory`, `data get entity NAME Pos`, and, for blocks without data such as a crafting table, `execute if block X Y Z BLOCK` ("Test passed" or "Test failed"). The bot's own reports are compared against them, never trusted alone.
+Independent verification uses only server console reads: `data get block X Y Z Items`, `data get entity NAME Inventory`, `data get entity NAME Pos`, `foodLevel` and `Health`, and, for blocks without data such as a crafting table, `execute if block X Y Z BLOCK` ("Test passed" or "Test failed"). The bot's own reports are compared against them, never trusted alone.
 
 Ctrl+C stops the current scenario, cleans up its fixture even with `--keep-server`, skips the rest, stops the server, and writes results. The interrupt sequence has unit coverage with fake processes. A second Ctrl+C exits immediately and kills the child processes. After a normal run, `--keep-server` retains fixtures, keeps the server running with every bot session stopped, and forwards console commands until Ctrl+C or end of input.
 
@@ -104,6 +108,42 @@ Ctrl+C stops the current scenario, cleans up its fixture even with `--keep-serve
 | `craft-reuses-consumed-slot` | Player holds one log and 35 full cobblestone stacks. `craft oak_planks 4`. | The planks occupy the slot freed by the log. All cobblestone remains. | Bot withdraw and craft, full inventory with room after consumption. |
 | `craft-no-table` | Player has the inputs for a stone pickaxe with no crafting table held or nearby. | Job reports that a table is required. The server confirms the inputs remain. | Bot withdraw and craft, missing table. |
 | `cobblestone-hostiles-dimension` | The bot starts with an iron pickaxe near eight cobblestone blocks and two enclosed husks. The server teleports the bot to a Nether landing pad during navigation. | Server inventory confirms at least four cobblestone. The bridge includes the husk within 16 blocks. Navigation is cancelled on the dimension change and control returns to manual. Server position reads confirm the bot stays on the landing pad. | Bot half of the cobblestone, hostile observations, and dimension-change gate. |
+| `eat-timeout` | Easy difficulty, natural regeneration off; the player holds eight bread that take 30 s to eat (`food={…,eat_seconds:30}`). Food is lowered to 12 or less with the hunger effect before control is taken. `eat`, then `wait 20`, recording each automatic eating attempt until the second one starts. Long-running: not in `--fast`. | `eat` fails with "Eating timed out." after the backend's consumption timeout (Fabric 5 s, bot 2.5 s); each automatic attempt ends "Could not eat." after that timeout and starts 10 s after the previous failure; on Fabric the wait still finishes, on the bot it fails with the interrupted attempt; the server shows 8 bread and food never rises. | Pre-check for the Fabric eating gate (eating timeout and backoff). |
+| `low-health-retreat` | Easy difficulty, natural regeneration off, full health and food. `set_home`, `goto` 16 blocks east, `wait 60`, then `damage <player> 13` while it runs. | Server `Health` ≤ 8 and never regenerates; the wait job reports "Low health: retreating home" and fails with "Action interrupted for survival" within 60 s; server `Pos` within 2 blocks of home; mode stays `agent`. | Pre-check for the Fabric eating gate (retreat). |
+| `eat-retreat-timeout` | As `eat-timeout`, plus `set_home`, `goto` 24 blocks east, and a bedrock shell around home (`fill … minecraft:bedrock hollow`). `wait 120`; `damage` while it runs; once the retreat starts, food is lowered to 12 or less. Long-running: not in `--fast`. | Fabric: automatic eating attempts keep failing during the retreat, and the job fails with "Survival retreat timed out." 60 s (± 2 s) after the retreat started. Bot: its retreat runs without the eating reflex and fails with "Action interrupted for survival" within 60 s; the reported failure's distance agrees with server `Pos`. Both: server `Pos` outside the shell, the shell intact, 8 bread and food not raised. | Pre-check for the Fabric eating gate (retreat deadline while eating fails). |
+| `collect-full-inventory` | An iron axe, 34 full cobblestone stacks and 58 oak logs fill every main slot, leaving room for six logs; an 18-log patch five blocks west. `collect oak_log 8`, then `wait 1` with the same bridge client. | The job fails on its own with "Inventory full; collected 6 of 8 oak_log. Inventory: 64/66." long before the 180 s mining deadline; the reported return agrees with server `Pos`; the server shows exactly 64 logs, the axe and every cobblestone; the bridge agrees; mode stays `agent` and the same lease runs `wait 1`. | Both backends of the [`inventory-full-collect`](LIFECYCLE-SCENARIOS.md) row. |
+
+### Eating, retreat and full inventory
+
+`eat-timeout`, `low-health-retreat`, `eat-retreat-timeout` and
+`collect-full-inventory` pre-check the Fabric `fabric-eating-recovery` gate and
+the `inventory-full-collect` checklist row, and run on both backends. They reuse
+the [Fabric fixtures](#fabric-fixtures) of the same names: the same slow bread
+(`eat_seconds:30`), and the same bedrock shell around home. Each runs in easy
+difficulty with natural regeneration off (peaceful refills food and heals), and
+its cleanup restores peaceful, regeneration, full health and full food.
+Independent `foodLevel`, `Health`, `Inventory` and `Pos` reads back every
+check; the bridge's `survival` status is polled every 100 ms to time each
+eating attempt and the retreat.
+
+The backends legitimately differ, and each scenario checks each backend's own
+behaviour:
+
+- **Consumption timeout.** Fabric gives up eating after 5 s, the bot after
+  2.5 s (Mineflayer's consume timeout). Both report "Eating timed out." for
+  `eat` and "Could not eat." for automatic eating, and both then back off
+  automatic eating for 10 s. Fabric pauses a running job to eat and resumes it;
+  the bot interrupts the job to eat, so its `wait` fails with the failed attempt.
+- **Eating during a retreat.** Fabric's tick keeps trying to eat during a
+  retreat, and checks the 60 s retreat deadline first. The bot's action guard
+  stops when its retreat starts, so it doesn't eat until the job has ended, and
+  its pathfinder gives up on the walled-in home before the budget runs out,
+  reporting how far away it stopped.
+
+Neither result is evidence for the gate: Fabric runs use the development
+client, and `acceptance review-bot` lists the bot runs as supplemental. The
+interruption half of the gate (F8 and stop while eating or retreating) is in the
+[takeover scenarios](#takeover-scenarios).
 
 ### Collect-and-store without a model
 
@@ -218,6 +258,10 @@ opened containers, saved home or last job.
   `inspect-preserves-home` used to end five blocks from home
   ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)); its
   results now record the server `Pos` before each planner request.
+  On 26 November 2026 the four [survival scenarios](#eating-retreat-and-full-inventory)
+  passed on the development client: two failed automatic eating attempts
+  10.0 s apart, four failed attempts during a retreat that gave up 60.0 s after
+  it started, and an inventory-full failure after exactly six logs.
 - **Not covered.** The packaged mods folder, the normal launcher and handoff
   can't be scripted here. F8, menus, stop, expiry, death and dimension changes
   are covered as pre-checks by the [takeover scenarios](#takeover-scenarios).

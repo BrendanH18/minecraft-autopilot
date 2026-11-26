@@ -19,6 +19,9 @@ import {
   scriptedPlanner,
   interceptInference,
   depositCompleted,
+  eatingAttempts,
+  eatingGaps,
+  SLOW_BREAD,
 } from '../scripts/live-acceptance/scenarios.js';
 import {
   createRunDirectory,
@@ -424,6 +427,8 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
     mode: 'manual',
     stopping: false,
     moving: false,
+    food: 20,
+    health: 20,
   };
   const reply = (command) => {
     const [verb, ...rest] = command.split(' ');
@@ -431,6 +436,15 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
       return `${rest[2]}, ${rest[3]}, ${rest[4]} has the following block data: [${world.chest.map((item, slot) => `{count: ${item.count}, Slot: ${slot}b, id: "${item.id}"}`).join(', ')}]`;
     if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'Inventory')
       return `${BOT} has the following entity data: [${world.inventory.map((item, slot) => `{count: ${item.count}, Slot: ${slot}b, id: "${item.id}"}`).join(', ')}]`;
+    if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'foodLevel')
+      return `${BOT} has the following entity data: ${world.food}`;
+    if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'Health')
+      return `${BOT} has the following entity data: ${world.health}.0f`;
+    if (verb === 'damage') {
+      world.health = Math.max(1, world.health - Number(rest[1]));
+      return `Applied ${rest[1]}.0 damage to ${BOT}`;
+    }
+    if (verb === 'effect' && rest[2] === 'minecraft:hunger') world.food = Math.min(world.food, 11);
     if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'Pos') {
       if (world.moving) world.pos.x += 1;
       return `${BOT} has the following entity data: [${world.pos.x}d, ${world.pos.y}d, ${world.pos.z}d]`;
@@ -444,7 +458,9 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
       return `Teleported ${BOT} to ${rest[1]}, ${rest[2]}, ${rest[3]}`;
     }
     if (verb === 'give') {
-      world.inventory.push({ id: rest[1], count: Number(rest[2]) });
+      // Like the server, a large give fills stacks of 64.
+      for (let left = Number(rest[2]); left > 0; left -= 64)
+        world.inventory.push({ id: rest[1].replace(/\[.*$/, ''), count: Math.min(64, left) });
       return `Gave ${rest[2]} [Item] to ${BOT}`;
     }
     if (verb === 'clear') {
@@ -486,10 +502,12 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
   });
   world.console = serverConsole;
   world.state = () => ({
+    ...world.onObserve?.(),
     connected: true,
     mode: world.mode,
     stopping: world.stopping,
     job: world.job && { ...world.job },
+    ...(world.survival && { survival: world.survival }),
     player: { position: { ...world.pos } },
     inventory: world.inventory
       .filter((item) => item.count > 0)
@@ -997,6 +1015,163 @@ test('withdraw-craft-model requires both criteria, matching server reads, and ma
   }
 });
 
+const SURVIVAL = ['eat-timeout', 'low-health-retreat', 'eat-retreat-timeout', 'collect-full-inventory'];
+
+test('survival scenarios: the dry run lists them, --fast keeps the short two, --all runs all four on both backends', () => {
+  for (const argv of [['--dry-run'], ['--dry-run', '--all'], ['--dry-run', '--backend', 'fabric']]) {
+    const ids = buildPlan(parseOptions(argv)).scenarios.map(({ id }) => id);
+    for (const id of SURVIVAL) assert.ok(ids.includes(id), `${argv.join(' ')} lists ${id}`);
+  }
+  for (const backend of ['bot', 'fabric']) {
+    const fast = parseOptions(['--fast', '--backend', backend]).scenarios.map(({ id }) => id);
+    assert.ok(fast.includes('low-health-retreat') && fast.includes('collect-full-inventory'), backend);
+    assert.ok(!fast.includes('eat-timeout') && !fast.includes('eat-retreat-timeout'), backend);
+    const all = parseOptions(['--all', '--backend', backend]).scenarios.map(({ id }) => id);
+    for (const id of SURVIVAL) assert.ok(all.includes(id), `${backend} --all runs ${id}`);
+  }
+  assert.deepEqual(
+    parseOptions(['--scenario', 'eat-retreat-timeout', '--backend', 'fabric']).scenarios.map(({ id }) => id),
+    ['eat-retreat-timeout'],
+  );
+
+  const plan = buildPlan(parseOptions(['--dry-run', '--all']));
+  const scenario = (id) => plan.scenarios.find((entry) => entry.id === id);
+  for (const id of ['eat-timeout', 'low-health-retreat', 'eat-retreat-timeout']) {
+    const { fixture, cleanup, prepare, verify } = scenario(id);
+    assert.ok(fixture.includes('difficulty easy') && fixture.includes('gamerule naturalRegeneration false'), id);
+    assert.ok(cleanup.includes('difficulty peaceful') && cleanup.includes('gamerule naturalRegeneration true'), id);
+    assert.ok(prepare.includes(`effect give ${BOT} minecraft:instant_health 1 10 true`), id);
+    assert.ok(verify.includes(`data get entity ${BOT} foodLevel`) && verify.includes(`data get entity ${BOT} Health`));
+  }
+  assert.ok(scenario('eat-timeout').prepare.includes(`give ${BOT} ${SLOW_BREAD} 8`));
+  assert.equal(SLOW_BREAD, 'minecraft:bread[food={nutrition:5,saturation:6,eat_seconds:30}]');
+  const { x } = laneOrigin(byId('eat-retreat-timeout').lane);
+  const retreat = scenario('eat-retreat-timeout');
+  assert.deepEqual(retreat.during, [
+    `fill ${x - 2} -61 -2 ${x + 2} -57 2 minecraft:bedrock hollow`,
+    `damage ${BOT} 13 minecraft:generic`,
+    `effect give ${BOT} minecraft:hunger 120 255 true`,
+    `effect clear ${BOT} minecraft:hunger`,
+  ]);
+  assert.ok(retreat.verify.includes(`execute if block ${x + 2} -60 0 minecraft:bedrock`));
+  assert.ok(retreat.cleanup.includes(`fill ${x - 2} -61 -2 ${x + 2} -61 2 minecraft:grass_block`));
+  assert.deepEqual(scenario('collect-full-inventory').prepare.slice(-3), [
+    `give ${BOT} minecraft:iron_axe 1`,
+    `give ${BOT} minecraft:cobblestone ${34 * 64}`,
+    `give ${BOT} minecraft:oak_log 58`,
+  ]);
+  const text = formatPlan(plan);
+  assert.match(text, /\[eat-timeout\][\s\S]*bridge: eat with eight slow bread held/);
+  assert.match(text, /\[low-health-retreat\][\s\S]*while it runs: > damage LiveBot 13 minecraft:generic/);
+});
+
+test('eating attempts and backoff gaps come from the recorded survival timeline', () => {
+  const attempts = eatingAttempts([
+    { atMs: 0, survival: 'Could not eat.' },
+    { atMs: 10_100, survival: 'Eating' },
+    // A job message change records the same status again; it is not a new attempt.
+    { atMs: 10_300, survival: 'Eating' },
+    { atMs: 15_150, survival: 'Could not eat.' },
+    { atMs: 25_200, survival: 'Eating' },
+  ]);
+  assert.deepEqual(attempts, [
+    { startMs: 10_100, endMs: 15_150, outcome: 'Could not eat.' },
+    { startMs: 25_200, endMs: null, outcome: null },
+  ]);
+  assert.deepEqual(eatingGaps(attempts, 0), [10_100, 10_050]);
+  // Food eaten (the status moved on) starts no backoff, and without an earlier failure the first attempt has no gap.
+  const eaten = eatingAttempts([
+    { atMs: 0, survival: 'Eating' },
+    { atMs: 1600, survival: 'Ready' },
+    { atMs: 1700, survival: 'Eating' },
+  ]);
+  assert.deepEqual(eatingGaps(eaten), []);
+  assert.deepEqual(eatingAttempts([{ atMs: 0, survival: null }]), []);
+});
+
+test('collect-full-inventory passes on an inventory-full failure the server confirms, under the same lease', async () => {
+  const scenario = byId('collect-full-inventory');
+  const start = { x: laneOrigin(scenario.lane).x + 0.5, y: -60, z: 0.5 };
+  const run = async ({ logs = 64, message, mode = 'agent' } = {}) => {
+    const world = fakeWorld({ start });
+    const behaviors = {
+      collect: async (action) => {
+        assert.deepEqual(action, { type: 'collect', block: 'oak_log', count: 8 });
+        world.inventory.find((item) => item.id === 'minecraft:oak_log').count = logs;
+        world.mode = mode;
+        const text =
+          message ?? 'Inventory full; collected 6 of 8 oak_log. Inventory: 64/66. Returned to the starting point.';
+        world.job = { status: 'failed', message: text };
+        throw new Error(text);
+      },
+      wait: async () => ({ status: 'completed', message: 'Wait finished.' }),
+    };
+    const deps = fakeDeps(world, { behaviors });
+    deps.connect = async () => Object.assign(world.adapter(behaviors), { leaseId: 'lease-1' });
+    return runScenario(scenario, env(world, deps));
+  };
+  const passed = await run();
+  assert.equal(passed.status, 'pass', JSON.stringify(passed.checks.filter((check) => !check.pass)));
+  const timedOut = await run({
+    message:
+      'Collection timed out before reaching the requested quota. Inventory: 60/66. Returned to the starting point.',
+    logs: 60,
+  });
+  assert.equal(timedOut.status, 'fail');
+  assert.match(timedOut.reason, /inventory-full outcome/);
+  assert.match(timedOut.reason, /exactly 64 logs/);
+  const released = await run({ mode: 'manual' });
+  assert.match(released.reason, /the session kept control/);
+});
+
+test('low-health-retreat passes when the server confirms the retreat home and fails when the player stays away', async () => {
+  const scenario = byId('low-health-retreat');
+  const { x } = laneOrigin(scenario.lane);
+  const start = { x: x + 0.5, y: -60, z: 0.5 };
+  const run = async ({ arrive = true } = {}) => {
+    const world = fakeWorld({ start });
+    const clock = { now: 0 };
+    let settle;
+    let woundedAt = null;
+    // The retreat starts when the server reports the damage and ends three seconds later.
+    world.onObserve = () => {
+      if (world.health > 8 || !world.job || world.job.status !== 'running') return;
+      woundedAt ??= clock.now;
+      world.job.message = 'Low health: retreating home';
+      if (clock.now - woundedAt < 3000) return;
+      if (arrive) world.pos = { ...start };
+      const message = 'Action interrupted for survival. Check your health and shelter.';
+      world.job = { type: 'wait', status: 'failed', message };
+      settle(new Error(message));
+    };
+    const behaviors = {
+      set_home: async () => ({ status: 'completed', message: 'Saved home.' }),
+      goto: async (action) => {
+        assert.deepEqual(action, { type: 'goto', x: x + 16, y: -60, z: 0 });
+        world.pos = { x: x + 16.5, y: -60, z: 0.5 };
+        return { status: 'completed', message: 'Reached destination.' };
+      },
+      wait: (action) => {
+        assert.deepEqual(action, { type: 'wait', seconds: 60 });
+        world.mode = 'agent';
+        world.job = { type: 'wait', status: 'running', message: 'Started wait' };
+        return new Promise((_, reject) => {
+          settle = reject;
+        });
+      },
+    };
+    const record = await runScenario(scenario, env(world, fakeDeps(world, { behaviors, clock })));
+    return { record, world };
+  };
+  const { record, world } = await run();
+  assert.equal(record.status, 'pass', JSON.stringify(record.checks.filter((check) => !check.pass)));
+  assert.ok(world.written.includes(`damage ${BOT} 13 minecraft:generic`));
+  assert.equal(world.health, 7);
+  const away = await run({ arrive: false });
+  assert.equal(away.record.status, 'fail');
+  assert.match(away.record.reason, /server Pos is within 2 blocks of home/);
+});
+
 test('model-only scenarios are skipped without --model and never faked', async () => {
   for (const scenario of scenarios.filter((entry) => entry.requiresModel)) {
     const world = fakeWorld();
@@ -1443,6 +1618,8 @@ test('--fast dry-run includes short offline scenarios and excludes pits and mode
       'craft-reuses-consumed-slot',
       'craft-no-table',
       'cobblestone-hostiles-dimension',
+      'low-health-retreat',
+      'collect-full-inventory',
     ],
   );
   assert.throws(() => parseOptions(['--fast', '--all']), /Choose only one/);

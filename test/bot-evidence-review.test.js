@@ -91,6 +91,12 @@ test('review-bot groups coverage and prefers the latest attempt over older attem
   });
   for (const id of ['collection-pit-recovery', 'bot-mining-timeout'])
     assert.equal(gate(id).offline.find(({ id }) => id === 'recovery-timeout').status, 'pass');
+  // The bot runs of the Fabric eating and full-inventory checks belong to no bot gate; they are listed separately.
+  assert.deepEqual(
+    report.supplemental.map(({ id }) => id),
+    ['eat-timeout', 'low-health-retreat', 'eat-retreat-timeout', 'collect-full-inventory'],
+  );
+  assert.ok(report.gates.every(({ offline }) => offline.every(({ id }) => !id.startsWith('eat-'))));
 });
 
 test('review-bot rejects passes without supported server provenance and runs with changed or unverified source', async (t) => {

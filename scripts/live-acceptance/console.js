@@ -37,6 +37,7 @@ export const REPLIES = {
   effect:
     /^(?:Applied effect|Removed every effect|Removed effect|Unable to apply this effect|Target has no effects|Couldn't remove)/,
   gamerule: /^Gamerule \S+ is (?:now|currently) set to/,
+  damage: /^Applied [\d.]+ damage to /,
   difficulty: /^The difficulty (?:has been set to|did not change)/,
   time: /^Set the time to/,
   weather: /^(?:Set the weather to|Changing to)/,

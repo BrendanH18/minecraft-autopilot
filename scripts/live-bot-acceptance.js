@@ -80,7 +80,8 @@ export const BACKENDS = {
 };
 const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast | --takeover) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
   [--backend bot|fabric] [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
---fast runs offline scenarios without the long pit recovery cases or the takeover scenarios.
+--fast runs offline scenarios without the long-running ones (pit recovery, eat-timeout, eat-retreat-timeout)
+  or the takeover scenarios.
 --backend fabric starts a fresh Fabric development client per scenario instead of the bot (npm run acceptance:fabric);
   it needs a display (xvfb-run on a headless host) and the cached Minecraft assets, and is a pre-check, not release evidence.
 --takeover (Fabric only) runs the scripted Fabric checklist items: F8, menus, stop, cancel, expiry, death, dimension

@@ -20,7 +20,10 @@ import {
 } from './live-acceptance/processes.js';
 import {
   CRAFT_SEQUENCE,
+  enclosure,
+  laneOrigin,
   readCommands,
+  SLOW_BREAD,
   scenarioPlan,
   scenarios,
   STAND,
@@ -95,10 +98,9 @@ function eatingPlan(player) {
 
 function failedEatingPlan(player) {
   const plan = eatingPlan(player);
-  const bread = 'minecraft:bread[food={nutrition:5,saturation:6,eat_seconds:30}]';
   return {
     ...plan,
-    prepare: [...preparePlayer(player), `give ${player} ${bread} 8`],
+    prepare: [...preparePlayer(player), `give ${player} ${SLOW_BREAD} 8`],
     actions: [
       'mc-agent eat',
       'Record the elapsed time to Eating timed out (about 5 seconds). Check the server food level and bread count against the baseline.',
@@ -108,8 +110,9 @@ function failedEatingPlan(player) {
   };
 }
 
+// The same bedrock shell as the eat-retreat-timeout runner scenario, around this helper's start at 96.5 0.5.
 function unreachableHome() {
-  return `fill 94 ${STAND - 1} -2 98 ${STAND + 3} 2 minecraft:bedrock hollow`;
+  return enclosure(laneOrigin(0));
 }
 
 function failedEatingRetreatPlan(player) {

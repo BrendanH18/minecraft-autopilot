@@ -150,7 +150,12 @@ export async function reviewBotEvidence(files, commit) {
         summary: { offline: countOutcomes(offline), realModel: countOutcomes(realModel) },
       };
     }),
-    supplemental: scenarios.filter((scenario) => !scenario.release?.length).map(outcome),
+    // Scenarios that map to no bot gate, such as the bot runs of the Fabric eating and full-inventory checks.
+    supplemental: scenarios
+      .filter(
+        (scenario) => !gateGroups.some(([, release]) => scenario.release?.some((entry) => release.includes(entry))),
+      )
+      .map(outcome),
     note: 'Bot runner coverage only. Review the raw results and server logs before recording acceptance separately.',
   };
 }
