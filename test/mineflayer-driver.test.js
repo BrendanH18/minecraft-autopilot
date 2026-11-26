@@ -200,6 +200,29 @@ test('explicit eat that the server never completes fails as "Eating timed out." 
   assert.equal(driver.wantsToEat(), true);
 });
 
+test('cancelling an action during reflex eating does not leave the bridge reporting Eating', async (t) => {
+  const { bot, calls } = uneatableFoodBot();
+  bot.health = 20;
+  bot.consume = () => {
+    calls.consumed++;
+    return new Promise(() => {});
+  };
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  harness.start(owner, { type: 'wait', seconds: 30 });
+  const deadline = Date.now() + 3000;
+  while (calls.consumed === 0 && Date.now() < deadline) await delay(50);
+  assert.equal(driver.survival, 'Eating');
+  harness.cancel();
+  await harness.task;
+  assert.equal(harness.job.status, 'cancelled');
+  await delay(50);
+  assert.notEqual(driver.survival, 'Eating');
+});
+
 test('collection walks back to its start, digging out of a pit only as a fallback, then restores non-destructive movement', async (t) => {
   const bot = new EventEmitter();
   const sand = minecraftData('1.21.1').blocksByName.sand;

@@ -1106,16 +1106,25 @@ export async function runHeldStop(ctx, plan, spec, lifecycle) {
   const { proxy } = ctx;
   const session = { adapters: [], cleanups: [], release: null };
   let heldAt = null;
-  const hold = () => {
-    const at = proxy.pause('toClient');
-    heldAt = ctx.now();
-    return at;
-  };
+  let watchdog = null;
+  let overran = false;
   const release = () => {
+    clearTimeout(watchdog);
     if (heldAt === null) return null;
     const heldMs = ctx.now() - heldAt;
     heldAt = null;
     return { heldMs, ...proxy.resume('toClient') };
+  };
+  const hold = () => {
+    const at = proxy.pause('toClient');
+    heldAt = ctx.now();
+    // Never hold past the cap, whatever step is waiting: a longer hold would let the keep-alive time out.
+    watchdog = setTimeout(() => {
+      overran = true;
+      release();
+    }, HOLD.maxMs);
+    watchdog.unref?.();
+    return at;
   };
   try {
     if (!proxy) {
@@ -1240,8 +1249,8 @@ export async function runHeldStop(ctx, plan, spec, lifecycle) {
     );
     ctx.check(
       `the proxy held the server's replies (under ${HOLD.maxMs / 1000} s, so no keep-alive timed out)`,
-      !!released && released.held.toClient > 0 && released.heldMs <= HOLD.maxMs,
-      { released },
+      !overran && !!released && released.held.toClient > 0 && released.heldMs <= HOLD.maxMs,
+      { released, overran },
     );
     ctx.check('stopping clears once the released reply settles the opening', settled.ok, { settled });
     // Nothing moves between the stop and the release, nor in the 5 s after it.

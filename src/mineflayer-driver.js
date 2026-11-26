@@ -516,7 +516,11 @@ export class MineflayerDriver {
       await this.abortable(() => this.bot.equip(food, 'hand'), signal);
       await this.abortable(() => this.bot.consume(), signal);
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted) {
+        // A stop or cancel ends the attempt; don't leave the bridge reporting it.
+        if (this.survival === 'Eating') this.survival = 'Survival response stopped.';
+        throw error;
+      }
       // Mineflayer stops waiting for the server after a few seconds (food that takes longer, or a refused use).
       this.eatingRetryAt = Date.now() + EATING_BACKOFF_MS;
       this.survival = FAILED_EATING;

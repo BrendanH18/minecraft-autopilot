@@ -1643,6 +1643,8 @@ async function runEatRetreatTimeout(ctx, plan) {
   const origin = ctx.now();
   const health = await wound(ctx, plan);
   const watched = watchBridge(ctx, { origin, timeoutMs: RETREAT_BUDGET_MS + 30_000, until: waitEnded });
+  // Awaited below; if a step in between fails, its rejection must not crash the runner before cleanup.
+  watched.done.catch(() => {});
   // Food falls only once the retreat is under way, so on Fabric the eating attempts interrupt the retreat.
   await ctx.step('wait for the retreat to start', () =>
     pollBridge(ctx, (state) => RETREATING.test(state.job?.message ?? '') || waitEnded(state), { timeoutMs: 10_000 }),
@@ -1682,8 +1684,11 @@ async function runEatRetreatTimeout(ctx, plan) {
       { outcome, retreatToEndMs },
     );
     ctx.check(
-      'eating attempts continued during the retreat and each failed',
-      attempts.length >= 2 && attempts.every(({ outcome }) => outcome === null || outcome === 'Could not eat.'),
+      'eating attempts continued during the retreat and each failed (at least two observed failures)',
+      attempts.filter(({ outcome }) => outcome === 'Could not eat.').length >= 2 &&
+        attempts.every(
+          ({ outcome }, index) => outcome === 'Could not eat.' || (outcome === null && index === attempts.length - 1),
+        ),
       { attempts },
     );
     return;
@@ -1758,7 +1763,12 @@ async function runCollectFullInventory(ctx, plan) {
   const gap = distance(after.position, start);
   if (/(?:Returned to|At) the starting point/.test(outcome.message))
     ctx.check('reported return agrees with server Pos (≤ 2.5 blocks)', gap <= 2.5, { distance: gap });
-  else ctx.check('reported failed return agrees with server Pos (> 2 blocks)', gap > 2, { distance: gap });
+  else
+    ctx.check(
+      'reported failed return agrees with server Pos (> 2 blocks)',
+      /Could not return to the starting point/.test(outcome.message) && gap > 2,
+      { message: outcome.message, distance: gap },
+    );
   ctx.check('bridge inventory agrees with the server', sameTotals(bridgeItemTotals(state.inventory), after.totals), {
     bridge: bridgeItemTotals(state.inventory),
     server: after.totals,
