@@ -1702,6 +1702,10 @@ async function runEatRetreatTimeout(ctx, plan) {
     .map(({ survival }) => survival ?? '')
     .find((survival) => /^Retreat failed: /.test(survival));
   const reported = /stopped (\d+(?:\.\d+)?) blocks away/.exec(failure ?? '');
+  // Once the retreat fails the bot is free to eat again, and an attempt can replace the "Retreat failed" status
+  // before the next 100 ms poll. The job's failure and the server reads below still cover that case.
+  const overwritten =
+    !failure && watched.changes.some(({ survival, job }) => survival === 'Eating' && job?.status === 'failed');
   ctx.check(
     'bot: the job failed with the survival interruption within the 60 s retreat budget',
     outcome.settled === 'rejected' &&
@@ -1711,9 +1715,9 @@ async function runEatRetreatTimeout(ctx, plan) {
     { outcome, retreatToEndMs },
   );
   ctx.check(
-    'bot: the failed retreat is reported, and any distance it gives agrees with server Pos (± 1 block)',
-    !!failure && (!reported || Math.abs(Number(reported[1]) - gap) <= 1),
-    { reported: failure ?? null, server: gap },
+    'bot: the failed retreat is reported (or replaced at once by the next eating attempt), and any distance it gives agrees with server Pos (± 1 block)',
+    (!!failure || overwritten) && (!reported || Math.abs(Number(reported[1]) - gap) <= 1),
+    { reported: failure ?? null, overwritten, server: gap },
   );
 }
 

@@ -1190,12 +1190,15 @@ export async function runHeldStop(ctx, plan, spec, lifecycle) {
       `watch the bridge for ${HOLD.newSessionMs / 1000} s with the reply held`,
       async () => {
         const seen = [];
-        const until = ctx.now() + HOLD.newSessionMs;
+        const from = ctx.now();
+        const until = from + HOLD.newSessionMs;
         while (ctx.now() < until && ctx.now() - heldAt < HOLD.maxMs - 1000) {
           const state = await ctx.bridge.observe();
           seen.push({ ...pick(state), job: state.job?.id === jobId ? 'interrupted' : pick(state).job });
           await ctx.sleep(100);
         }
+        // Cut short when the hold neared its cap: the window then wasn't watched in full.
+        seen.windowMs = ctx.now() - from;
         return seen;
       },
     );
@@ -1244,8 +1247,9 @@ export async function runHeldStop(ctx, plan, spec, lifecycle) {
       refused.awaiting &&
         refusedLate.awaiting &&
         during.length > 0 &&
+        during.windowMs >= HOLD.newSessionMs &&
         during.every((each) => each.stopping === true && each.mode === 'manual' && each.job === 'interrupted'),
-      { refused, refusedLate, during },
+      { refused, refusedLate, during, windowMs: during.windowMs },
     );
     ctx.check(
       `the proxy held the server's replies (under ${HOLD.maxMs / 1000} s, so no keep-alive timed out)`,

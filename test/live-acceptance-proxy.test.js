@@ -166,6 +166,7 @@ test('a client that disconnects closes its upstream connection, and close() shut
   const server = await target();
   t.after(() => server.close());
   const proxy = await startProxy({ port: server.port });
+  t.after(() => proxy.close());
   const first = await client(proxy.port);
   await until(() => server.connections.length === 1);
   first.socket.destroy();

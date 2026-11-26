@@ -126,7 +126,7 @@ test('a hungry bot with low health eats instead of repeatedly retreating', async
 /** A hungry, wounded bot whose food Mineflayer gives up on, as with food that takes longer than its consume timeout. */
 function uneatableFoodBot() {
   const bot = new EventEmitter();
-  const calls = { consumed: 0, goals: 0 };
+  const calls = { consumed: 0, goals: 0, deactivated: 0 };
   let stopPath;
   Object.assign(bot, {
     registry: minecraftData('1.21.1'),
@@ -153,7 +153,9 @@ function uneatableFoodBot() {
     },
     findBlocks: () => [],
     clearControlStates() {},
-    deactivateItem() {},
+    deactivateItem() {
+      calls.deactivated++;
+    },
     stopDigging() {},
     equip: async () => {},
     consume: async () => {
@@ -196,8 +198,28 @@ test('explicit eat that the server never completes fails as "Eating timed out." 
   await delay(600);
   assert.equal(calls.consumed, 1, 'automatic eating waits out the backoff');
   assert.equal(driver.wantsToEat(), false);
-  driver.eatingRetryAt = 0;
-  assert.equal(driver.wantsToEat(), true);
+  // A later successful eat clears the failure and the backoff.
+  bot.consume = async () => {};
+  harness.start(owner, { type: 'eat' });
+  await harness.task;
+  assert.equal(harness.job.status, 'completed');
+  assert.equal(driver.survival, 'Ready');
+  assert.equal(driver.eatingRetryAt, 0);
+});
+
+test('automatic eating that times out with no job running releases the item in use', async (t) => {
+  const { bot, calls } = uneatableFoodBot();
+  bot.health = 20;
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  harness.acquire(randomUUID());
+  const deadline = Date.now() + 3000;
+  while (driver.survival !== 'Could not eat.' && Date.now() < deadline) await delay(50);
+  assert.equal(driver.survival, 'Could not eat.');
+  assert.equal(calls.consumed, 1);
+  // One release before equipping, and one after Mineflayer gave up, so the server cannot finish the use later.
+  assert.equal(calls.deactivated, 2);
 });
 
 test('cancelling an action during reflex eating does not leave the bridge reporting Eating', async (t) => {
