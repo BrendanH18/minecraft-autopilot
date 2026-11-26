@@ -23,6 +23,9 @@ public final class AgentClient implements ClientModInitializer {
     private static final String TAKE_BACK = "Control returned to the player with F8.";
     private static AgentController controller;
     private static KeyBinding takeBack;
+    // The press that just returned control; an open screen must not also receive it (a rebound button would click a slot).
+    private static int takenBackKey = GLFW.GLFW_KEY_UNKNOWN;
+    private static int takenBackButton = -1;
     private BridgeServer bridge;
 
     /**
@@ -30,13 +33,17 @@ public final class AgentClient implements ClientModInitializer {
      * closes container screens between stacks, so a takeover press must not wait for the end of the tick.
      */
     public static void takeBackKey(long window, int key, int scancode, int action) {
-        if (action == GLFW.GLFW_PRESS && pressedInGame(window) && takeBack.matchesKey(key, scancode))
+        if (action == GLFW.GLFW_PRESS && pressedInGame(window) && takeBack.matchesKey(key, scancode)) {
             controller.release(TAKE_BACK);
+            takenBackKey = key;
+        }
     }
 
     public static void takeBackButton(long window, int button, int action) {
-        if (action == GLFW.GLFW_PRESS && pressedInGame(window) && takeBack.matchesMouse(button))
+        if (action == GLFW.GLFW_PRESS && pressedInGame(window) && takeBack.matchesMouse(button)) {
             controller.release(TAKE_BACK);
+            takenBackButton = button;
+        }
     }
 
     private static boolean pressedInGame(long window) {
@@ -66,17 +73,21 @@ public final class AgentClient implements ClientModInitializer {
             controller.playerScreenOpened(screen);
             // Handled screens consume ordinary keybinding presses, including while the agent opens storage.
             ScreenKeyboardEvents.allowKeyPress(screen).register((current, key, scan, modifiers) -> {
+                if (key == takenBackKey) return false;
                 if (!controller.hasControl() || !takeBack.matchesKey(key, scan)) return true;
                 controller.release("Control returned to the player with the takeover binding.");
                 return false;
             });
             ScreenMouseEvents.allowMouseClick(screen).register((current, x, y, button) -> {
+                if (button == takenBackButton) return false;
                 if (!controller.hasControl() || !takeBack.matchesMouse(button)) return true;
                 controller.release("Control returned to the player with the takeover binding.");
                 return false;
             });
         });
         ClientTickEvents.END_CLIENT_TICK.register(game -> {
+            takenBackKey = GLFW.GLFW_KEY_UNKNOWN;
+            takenBackButton = -1;
             while (takeBack.wasPressed()) {
                 controller.release(TAKE_BACK);
                 if (game.player != null)

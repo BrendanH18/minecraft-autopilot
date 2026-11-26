@@ -647,7 +647,8 @@ public final class AgentController {
     /** The pause menu and the player's own inventory only ever open from the player's keys during a session. */
     void playerScreenOpened(Screen screen) {
         if (lease.active() && (screen instanceof GameMenuScreen || screen instanceof AbstractInventoryScreen<?>))
-            release("A game menu was opened (" + screen.getClass().getSimpleName()
+            // A readable label: class names are intermediary names (class_433) in the packaged mod.
+            release("A game menu was opened (" + (screen instanceof GameMenuScreen ? "pause menu" : "inventory")
                     + "). Control returned to the player.");
     }
 

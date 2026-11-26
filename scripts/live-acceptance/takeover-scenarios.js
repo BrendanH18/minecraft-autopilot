@@ -205,7 +205,7 @@ const TRIGGERS = {
   inventory: { text: () => 'xdotool: press E (opens the inventory screen)' },
   'escape-screen': {
     text: () =>
-      'xdotool: press Escape while the agent has its screen open (closes it); for storage, retried up to 6 times when the press lands between screen openings',
+      'xdotool: press Escape while the agent has its screen open (closes it); for storage, retried up to 4 times when the press lands between screen openings',
   },
   stop: { text: () => 'second process: mc-agent stop' },
   cancel: { text: () => 'bridge: /v1/cancel with the session lease' },
@@ -698,7 +698,7 @@ function transition(ctx, expect, jobId, { timeoutMs }) {
 
 const MENU = /game menu was opened/i;
 // Only the pause menu, not another screen the agent doesn't own (that would be an unrelated cancellation).
-const PAUSE_MENU = /game menu was opened \((?:GameMenuScreen|pause)\)/i;
+const PAUSE_MENU = /game menu was opened \((?:pause menu|pause)\)/i;
 
 /**
  * Escape cancelled this storage job: through the storage screen, or through the pause menu between stacks. The

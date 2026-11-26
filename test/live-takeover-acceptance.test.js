@@ -332,14 +332,15 @@ test('the storage-close expected failure needs Escape to have cancelled the same
   const storage = /Storage screen was closed or replaced/i;
   const job = (message, extra = {}) => ({ id: 'job-1', status: 'cancelled', message, ...extra });
   const menu = (screen) => job(`A game menu was opened (${screen}). Control returned to the player.`);
-  assert.ok(escapeCancelledStorage('job-1', menu('GameMenuScreen'), storage));
+  assert.ok(escapeCancelledStorage('job-1', menu('pause menu'), storage));
   assert.ok(escapeCancelledStorage('job-1', menu('pause'), storage));
   assert.ok(!escapeCancelledStorage('job-1', menu('GenericContainerScreen'), storage));
+  assert.ok(!escapeCancelledStorage('job-1', menu('inventory'), storage));
   assert.ok(escapeCancelledStorage('job-1', job('Storage screen was closed or replaced.'), storage));
   // An unrelated cancellation, another job, a missing job, or one still running is not the explained failure.
   assert.ok(!escapeCancelledStorage('job-1', job('Cancelled by agent.'), storage));
   assert.ok(!escapeCancelledStorage('job-1', job('Storage screen was closed or replaced.', { id: 'job-2' }), storage));
   assert.ok(!escapeCancelledStorage('job-1', null, storage));
-  assert.ok(!escapeCancelledStorage('job-1', { ...menu('GameMenuScreen'), status: 'running' }, storage));
-  assert.ok(!escapeCancelledStorage(null, menu('GameMenuScreen'), storage));
+  assert.ok(!escapeCancelledStorage('job-1', { ...menu('pause menu'), status: 'running' }, storage));
+  assert.ok(!escapeCancelledStorage(null, menu('pause menu'), storage));
 });

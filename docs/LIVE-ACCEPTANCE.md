@@ -254,7 +254,7 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
 - **Retries.** Eating lasts 1.6 s, so an eat scenario repeats (up to three
   times) when the food is eaten before the key lands. Escape reaches a storage
   screen only while the agent has it open, which is about one tick per stack, so
-  `menu-storage-close` and `menu-storage-close-withdraw` repeat up to six times
+  `menu-storage-close` and `menu-storage-close-withdraw` repeat up to four times
   when Escape opens the pause menu instead.
 - **Not in `--fast`.** Each scenario starts its own client, so `--takeover`
   takes about 18 minutes in Boat (31 scenarios). On Fabric, `--all` includes them.
