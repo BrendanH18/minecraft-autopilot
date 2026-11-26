@@ -23,6 +23,8 @@ const COLLECT_BLOCKS = new Set([
   'cobblestone',
   'sand',
 ]);
+const EATING_BACKOFF_MS = 10_000;
+const FAILED_EATING = 'Could not eat.';
 const SAFE_FOOD = new Set([
   'bread',
   'apple',
@@ -120,6 +122,8 @@ export class MineflayerDriver {
     this.idleController = null;
     this.idleTask = null;
     this.lastRetreat = 0;
+    // As in the Fabric mod: after food use fails, automatic eating waits so it cannot defer a retreat indefinitely.
+    this.eatingRetryAt = 0;
     this.operations = new OperationGate();
     this.controlController = null;
     this.controlIdentity = null;
@@ -254,7 +258,7 @@ export class MineflayerDriver {
       const signal = AbortSignal.any([controller.signal, this.controlController.signal]);
       const home = this.homes[this.identity()];
       let behavior;
-      if (this.bot.food <= 16 && this.bot.inventory.items().some((item) => SAFE_FOOD.has(item.name))) {
+      if (this.wantsToEat()) {
         this.survival = 'Eating';
         behavior = () => this.eat(signal);
       } else if (this.bot.health <= 8 && home && Date.now() - this.lastRetreat > 10_000) {
@@ -273,9 +277,9 @@ export class MineflayerDriver {
             this.survival = 'Ready';
           },
           (error) => {
-            this.survival = signal.aborted
-              ? 'Survival response stopped.'
-              : `Survival response failed: ${error.message}`;
+            if (signal.aborted) this.survival = 'Survival response stopped.';
+            // eat() reports its own failure ("Could not eat.").
+            else if (this.survival !== FAILED_EATING) this.survival = `Survival response failed: ${error.message}`;
           },
         )
         .finally(() => {
@@ -494,13 +498,30 @@ export class MineflayerDriver {
     return this.operations.run(operation, signal, () => this.stop());
   }
 
+  /** Hungry, holding safe food, and not backing off after a failed attempt. */
+  wantsToEat() {
+    return (
+      this.bot.food <= 16 &&
+      Date.now() >= this.eatingRetryAt &&
+      this.bot.inventory.items().some((item) => SAFE_FOOD.has(item.name))
+    );
+  }
+
   async eat(signal) {
     if (this.bot.food >= 20) return;
     const food = this.bot.inventory.items().find((item) => SAFE_FOOD.has(item.name));
     if (!food) throw new Error('No supported food in inventory.');
     this.stop();
-    await this.abortable(() => this.bot.equip(food, 'hand'), signal);
-    await this.abortable(() => this.bot.consume(), signal);
+    try {
+      await this.abortable(() => this.bot.equip(food, 'hand'), signal);
+      await this.abortable(() => this.bot.consume(), signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // Mineflayer stops waiting for the server after a few seconds (food that takes longer, or a refused use).
+      this.eatingRetryAt = Date.now() + EATING_BACKOFF_MS;
+      this.survival = FAILED_EATING;
+      throw /timed out/i.test(error.message) ? new Error('Eating timed out.') : error;
+    }
   }
 
   async execute(action, { signal, onProgress, collectionTimeoutMs = 180_000 }) {
@@ -521,13 +542,10 @@ export class MineflayerDriver {
         local.abort(new Error('World or dimension changed.'));
         return;
       }
-      if (
-        this.bot.food <= 16 &&
-        action.type !== 'eat' &&
-        this.bot.inventory.items().some((item) => SAFE_FOOD.has(item.name))
-      ) {
+      if (action.type !== 'eat' && this.wantsToEat()) {
         reflexBusy = true;
         interruptedForFood = true;
+        this.survival = 'Eating';
         local.abort(new Error('Interrupted to eat.'));
         eatingTask = this.eat(scopedSignal).finally(() => {
           reflexBusy = false;
@@ -551,7 +569,13 @@ export class MineflayerDriver {
     } catch (error) {
       if (interruptedForFood && !scopedSignal.aborted) {
         clearInterval(guard);
-        await eatingTask;
+        await eatingTask.catch((eatingError) => {
+          if (scopedSignal.aborted) throw scopedSignal.reason;
+          throw withContainer(
+            new Error(`Interrupted to eat, but could not eat (${eatingError.message}). Replan from fresh state.`),
+            error?.container,
+          );
+        });
         this.survival = 'Ate food; replan from current state';
         // Restart from the current inventory/position without duplicating a collection quota.
         throw withContainer(new Error('Interrupted to eat. Food consumed; replan from fresh state.'), error?.container);

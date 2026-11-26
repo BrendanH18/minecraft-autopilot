@@ -123,6 +123,83 @@ test('a hungry bot with low health eats instead of repeatedly retreating', async
   assert.equal(goals, 1, 'no retreat should start before eating');
 });
 
+/** A hungry, wounded bot whose food Mineflayer gives up on, as with food that takes longer than its consume timeout. */
+function uneatableFoodBot() {
+  const bot = new EventEmitter();
+  const calls = { consumed: 0, goals: 0 };
+  let stopPath;
+  Object.assign(bot, {
+    registry: minecraftData('1.21.1'),
+    entity: { position: new Vec3(0, 64, 0) },
+    entities: {},
+    username: 'Test',
+    player: { uuid: randomUUID() },
+    game: { dimension: 'overworld' },
+    health: 7,
+    food: 10,
+    inventory: { items: () => [{ name: 'bread', count: 8, slot: 36 }] },
+    // Like mineflayer-pathfinder, clearing the goal rejects the pending goto.
+    pathfinder: {
+      setMovements() {},
+      setGoal(goal) {
+        if (goal === null) stopPath?.(new Error('Goal changed'));
+      },
+      goto: () => {
+        calls.goals++;
+        return new Promise((_, reject) => {
+          stopPath = reject;
+        });
+      },
+    },
+    findBlocks: () => [],
+    clearControlStates() {},
+    deactivateItem() {},
+    stopDigging() {},
+    equip: async () => {},
+    consume: async () => {
+      calls.consumed++;
+      throw new Error('Promise timed out.');
+    },
+    quit: () => bot.emit('end', 'Closed'),
+  });
+  return { bot, calls };
+}
+
+test('failed food use backs off automatic eating, so a wounded bot retreats instead of retrying food', async (t) => {
+  const { bot, calls } = uneatableFoodBot();
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  driver.homes[driver.identity()] = { x: 5, y: 64, z: 5 };
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  harness.acquire(randomUUID());
+  const deadline = Date.now() + 3000;
+  while (calls.goals === 0 && Date.now() < deadline) await delay(50);
+  assert.equal(calls.consumed, 1, 'one failed attempt, then the 10 s backoff');
+  assert.equal(calls.goals, 1, 'the retreat starts during the backoff');
+  assert.equal(driver.survival, 'Low health: retreating home');
+  assert.ok(driver.eatingRetryAt > Date.now() + 8000);
+});
+
+test('explicit eat that the server never completes fails as "Eating timed out." and starts the backoff', async (t) => {
+  const { bot, calls } = uneatableFoodBot();
+  bot.health = 20;
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  const harness = new Harness(driver);
+  t.after(() => harness.close());
+  const owner = randomUUID();
+  harness.acquire(owner);
+  harness.start(owner, { type: 'eat' });
+  await harness.task;
+  assert.equal(harness.job.status, 'failed');
+  assert.equal(harness.job.message, 'Eating timed out.');
+  assert.equal(driver.survival, 'Could not eat.');
+  await delay(600);
+  assert.equal(calls.consumed, 1, 'automatic eating waits out the backoff');
+  assert.equal(driver.wantsToEat(), false);
+  driver.eatingRetryAt = 0;
+  assert.equal(driver.wantsToEat(), true);
+});
+
 test('collection walks back to its start, digging out of a pit only as a fallback, then restores non-destructive movement', async (t) => {
   const bot = new EventEmitter();
   const sand = minecraftData('1.21.1').blocksByName.sand;

@@ -394,7 +394,7 @@ These are behaviors found during live testing that the code depends on:
   - Bot: walks for up to 20 s, then digs as a fallback within a 60 s return budget, because mineflayer-pathfinder replans after every broken block.
   - A low-health retreat during collection may also break blocks.
   - Exhausting reachable blocks triggers a return attempt even when the quota is unmet. Failed returns report a failed job; inventory progress is preserved. Manual handoff never starts a return trip.
-- **Survival order.** Both backends eat before retreating, because health cannot regenerate while hungry.
+- **Survival order.** Both backends eat before retreating, because health cannot regenerate while hungry. After failed food use (Fabric gives up after 5 s, Mineflayer's `consume` after 2.5 s), both back off automatic eating for 10 s, so food that can't be eaten never defers a retreat.
 - **Mineflayer details:**
   - `consume` can take up to 2.5 s to settle after cancellation. The adapter waits up to 10 s for `stopping` to clear before takeover.
   - `timers/promises` rejects with a generic `AbortError`, so the driver rethrows the signal's reason.
