@@ -359,7 +359,7 @@ test('dry-run plan covers every scenario with known reply patterns, separated la
 });
 
 test('options require an explicit selection and validate ids, ports, and names', () => {
-  assert.throws(() => parseOptions([]), /--scenario <id> \(repeatable\), --all, or --fast/);
+  assert.throws(() => parseOptions([]), /--scenario <id> \(repeatable\), --all, --fast, or --takeover/);
   assert.throws(() => parseOptions(['--scenario', 'nope']), /Unknown scenario "nope"/);
   assert.throws(() => parseOptions(['--all', '--scenario', 'blocked-lid']), /Choose only one/);
   assert.throws(() => parseOptions(['--all', '--port', '80']), /--port/);

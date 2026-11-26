@@ -117,11 +117,12 @@ fi
 run=(bash -c "$cmd")
 # A dry run starts nothing, so it needs neither.
 if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) && ! $cmd =~ --dry-run ]]; then
-    if ! command -v xvfb-run >/dev/null; then
-        say "installing Xvfb and Mesa for the headless Fabric client"
+    # xdotool presses keys in the client window for the takeover scenarios (--takeover).
+    if ! command -v xvfb-run >/dev/null || ! command -v xdotool >/dev/null; then
+        say "installing Xvfb, Mesa and xdotool for the headless Fabric client"
         sudo apt-get update -qq --allow-releaseinfo-change >/dev/null || true
         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y -qq --no-install-recommends \
-            xvfb xauth libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 >/dev/null
+            xvfb xauth libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 xdotool >/dev/null
     fi
     # Loom checks every object and fetches only what is missing, so an interrupted download heals here.
     say "checking the Minecraft client asset cache"

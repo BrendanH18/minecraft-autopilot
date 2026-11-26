@@ -216,8 +216,68 @@ opened containers, saved home or last job.
   `inspect-preserves-home` used to end five blocks from home
   ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)); its
   results now record the server `Pos` before each planner request.
-- **Not covered.** F8, menus, the packaged mods folder, the normal launcher and
-  handoff can't be scripted here. They stay in the [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist).
+- **Not covered.** The packaged mods folder, the normal launcher and handoff
+  can't be scripted here. F8, menus, stop, expiry, death and dimension changes
+  are covered as pre-checks by the [takeover scenarios](#takeover-scenarios).
+
+### Takeover scenarios
+
+`--takeover` (Fabric only) runs the [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist)
+items that need no person, so the keyboard session starts from known results.
+Each scenario has the checklist item's id (`f8-idle`, `menu-collect`,
+`expiry-goto`, ...) and takes its expected outcome from
+[`src/lifecycle-scenarios.js`](../src/lifecycle-scenarios.js). They live in
+[`scripts/live-acceptance/takeover-scenarios.js`](../scripts/live-acceptance/takeover-scenarios.js).
+
+```sh
+npm run acceptance:fabric -- --dry-run --takeover
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fabric -- --accept-eula --takeover
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fabric -- --accept-eula --scenario f8-collect --scenario stop-goto
+```
+
+- **How the transitions happen.** Keys are real X key presses: `xdotool`
+  focuses the client window on the Xvfb display and presses F8, Escape or E
+  (Tab and Enter press Respawn on the death screen). A key counts only when the
+  bridge then shows the transition. "Waiting for model inference" is the
+  in-process agent with a scripted planner whose first request is held open.
+  For `expiry-idle` the real `mc-agent agent` runs as a second process against a
+  loopback stand-in for Ollama, and is suspended with SIGSTOP. `mc-agent stop`
+  and `mc-agent job` run as separate processes, `expiry-goto` kills
+  `mc-agent goto` with SIGKILL, and server commands kill, kick, teleport to the
+  Nether or fill the last inventory slot.
+- **What is checked.** The bridge mode and job message from the lifecycle
+  table; independent `data get` reads 1 s after the transition and 5 s later
+  (position, inventory, `foodLevel`, `Dimension`, both halves of the chest);
+  that the old lease can neither heartbeat nor act; and that a new session is
+  refused while the player is dead or disconnected, runs only when explicitly
+  started (`wait 1`), or, after a cancel, that the same lease goes on.
+- **Retries.** Eating lasts 1.6 s, so an eat scenario repeats (up to three
+  times) when the food is eaten before the key lands. Escape reaches a storage
+  screen only while the agent has it open, which is about one tick per stack, so
+  `menu-storage-close` and `menu-storage-close-withdraw` repeat up to six times
+  when Escape opens the pause menu instead.
+- **Not in `--fast`.** Each scenario starts its own client, so `--takeover`
+  takes about 18 minutes in Boat (31 scenarios). On Fabric, `--all` includes them.
+- **Needs Xvfb and xdotool.** The scenarios refuse to run without `$DISPLAY` or
+  `xdotool`; the Boat check installs both. Don't run them on the Mac.
+- **Not proof for the packaged gates.** Synthetic key presses on Xvfb reach the
+  development client through XTEST, not a person's keyboard in a normal
+  launcher with the packaged jars. `fabric-f8-takeover` and the RELEASE.md
+  boxes still need the keyboard sessions; `acceptance review-bot` rejects these
+  results like any Fabric result.
+- **Not scripted.** The three `takeover-while-stopping-*` items need a server
+  slow enough to leave a container opening unanswered, and the loopback server
+  replies within a tick. `disconnect-collect` doesn't rejoin after the kick.
+- **Results (25 November 2026).** On the development client in Boat, 29 of the
+  31 scenarios pass and `menu-storage-close` and `menu-storage-close-withdraw`
+  are expected failures (`XFAIL`): the agent's container screen opens and
+  closes within one frame, so no key press reaches it. Escape lands between
+  stacks instead, and that path is checked. An expected failure is reported
+  and counted apart from failures, and doesn't fail the run. The first runs
+  found two Fabric bugs, now fixed: a takeover key press (F8) or the pause
+  menu between storage stacks was lost, so the transfer went on, and a new
+  session at the death screen was refused as "paused" instead of asking the
+  player to respawn.
 
 ## Fabric fixtures
 
