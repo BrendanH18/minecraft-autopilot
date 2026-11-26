@@ -42,7 +42,8 @@ runs.
 Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks),
 which also copies the results back:
 `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --fast`.
-A full offline `--all` run took about 15 minutes in Boat. The three pit
+A `--fast` run takes about 4.5 minutes in Boat, and a full offline `--all`
+run took about 15 minutes. The three pit
 scenarios each wait out the bot's 180-second mining deadline. See the
 [observed results](DEVELOPMENT.md#validation).
 
@@ -119,10 +120,11 @@ minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, serverLo
 options: { port, account, keepServer, model, noThinking, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
+timings: { serverStartMs, worldSetupMs, scenariosMs, serverStopMs, totalMs }
 summary: { pass, fail, skipped, error }, error
 ```
 
-`steps` record every console command, bridge/CLI action, and read with timing and outcome. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
+`steps` record every console command, bridge/CLI action, and read with timing and outcome. Each `cleanup` entry also has a `durationMs`, and `timings` gives the wall time of each run phase (`null` for a phase the run never reached), so a slow run shows where its time went. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
 
 Cleanup failures fail the affected scenario. If the runner cannot stop the bot, it records the failure and skips the remaining scenarios. Failed runs include the last available bot output alongside the server log. A run exits unsuccessfully if it cannot hash the server log after shutdown or records zero passing scenarios, including a selection made up entirely of real-model scenarios without `--model`.
 

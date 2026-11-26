@@ -57,7 +57,7 @@ Strict acceptance start verifies the installable ZIP and its pinned dependencies
 | --- | --- |
 | Defer automatic eating while a Fabric storage or craft action owns the inventory, and wait for the server to confirm a placed crafting table. | Java helper tests cover both. `npm run build:mod` and `npm run lint:mod` pass. |
 | Add a recipe parity test between `src/recipes.js` and `CraftingRecipes.java`. | The test fails when an item, yield, ingredient, or table requirement differs. |
-| Add a `withdraw-craft-model` real-model scenario and a `--fast` preset (no pit scenarios) to the [bot runner](LIVE-ACCEPTANCE.md). | `--dry-run` lists both, and `--fast` passes in Boat in under five minutes. |
+| Add a `withdraw-craft-model` real-model scenario and a `--fast` preset (no pit scenarios) to the [bot runner](LIVE-ACCEPTANCE.md). | `--dry-run` lists both, and `--fast` passes in Boat in under five minutes (4 min 19 s on 26 November). |
 | Add a [Fabric fixture helper](LIVE-ACCEPTANCE.md#fabric-fixtures) for pit, chest and barrel deposits, withdrawals, and crafting on a local server. | A dry run prints the fixture and independent server reads for each provided setup, and a Boat run builds them on the vanilla server. |
 | Make `acceptance status` report whether all eligible evidence shares one candidate commit and archive checksum, and let `acceptance start` record the hashes of the jars in a launcher `mods` folder. | Mixed candidates and jars that don't match the archive are reported as ineligible, with tests. |
 | Add a weekly and on-demand `acceptance:bot` workflow on a GitHub-hosted runner. It is not a required check. | One manual run passes and uploads `results.json` and `server.out`. |
