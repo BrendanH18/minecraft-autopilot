@@ -85,8 +85,11 @@ test('the takeover dry run lists each scenario with known console replies, its o
       scenario.expect.some((text) => /^independently: /.test(text)),
       scenario.id,
     );
-    assert.ok(
+    // A cancel keeps its lease, so only a manual outcome lists the old lease's refusal.
+    const manual = LIFECYCLE_SCENARIOS.find(({ id }) => id === scenario.id).expect.mode === 'manual';
+    assert.equal(
       scenario.actions.some((text) => /old lease/.test(text)),
+      manual,
       scenario.id,
     );
   }
