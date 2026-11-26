@@ -6,7 +6,9 @@ import { scenarios as shared } from '../scripts/live-acceptance/scenarios.js';
 import {
   escapeCancelledStorage,
   FIRST_LANE,
+  HOLD,
   NOT_SCRIPTED,
+  probeAcquire,
   takeoverIds,
   takeoverScenarios,
 } from '../scripts/live-acceptance/takeover-scenarios.js';
@@ -346,4 +348,267 @@ test('the storage-close expected failure needs Escape to have cancelled the same
   assert.ok(!escapeCancelledStorage('job-1', null, storage));
   assert.ok(!escapeCancelledStorage('job-1', { ...menu('pause menu'), status: 'running' }, storage));
   assert.ok(!escapeCancelledStorage(null, menu('pause menu'), storage));
+});
+
+/**
+ * A fake client, server and proxy for the takeover-while-stopping scenarios. Holding the server's replies leaves the
+ * agent's next container click unanswered (`pending`); a stop while it is pending shows `stopping` until released.
+ */
+function fakeHeldStop({ replyTooFast = false, gotoDuringHold = false, movesAfterStop = false } = {}) {
+  let clock = 0;
+  const world = {
+    mode: 'manual',
+    job: null,
+    lease: null,
+    pending: false,
+    held: false,
+    chest: 0,
+    logs: 320,
+    position: { x: 100.5, y: -60, z: 0.5 },
+    stops: 0,
+    proxyEvents: [],
+    gotoArgs: null,
+  };
+  const checks = [];
+  let interrupted = null;
+  let gotoDone = null;
+  const state = () => ({
+    mode: world.mode,
+    stopping: world.pending && world.mode === 'manual' && world.job?.status !== 'running',
+    paused: false,
+    job: world.job && { ...world.job },
+    inventory: [{ name: 'minecraft:oak_log', count: world.logs }],
+  });
+  const refuseAcquire = () => {
+    if (world.pending) throw new Error('Previous storage opening is still awaiting the server.');
+    if (world.mode === 'agent') throw new Error('Another agent owns control. Stop it or press F8 first.');
+  };
+  const adapter = () => {
+    const self = {
+      leaseId: null,
+      async execute(action) {
+        refuseAcquire();
+        self.leaseId = `lease-${action.type}`;
+        world.lease = self.leaseId;
+        world.mode = 'agent';
+        world.job = { id: 'job-1', type: action.type, status: 'running', message: `Started ${action.type}` };
+        // The first stack moves before the hold.
+        world.logs -= 64;
+        world.chest += 64;
+        return new Promise((_resolve, reject) => {
+          interrupted = reject;
+        });
+      },
+      async request(path, body) {
+        if (path === '/v1/control' && body.action === 'acquire') {
+          refuseAcquire();
+          return { ok: true };
+        }
+        if (path === '/v1/control' && body.action === 'release') return { ok: true };
+        if (body.leaseId !== world.lease || world.mode !== 'agent')
+          throw new Error('Control was released or expired. Explicitly start a new session.');
+        return { ok: true };
+      },
+      async close() {},
+    };
+    return self;
+  };
+  const proxy = {
+    pause(direction) {
+      world.proxyEvents.push(`pause ${direction}`);
+      world.held = true;
+      // The agent clicks again within a tick; with the reply held, the opening stays unanswered.
+      if (!replyTooFast) world.pending = true;
+      return {};
+    },
+    resume(direction) {
+      world.proxyEvents.push(`resume ${direction}`);
+      world.held = false;
+      world.pending = false;
+      return { held: { toServer: 0, toClient: 512 } };
+    },
+    stats: () => ({ held: { toClient: world.held ? 512 : 0 } }),
+  };
+  const ctx = {
+    bot: 'LiveFabric',
+    proxy,
+    now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+      if (movesAfterStop && world.mode === 'manual' && world.job?.status === 'cancelled') world.chest++;
+      if (gotoDone && !world.pending) {
+        const [, x, y, z] = world.gotoArgs.map(Number);
+        world.position = { x: x + 0.5, y, z: z + 0.5 };
+        gotoDone({ code: 0, stdout: JSON.stringify({ type: 'goto', status: 'completed' }), stderr: '' });
+        gotoDone = null;
+      }
+    },
+    step: async (_name, fn) => fn(),
+    note() {},
+    check: (name, pass, detail) => checks.push({ name, pass: !!pass, detail }),
+    connect: async () => adapter(),
+    cliStop: async () => {
+      world.stops++;
+      world.mode = 'manual';
+      world.lease = null;
+      world.job = { ...world.job, status: 'cancelled', message: 'Emergency stop requested.' };
+      interrupted?.(new Error('Control was returned to the player.'));
+      return { code: 0, stdout: '{"ok":true}', stderr: '' };
+    },
+    cli: {
+      start: (args) => {
+        world.gotoArgs = args;
+        if (gotoDuringHold) world.job = { id: 'job-2', type: 'goto', status: 'running', message: 'Started goto' };
+        const exited = new Promise((resolve) => {
+          gotoDone = resolve;
+        });
+        return { exited, output: () => ({ stdout: '', stderr: '' }), stop: async () => ({}) };
+      },
+    },
+    bridge: { observe: async () => state() },
+    server: {
+      position: async () => world.position,
+      inventory: async () => [{ id: 'minecraft:oak_log', count: world.logs }],
+      items: async () => (world.chest ? [{ id: 'minecraft:oak_log', count: world.chest }] : []),
+      command: async () => 'ok',
+    },
+  };
+  return { ctx, world, checks };
+}
+
+const HELD_IDS = [
+  'takeover-while-stopping-deposit',
+  'takeover-while-stopping-withdraw',
+  'takeover-while-stopping-craft',
+];
+
+test('the takeover-while-stopping items are scripted with the proxy and the dry run says how', () => {
+  const plan = buildPlan(parseOptions(['--dry-run', '--takeover', ...FABRIC]));
+  for (const id of HELD_IDS) {
+    const scenario = plan.scenarios.find((entry) => entry.id === id);
+    assert.ok(scenario, id);
+    assert.equal(scenario.proxy, true);
+    const actions = scenario.actions.join('\n');
+    assert.match(actions, /hold the server's replies/);
+    assert.match(actions, /refused as "awaiting the server"/);
+    assert.match(actions, /mc-agent stop/);
+    assert.match(actions, /mc-agent goto -?\d+ -60 -?\d+ \(three blocks west\)/);
+    assert.match(actions, /capped at 8 s, under the 15 s keep-alive/);
+    assert.match(actions, /old lease/);
+  }
+  const craft = plan.scenarios.find(({ id }) => id === 'takeover-while-stopping-craft');
+  assert.ok(craft.prepare.includes('give LiveFabric minecraft:oak_planks 32'));
+  assert.match(craft.actions[0], /^proxy: hold the server's replies to the client; then bridge: craft chest 4/);
+  assert.ok(HOLD.clickMs + HOLD.newSessionMs < HOLD.maxMs && HOLD.maxMs < 15_000);
+  assert.ok(plan.scenarios.every((scenario) => scenario.proxy === true));
+  assert.match(formatPlan(plan), /pausable loopback TCP proxy/);
+});
+
+test('a held container reply shows stopping, keeps the new session waiting, and passes once it settles', async () => {
+  const scenario = takeoverScenarios.find(({ id }) => id === 'takeover-while-stopping-deposit');
+  const plan = scenario.plan({ bot: 'LiveFabric', lane: scenario.lane });
+  assert.deepEqual(plan.points.near, { x: plan.origin.x - 3, y: plan.points.far.y, z: plan.origin.z });
+  const good = fakeHeldStop();
+  await scenario.run(good.ctx, plan);
+  assert.deepEqual(
+    good.checks.filter((check) => !check.pass).map(({ name }) => name),
+    [],
+  );
+  assert.deepEqual(good.world.proxyEvents, ['pause toClient', 'resume toClient']);
+  assert.equal(good.world.stops, 1);
+  assert.deepEqual(good.world.gotoArgs, [
+    'goto',
+    ...[plan.points.near.x, plan.points.near.y, plan.points.near.z].map(String),
+  ]);
+  const names = good.checks.map(({ name }) => name);
+  for (const expected of [
+    /reply was held: a fresh acquire was refused as awaiting the server/,
+    /showed stopping: true after the stop/,
+    /job ends cancelled with a message matching \/Emergency stop requested\/i/,
+    /while stopping is true a new session cannot start work/,
+    /stopping clears once the released reply settles/,
+    /no further items moved into the container/,
+    /new session then starts work: mc-agent goto completes/,
+    /old session cannot heartbeat or act/,
+  ])
+    assert.ok(
+      names.some((name) => expected.test(name)),
+      String(expected),
+    );
+});
+
+test('a reply too fast to hold is reported as not observed, never as a pass', async () => {
+  const scenario = takeoverScenarios.find(({ id }) => id === 'takeover-while-stopping-craft');
+  const plan = scenario.plan({ bot: 'LiveFabric', lane: scenario.lane });
+  const fast = fakeHeldStop({ replyTooFast: true });
+  await scenario.run(fast.ctx, plan);
+  const failed = fast.checks.filter((check) => !check.pass).map(({ name }) => name);
+  assert.equal(failed.length, 1);
+  assert.match(failed[0], /^not observed: /);
+  // The craft holds the replies before it starts, and the hold is always released.
+  assert.deepEqual(fast.world.proxyEvents, ['pause toClient', 'resume toClient']);
+  assert.equal(fast.world.stops, 0);
+});
+
+test('a new session that starts work while stopping, or items that move after the stop, fail the scenario', async () => {
+  const scenario = takeoverScenarios.find(({ id }) => id === 'takeover-while-stopping-withdraw');
+  const plan = scenario.plan({ bot: 'LiveFabric', lane: scenario.lane });
+  const early = fakeHeldStop({ gotoDuringHold: true });
+  await scenario.run(early.ctx, plan);
+  assert.ok(
+    early.checks.some(
+      (check) => !check.pass && /while stopping is true a new session cannot start work/.test(check.name),
+    ),
+  );
+  const moving = fakeHeldStop({ movesAfterStop: true });
+  await scenario.run(moving.ctx, plan);
+  assert.ok(moving.checks.some((check) => !check.pass && /no further items taken from the container/.test(check.name)));
+  assert.deepEqual(moving.world.proxyEvents, ['pause toClient', 'resume toClient']);
+});
+
+test('without the proxy the held-stop scenarios fail instead of running', async () => {
+  const scenario = takeoverScenarios.find(({ id }) => id === 'takeover-while-stopping-deposit');
+  const plan = scenario.plan({ bot: 'LiveFabric', lane: scenario.lane });
+  const rig = fakeHeldStop();
+  rig.ctx.proxy = null;
+  await scenario.run(rig.ctx, plan);
+  assert.deepEqual(
+    rig.checks.map(({ name, pass }) => [name, pass]),
+    [["the client joined through the runner's pausable proxy", false]],
+  );
+});
+
+test('probeAcquire reports a refusal as awaiting the server and releases an accepted probe', async () => {
+  const refusing = {
+    request: async () => {
+      throw new Error('Previous storage opening is still awaiting the server.');
+    },
+  };
+  assert.deepEqual(await probeAcquire(refusing), {
+    refused: true,
+    awaiting: true,
+    message: 'Previous storage opening is still awaiting the server.',
+  });
+  const busy = {
+    request: async () => {
+      throw new Error('Another agent owns control. Stop it or press F8 first.');
+    },
+  };
+  assert.equal((await probeAcquire(busy)).awaiting, false);
+  const calls = [];
+  const accepting = {
+    request: async (path, body) => {
+      calls.push([path, body.action, body.leaseId]);
+      return { ok: true };
+    },
+  };
+  assert.deepEqual(await probeAcquire(accepting), { refused: false, awaiting: false });
+  assert.deepEqual(
+    calls.map(([path, action]) => [path, action]),
+    [
+      ['/v1/control', 'acquire'],
+      ['/v1/control', 'release'],
+    ],
+  );
+  assert.equal(calls[0][2], calls[1][2]);
 });

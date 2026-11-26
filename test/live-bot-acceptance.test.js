@@ -1906,6 +1906,90 @@ test('a Fabric run starts a fresh client per scenario and records a separate sch
   assert.match(summary, /Client log: \/fake\/run\/client\/client\.out/);
 });
 
+test('scenarios marked proxy join a Fabric run through one pausable proxy; the others join the server directly', async () => {
+  const world = fakeWorld();
+  const deps = fakeDeps(world);
+  const starts = [];
+  const proxies = [];
+  deps.prepareFabricGameDirectory = async () => {};
+  deps.startFabricClient = async (options) => {
+    starts.push(options.port);
+    return {
+      stop: async () => world.console.push(`${LOG_PREFIX}${BOT} left the game\n`),
+    };
+  };
+  deps.startProxy = async (options) => {
+    const proxy = {
+      port: 40001,
+      options,
+      paused: false,
+      closed: false,
+      pause() {
+        proxy.paused = true;
+      },
+      resume() {
+        proxy.paused = false;
+      },
+      async close() {
+        proxy.closed = true;
+      },
+    };
+    proxies.push(proxy);
+    return proxy;
+  };
+  const seen = [];
+  const stub = (id, proxied) => ({
+    id,
+    lane: 0,
+    title: id,
+    backends: ['fabric'],
+    ...(proxied && { proxy: true }),
+    release: ['RELEASE.md: stub'],
+    actions: ['a'],
+    expect: ['e'],
+    plan: () => ({
+      points: { start: { x: 0.5, y: -60, z: 0.5 } },
+      fixture: [],
+      prepare: [`tp ${BOT} 0.5 -60 0.5`],
+      cleanup: [],
+    }),
+    run: async (ctx) => {
+      seen.push(ctx.proxy);
+      // A scenario that leaves the replies held must not leave the client cut off.
+      ctx.proxy?.pause('toClient');
+      ctx.check('ran', true);
+    },
+  });
+  const options = {
+    ...parseOptions(['--scenario', 'craft-rounds-up', '--accept-eula', '--backend', 'fabric', '--account', BOT]),
+    scenarios: [stub('direct', false), stub('held', true)],
+    out: '/fake/results.json',
+  };
+  const results = await runAcceptance(options, deps);
+  assert.equal(proxies.length, 1);
+  assert.deepEqual(proxies[0].options, { port: 25566 });
+  assert.deepEqual(starts, [25566, 40001]);
+  assert.deepEqual(seen, [null, proxies[0]]);
+  assert.equal(proxies[0].paused, false);
+  assert.equal(proxies[0].closed, true);
+  assert.deepEqual(results.proxy, { port: 40001, target: 25566 });
+  assert.deepEqual(
+    results.scenarios.map(({ status }) => status),
+    ['pass', 'pass'],
+  );
+  const plan = buildPlan({ ...options, dryRun: true });
+  assert.match(plan.proxy, /pausable loopback TCP proxy .*127\.0\.0\.1:25566/);
+  assert.deepEqual(
+    plan.scenarios.map(({ proxy }) => proxy),
+    [undefined, true],
+  );
+  assert.match(formatPlan(plan), /\[held\] held \[proxy\]/);
+
+  // Without a proxied scenario no proxy starts.
+  deps.startProxy = async () => assert.fail('no proxy without a proxied scenario');
+  await runAcceptance({ ...options, scenarios: [stub('direct', false)] }, deps);
+});
+
 test('a Fabric client that cannot be stopped skips the remaining scenarios', async () => {
   const world = fakeWorld();
   const deps = fakeDeps(world);

@@ -291,6 +291,25 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   and `mc-agent job` run as separate processes, `expiry-goto` kills
   `mc-agent goto` with SIGKILL, and server commands kill, kick, teleport to the
   Nether or fill the last inventory slot.
+- **A pausable proxy for the server's replies.** The takeover scenarios' client
+  joins through a loopback TCP forwarder
+  ([`scripts/live-acceptance/proxy.js`](../scripts/live-acceptance/proxy.js))
+  in front of the offline server. It forwards bytes unchanged and parses
+  nothing; a scenario can hold one direction and release it later. Only the
+  three `takeover-while-stopping-*` items hold anything: they hold the server's
+  replies so the agent's container click stays unanswered. A deposit or
+  withdrawal is held once its first stack has moved; a craft (`craft chest 4`
+  with 32 planks) is held before it starts, because it opens its table only
+  once. The click counts as made when a fresh session's acquire is refused as
+  "awaiting the server". Then `mc-agent stop` runs as a second process, the
+  bridge must show `stopping: true`, and `mc-agent goto` three blocks west is
+  started at once; for 2.5 s a fresh acquire must still be refused and no job
+  may start. The replies are then released (the hold is capped at 8 s, well
+  under the 15 s keep-alive), `stopping` must clear, and the goto must run and
+  complete. Chest or inventory reads at the stop, 1 s after the release and
+  5 s later must match. If the click is never seen awaiting the server, or
+  `stopping` never appears, the scenario fails with a check named
+  `not observed: ...`; it never passes without seeing the window.
 - **What is checked.** The bridge mode and job message from the lifecycle
   table; independent `data get` reads 1 s after the transition and 5 s later
   (position, inventory, `foodLevel`, `Dimension`, both halves of the chest);
@@ -303,7 +322,7 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   `menu-storage-close` and `menu-storage-close-withdraw` repeat up to four times
   when Escape opens the pause menu instead.
 - **Not in `--fast`.** Each scenario starts its own client, so `--takeover`
-  takes about 18 minutes in Boat (31 scenarios). On Fabric, `--all` includes them.
+  takes about 18 minutes in Boat (34 scenarios). On Fabric, `--all` includes them.
 - **Needs Xvfb and xdotool.** The scenarios refuse to run without `$DISPLAY` or
   `xdotool`; the Boat check installs both. Don't run them on the Mac.
 - **Not proof for the packaged gates.** Synthetic key presses on Xvfb reach the
@@ -311,11 +330,12 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   launcher with the packaged jars. `fabric-f8-takeover` and the RELEASE.md
   boxes still need the keyboard sessions; `acceptance review-bot` rejects these
   results like any Fabric result.
-- **Not scripted.** The three `takeover-while-stopping-*` items need a server
-  slow enough to leave a container opening unanswered, and the loopback server
-  replies within a tick. `disconnect-collect` doesn't rejoin after the kick.
-- **Results (25 November 2026).** On the development client in Boat, 29 of the
-  31 scenarios pass and `menu-storage-close` and `menu-storage-close-withdraw`
+- **Not scripted.** `disconnect-collect` doesn't rejoin after the kick. The
+  proxy doesn't help `menu-storage-close`: the server sends the container screen
+  and its contents together, so holding or delaying them still opens and closes
+  the screen within one frame.
+- **Results (26 November 2026).** On the development client in Boat, 32 of the
+  34 scenarios pass (17 min 38 s in all) and `menu-storage-close` and `menu-storage-close-withdraw`
   are expected failures (`XFAIL`): the agent's container screen opens and
   closes within one frame, so no key press reaches it. Escape lands between
   stacks instead, and that path is checked. An expected failure is reported
@@ -324,7 +344,11 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   found two Fabric bugs, now fixed: a takeover key press (F8) or the pause
   menu between storage stacks was lost, so the transfer went on, and a new
   session at the death screen was refused as "paused" instead of asking the
-  player to respawn.
+  player to respawn. The three `takeover-while-stopping-*` items, scripted on
+  26 November, pass at about 28 s each: the replies were held for 3.3 to 3.7 s,
+  `stopping` was `true` throughout, `mc-agent goto` started no job until the
+  release and then completed, and the chest or inventory didn't change after
+  the stop. They found no bugs.
 
 ## Fabric fixtures
 

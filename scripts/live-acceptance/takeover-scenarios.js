@@ -2,6 +2,7 @@
 // docs/LIFECYCLE-SCENARIOS.md, run against the headless development client. Each scenario takes its expected
 // outcome from src/lifecycle-scenarios.js and checks it with independent server reads. Keys are real X key presses on
 // the Xvfb display (xdotool), so this is a pre-check: it never proves the packaged mod in a normal launcher.
+import { randomUUID } from 'node:crypto';
 import { HALTS, LIFECYCLE_SCENARIOS, describeExpectation } from '../../src/lifecycle-scenarios.js';
 import { bridgeItemTotals, distance, itemTotals, parseDataReply, sameTotals } from './nbt-parse.js';
 import { LOG, laneOrigin, STAND, scriptedPlanner } from './scenarios.js';
@@ -141,9 +142,10 @@ export function takeoverPlan({ bot, lane }, fixture) {
       break;
     }
     case 'table':
+    case 'table-32':
       plan.points.table = chest;
       plan.fixture.push(`setblock ${chest.x} ${chest.y} ${chest.z} minecraft:crafting_table`);
-      plan.prepare.push(`give ${bot} ${PLANKS} 64`);
+      plan.prepare.push(`give ${bot} ${PLANKS} ${fixture === 'table-32' ? 32 : 64}`);
       break;
     case 'grid':
       plan.prepare.push(`give ${bot} ${LOG} 16`);
@@ -152,6 +154,8 @@ export function takeoverPlan({ bot, lane }, fixture) {
       throw new Error(`Unknown takeover fixture ${fixture}.`);
   }
   plan.decision = { type: 'goto', x: far.x, y: far.y, z: far.z };
+  // Three blocks west of the start, away from the chest or table: where the next session walks.
+  plan.points.near = point(o, -3, STAND, 0);
   return plan;
 }
 
@@ -179,6 +183,10 @@ const ACTIVITIES = {
   deposit: { text: () => `bridge: deposit oak_log (${STACKS} stacks held, empty double chest two blocks east)` },
   withdraw: { text: () => `bridge: withdraw oak_log (${STACKS} stacks in a double chest two blocks east)` },
   'craft-table': { text: () => 'bridge: craft chest 8 with 64 planks held and a crafting table two blocks east' },
+  'craft-table-4': {
+    text: () =>
+      "proxy: hold the server's replies to the client; then bridge: craft chest 4 with 32 planks held and a crafting table two blocks east",
+  },
   'craft-grid': { text: () => 'bridge: craft oak_planks 64 from 16 held logs (inventory grid)' },
   wait: { text: () => 'bridge: wait 30' },
 };
@@ -195,6 +203,7 @@ const READY_TEXT = {
   deposit: 'once the first stack has left the inventory',
   withdraw: 'once the first stack is held',
   'craft-table': 'once the first chest is crafted',
+  'craft-table-4': 'once the craft job is running',
   'craft-grid': 'once the first planks are crafted',
   wait: 'once the wait is running',
 };
@@ -208,6 +217,10 @@ const TRIGGERS = {
       'xdotool: press Escape while the agent has its screen open (closes it); for storage, retried up to 4 times when the press lands between screen openings',
   },
   stop: { text: () => 'second process: mc-agent stop' },
+  'stop-held': {
+    text: () =>
+      "second process: mc-agent stop, once a fresh session's acquire is refused as awaiting the server (the agent clicked and its reply is held)",
+  },
   cancel: { text: () => 'bridge: /v1/cancel with the session lease' },
   suspend: { text: () => 'SIGSTOP the agent CLI (as Ctrl+Z) and wait for the 8 s lease to expire' },
   kill: { text: () => 'SIGKILL the CLI (kill -9) and wait for the 8 s lease to expire' },
@@ -310,19 +323,59 @@ const TABLE = [
     trigger: 'fill',
     release: 'takeover',
   },
+  // The proxy holds the server's replies, so the agent's container opening stays unanswered across the stop.
+  {
+    id: 'takeover-while-stopping-deposit',
+    fixture: 'deposit',
+    activity: 'deposit',
+    trigger: 'stop-held',
+    release: 'deposits',
+  },
+  {
+    id: 'takeover-while-stopping-withdraw',
+    fixture: 'withdraw',
+    activity: 'withdraw',
+    trigger: 'stop-held',
+    release: 'withdrawCraft',
+  },
+  {
+    id: 'takeover-while-stopping-craft',
+    fixture: 'table-32',
+    activity: 'craft-table-4',
+    trigger: 'stop-held',
+    release: 'withdrawCraft',
+  },
 ];
 
 /** Checklist items the runner leaves to a person, and why. */
-export const NOT_SCRIPTED = Object.freeze({
-  'takeover-while-stopping-deposit':
-    'Needs a server slow enough to leave a container opening unanswered; the loopback server replies within a tick, so `stopping` is never observable here.',
-  'takeover-while-stopping-withdraw': 'As takeover-while-stopping-deposit.',
-  'takeover-while-stopping-craft': 'As takeover-while-stopping-deposit.',
-});
+export const NOT_SCRIPTED = Object.freeze({});
+
+// How long the proxy may hold the server's replies. The server drops a client that leaves a keep-alive unanswered
+// for 15 s and the client gives up after 30 s without a packet; the hold stays well under both.
+export const HOLD = Object.freeze({ clickMs: 2000, newSessionMs: 2500, maxMs: 8000 });
 
 const lifecycleById = new Map(LIFECYCLE_SCENARIOS.map((scenario) => [scenario.id, scenario]));
 
+function heldSteps(spec, plan) {
+  const { near } = plan.points;
+  const lines = [ACTIVITIES[spec.activity].text(plan, spec)];
+  if (spec.activity !== 'craft-table-4')
+    lines.push(`${READY_TEXT[spec.activity]}: proxy: hold the server's replies to the client`);
+  lines.push(
+    `within ${HOLD.clickMs / 1000} s: a fresh /v1/control acquire is refused as "awaiting the server" (the agent clicked and the reply is held); "not observed" fails the scenario`,
+    TRIGGERS[spec.trigger].text(plan),
+    'the bridge must show stopping: true, manual, and the job cancelled; independent reads at the stop',
+    `at once: second process: mc-agent goto ${near.x} ${near.y} ${near.z} (three blocks west); a fresh acquire must be refused while stopping is true`,
+    `for ${HOLD.newSessionMs / 1000} s: stopping stays true and no new job starts`,
+    `release the held replies (the whole hold is capped at ${HOLD.maxMs / 1000} s, under the 15 s keep-alive): stopping must clear and the goto must then run and complete`,
+    'independent reads 1 s after the release and 5 s later, compared with the reads at the stop',
+    'old lease: /v1/control heartbeat and /v1/actions must be refused',
+  );
+  return lines;
+}
+
 function steps(spec, plan) {
+  if (spec.trigger === 'stop-held') return heldSteps(spec, plan);
   const activity = ACTIVITIES[spec.activity].text(plan, spec);
   const trigger = TRIGGERS[spec.trigger].text({ ...plan, bot: plan.bot });
   const lines = [activity, `${READY_TEXT[spec.activity]}: ${trigger}`];
@@ -353,6 +406,8 @@ export const takeoverScenarios = TABLE.map((spec, index) => {
     title: `${lifecycle.title} (scripted Fabric checklist item)`,
     backends: ['fabric'],
     takeover: true,
+    // Every takeover scenario joins through the runner's pausable proxy; only stop-held pauses it.
+    proxy: true,
     lifecycle: spec.id,
     spec,
     ...(spec.partial && { partial: spec.partial }),
@@ -366,7 +421,8 @@ export const takeoverScenarios = TABLE.map((spec, index) => {
       ...lifecycle.expect.halts.map((halt) => `independently: ${HALTS[halt].observe}`),
       ...(spec.partial ? [`not scripted: ${spec.partial}`] : []),
     ],
-    run: (ctx, plan) => runTakeover(ctx, plan, spec, lifecycle),
+    run: (ctx, plan) =>
+      spec.trigger === 'stop-held' ? runHeldStop(ctx, plan, spec, lifecycle) : runTakeover(ctx, plan, spec, lifecycle),
   };
 });
 
@@ -578,6 +634,7 @@ async function startActivity(ctx, plan, spec, session) {
     deposit: { type: 'deposit', item: 'oak_log' },
     withdraw: { type: 'withdraw', item: 'oak_log' },
     'craft-table': { type: 'craft', item: 'chest', count: 8 },
+    'craft-table-4': { type: 'craft', item: 'chest', count: 4 },
     'craft-grid': { type: 'craft', item: 'oak_planks', count: 64 },
     wait: { type: 'wait', seconds: 30 },
   };
@@ -598,6 +655,7 @@ async function startActivity(ctx, plan, spec, session) {
     deposit: (state) => held(state, LOG) < STACKS * 64,
     withdraw: (state) => held(state, LOG) >= 1,
     'craft-table': (state) => held(state, CHEST) >= 1,
+    'craft-table-4': () => true,
     'craft-grid': (state) => held(state, PLANKS) >= 4,
     wait: () => true,
   }[activity];
@@ -989,6 +1047,230 @@ export async function runTakeover(ctx, plan, spec, lifecycle) {
     }
   } finally {
     session.release?.();
+    for (const cleanup of session.cleanups.reverse()) await cleanup().catch(() => {});
+    for (const adapter of session.adapters) await adapter.close().catch(() => {});
+  }
+}
+
+const AWAITING = /awaiting the server/i;
+
+/**
+ * What a fresh session's acquire gets from the mod right now: refused as "awaiting the server" while the agent's
+ * container opening is unanswered. An accepted probe (no session held control) is released at once.
+ */
+export async function probeAcquire(adapter) {
+  const leaseId = randomUUID();
+  try {
+    await adapter.request('/v1/control', { action: 'acquire', leaseId });
+    await adapter.request('/v1/control', { action: 'release', leaseId }).catch(() => {});
+    return { refused: false, awaiting: false };
+  } catch (error) {
+    return { refused: true, awaiting: AWAITING.test(error.message), message: error.message };
+  }
+}
+
+const pick = (state) => ({
+  stopping: state.stopping,
+  mode: state.mode,
+  job: state.job && { id: state.job.id, type: state.job.type, status: state.job.status, message: state.job.message },
+});
+
+const parseJson = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
+/** The promise's value, or `late()` after `timeoutMs`; polled in short sleeps so no long timer outlives it. */
+async function settleWithin(ctx, promise, timeoutMs, late) {
+  let outcome = null;
+  promise.then((value) => {
+    outcome = { value };
+  });
+  await Promise.resolve();
+  const deadline = ctx.now() + timeoutMs;
+  while (!outcome && ctx.now() < deadline) await ctx.sleep(100);
+  return outcome ? outcome.value : late();
+}
+
+/**
+ * takeover-while-stopping: the proxy holds the server's replies so the agent's container click stays unanswered;
+ * `mc-agent stop` then cancels the job while the opening still awaits the server (`stopping`), and a new session
+ * (`mc-agent goto`) must wait until the released reply settles it. If `stopping` never appears the scenario fails
+ * as "not observed"; it never passes without it.
+ */
+export async function runHeldStop(ctx, plan, spec, lifecycle) {
+  const { expect } = lifecycle;
+  const { proxy } = ctx;
+  const session = { adapters: [], cleanups: [], release: null };
+  let heldAt = null;
+  const hold = () => {
+    const at = proxy.pause('toClient');
+    heldAt = ctx.now();
+    return at;
+  };
+  const release = () => {
+    if (heldAt === null) return null;
+    const heldMs = ctx.now() - heldAt;
+    heldAt = null;
+    return { heldMs, ...proxy.resume('toClient') };
+  };
+  try {
+    if (!proxy) {
+      ctx.check("the client joined through the runner's pausable proxy", false, { proxy: null });
+      return;
+    }
+    const probe = await ctx.connect();
+    session.adapters.push(probe);
+    const baseline = await ctx.step('independent baseline before the command', () => reads(ctx, plan, expect.halts));
+    // A craft opens its table once, at the start, so the replies are held before it; storage reopens per stack.
+    const holdFirst = spec.activity === 'craft-table-4';
+    if (holdFirst) await ctx.step("proxy: hold the server's replies to the client", async () => hold());
+    const handle = await ctx.step(ACTIVITIES[spec.activity].text(plan, spec), () =>
+      startActivity(ctx, plan, spec, session),
+    );
+    const ready = await ctx.step(`wait until ${READY_TEXT[spec.activity]}`, () => handle.ready());
+    ctx.check(`the activity reached the interrupt point (${READY_TEXT[spec.activity]})`, ready.ok, { ready });
+    if (!ready.ok) return;
+    const jobId = ready.job?.id ?? null;
+    const leaseId = handle.adapter?.leaseId ?? null;
+    if (!holdFirst) await ctx.step("proxy: hold the server's replies to the client", async () => hold());
+
+    const clicked = await ctx.step('wait for the agent to click and await the held reply', () =>
+      poll(
+        ctx,
+        async () => {
+          const answer = await probeAcquire(probe);
+          return { ...answer, ok: answer.awaiting };
+        },
+        { timeoutMs: HOLD.clickMs, intervalMs: 50 },
+      ),
+    );
+    ctx.check(
+      clicked.ok
+        ? 'the agent clicked and its reply was held: a fresh acquire was refused as awaiting the server'
+        : 'not observed: the agent never awaited a held container reply, so `stopping` could not be observed',
+      clicked.ok,
+      { clicked, proxy: proxy.stats() },
+    );
+    if (!clicked.ok) {
+      ctx.note('stoppingWindow', 'not observed');
+      return;
+    }
+
+    const stop = await ctx.step(TRIGGERS[spec.trigger].text(plan), () => ctx.cliStop());
+    const stopped = await ctx.step('the bridge shows stopping, manual control and the cancelled job', () =>
+      poll(
+        ctx,
+        async () => {
+          const state = await ctx.bridge.observe();
+          const ended = !!jobId && state.job?.id === jobId && state.job.status !== 'running';
+          return { ...pick(state), ok: state.stopping === true && state.mode === 'manual' && ended };
+        },
+        { timeoutMs: 1500, intervalMs: 50 },
+      ),
+    );
+    const atStop = await ctx.step('independent reads at the stop', () => reads(ctx, plan, expect.halts));
+    const { near } = plan.points;
+    const next = ctx.cli.start(['goto', String(near.x), String(near.y), String(near.z)]);
+    session.cleanups.push(() => next.stop());
+    const refused = await ctx.step('a fresh session while stopping is true', () => probeAcquire(probe));
+    const during = await ctx.step(
+      `watch the bridge for ${HOLD.newSessionMs / 1000} s with the reply held`,
+      async () => {
+        const seen = [];
+        const until = ctx.now() + HOLD.newSessionMs;
+        while (ctx.now() < until && ctx.now() - heldAt < HOLD.maxMs - 1000) {
+          const state = await ctx.bridge.observe();
+          seen.push({ ...pick(state), job: state.job?.id === jobId ? 'interrupted' : pick(state).job });
+          await ctx.sleep(100);
+        }
+        return seen;
+      },
+    );
+    const refusedLate = await probeAcquire(probe);
+    const released = await ctx.step('release the held replies', async () => release());
+    const releasedAt = ctx.now();
+    const settled = await ctx.step('wait for stopping to clear', () =>
+      poll(
+        ctx,
+        async () => {
+          const state = await ctx.bridge.observe();
+          return { ...pick(state), ok: state.stopping === false };
+        },
+        { timeoutMs: 10_000, intervalMs: 50 },
+      ),
+    );
+    await ctx.sleep(Math.max(0, releasedAt + 1000 - ctx.now()));
+    const first = await ctx.step('independent reads 1 s after the release', () => reads(ctx, plan, expect.halts));
+    await ctx.sleep(5000);
+    const last = await ctx.step('independent reads 5 s later', () => reads(ctx, plan, expect.halts));
+    ctx.note('reads', { baseline, atStop, first, last });
+    const walked = await ctx.step('wait for mc-agent goto to finish', () =>
+      settleWithin(ctx, next.exited, 60_000, () => ({ timedOut: true, ...next.output() })),
+    );
+    const position = await ctx.server.position();
+    const end = await ctx.bridge.observe();
+    ctx.note('final', pick(end));
+
+    ctx.check('mc-agent stop exited 0', stop?.code === 0, { stop });
+    ctx.check(
+      stopped.ok
+        ? 'the bridge showed stopping: true after the stop, with manual control and the job no longer running'
+        : 'not observed: `stopping` never appeared after the stop',
+      stopped.ok,
+      { stopped },
+    );
+    if (!stopped.ok) ctx.note('stoppingWindow', 'not observed');
+    const pattern = new RegExp(expect.job.message, 'i');
+    ctx.check(
+      `the job ends ${expect.job.status} with a message matching /${expect.job.message}/i`,
+      stopped.job?.id === jobId && stopped.job.status === expect.job.status && pattern.test(stopped.job.message),
+      { jobId, job: stopped.job },
+    );
+    ctx.check(
+      'while stopping is true a new session cannot start work (a fresh acquire is refused; mc-agent goto starts no job)',
+      refused.awaiting &&
+        refusedLate.awaiting &&
+        during.length > 0 &&
+        during.every((each) => each.stopping === true && each.mode === 'manual' && each.job === 'interrupted'),
+      { refused, refusedLate, during },
+    );
+    ctx.check(
+      `the proxy held the server's replies (under ${HOLD.maxMs / 1000} s, so no keep-alive timed out)`,
+      !!released && released.held.toClient > 0 && released.heldMs <= HOLD.maxMs,
+      { released },
+    );
+    ctx.check('stopping clears once the released reply settles the opening', settled.ok, { settled });
+    // Nothing moves between the stop and the release, nor in the 5 s after it.
+    checkHalts(ctx, expect.halts, atStop, first, baseline, { offline: false });
+    checkHalts(ctx, expect.halts, first, last, baseline, { offline: false });
+    const gotoJob = parseJson(walked.stdout ?? '');
+    ctx.check(
+      'the new session then starts work: mc-agent goto completes three blocks west',
+      walked.code === 0 &&
+        gotoJob?.type === 'goto' &&
+        gotoJob.status === 'completed' &&
+        distance(position, center(near)) <= 1.5,
+      { walked: { ...walked, stdout: walked.stdout?.slice(-2000) }, position },
+    );
+    ctx.check(
+      'mode becomes manual and stays manual apart from the explicitly started goto',
+      stopped.mode === 'manual' && end.mode === 'manual',
+      { atStop: stopped.mode, end: end.mode },
+    );
+    ctx.check('no stopping window at the end (stopping is false)', end.stopping === false, { stopping: end.stopping });
+    const interrupted = await settleWithin(ctx, handle.settled, 10_000, () => ({ pending: true }));
+    ctx.check('the interrupted command did not complete', interrupted.ok === false, { settled: interrupted });
+    if (leaseId) {
+      const old = await ctx.step('old lease: heartbeat and action', () => oldLease(handle.adapter, leaseId));
+      ctx.check('the old session cannot heartbeat or act', old.heartbeat.refused && old.action.refused, old);
+    }
+  } finally {
+    // Never leave the client cut off from the server, whatever failed.
+    if (heldAt !== null) release();
     for (const cleanup of session.cleanups.reverse()) await cleanup().catch(() => {});
     for (const adapter of session.adapters) await adapter.close().catch(() => {});
   }

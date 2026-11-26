@@ -20,6 +20,7 @@ import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from '
 import { scenarios as sharedScenarios, scenarioPlan } from './live-acceptance/scenarios.js';
 import { takeoverIds, takeoverScenarios } from './live-acceptance/takeover-scenarios.js';
 import { pressKey, startCli, startFakeModel } from './live-acceptance/takeover-tools.js';
+import { startProxy } from './live-acceptance/proxy.js';
 import {
   DEFAULT_JAR,
   RUNTIME,
@@ -194,6 +195,9 @@ export function buildPlan(options) {
           clientCommand: `${basename(options.java) === options.java ? '' : `JAVA_HOME=${dirname(dirname(options.java))} `}MC_AGENT_HOME=${where.home} ${process.execPath} ${fabricClientArguments({ port: options.port, account: options.account, gameDir: where.client }).join(' ')}`,
           clientLog: where.clientLog,
           reviewNote: FABRIC_REVIEW_NOTE,
+          ...(options.scenarios.some((scenario) => scenario.proxy) && {
+            proxy: `Scenarios marked [proxy] join through a pausable loopback TCP proxy (an ephemeral port forwarding to 127.0.0.1:${options.port}), so a scenario can hold the server's replies.`,
+          }),
         }
       : {
           botCommand: `MC_AGENT_HOME=${where.home} ${process.execPath} ${botArguments({ port: options.port, account: options.account, bridge: where.bridge }).join(' ')}`,
@@ -204,6 +208,7 @@ export function buildPlan(options) {
       release: releaseFor(options, scenario),
       requiresModel: !!scenario.requiresModel,
       willSkip: !!scenario.requiresModel && !options.model,
+      ...(scenario.proxy && { proxy: true }),
       ...scenarioPlan(scenario, { bot: options.account }),
     })),
   };
@@ -227,13 +232,18 @@ export function formatPlan(plan) {
     'World setup:',
     ...plan.worldSetup.map((command) => `  > ${command}`),
     ...(fabric
-      ? [`Fabric client (fresh per scenario): ${plan.clientCommand}`, `Client log: ${plan.clientLog}`, plan.reviewNote]
+      ? [
+          `Fabric client (fresh per scenario): ${plan.clientCommand}`,
+          `Client log: ${plan.clientLog}`,
+          ...(plan.proxy ? [plan.proxy] : []),
+          plan.reviewNote,
+        ]
       : [`Bot (per scenario): ${plan.botCommand}`]),
   ];
   for (const scenario of plan.scenarios) {
     lines.push(
       '',
-      `[${scenario.id}] ${scenario.title}${scenario.requiresModel ? ` (requires --model${scenario.willSkip ? '; will be skipped' : ''})` : ''}`,
+      `[${scenario.id}] ${scenario.title}${scenario.requiresModel ? ` (requires --model${scenario.willSkip ? '; will be skipped' : ''})` : ''}${fabric && scenario.proxy ? ' [proxy]' : ''}`,
       ...scenario.release.map((text) => `  maps to ${text}`),
       '  fixture:',
       ...scenario.fixture.map((command) => `    > ${command}`),
@@ -266,7 +276,7 @@ const compact = (value) => {
 };
 
 /** The scenario-facing API; every method is backed by the injectable console/bridge/CLI. */
-export function createContext({ record, options, serverConsole, bridge, deps, signal }) {
+export function createContext({ record, options, serverConsole, bridge, deps, signal, proxy = null }) {
   let actor = null,
     observer = null;
   const extra = new Set();
@@ -345,6 +355,8 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       start: (args) => deps.startCli(args, { bridge }),
     },
     keys: { press: (key) => deps.pressKey(key) },
+    // The pausable forwarder between the client and the server, for scenarios that join through it; else null.
+    proxy,
     fakeModel: (decisions) => deps.startFakeModel(decisions),
     async agent({ goal, criteria, fetchImpl, model, adapter: given, maxSteps = 20 }) {
       await ctx.bridge.release();
@@ -432,7 +444,7 @@ function scenarioRecord(scenario, reason = null, options = {}) {
 }
 
 /** Fixture → fresh bot or client session → prepare → run → stop job → cleanup → stop session. Cleanup always runs. */
-export async function runScenario(scenario, { options, deps, serverConsole, signal, where }) {
+export async function runScenario(scenario, { options, deps, serverConsole, signal, where, proxy = null }) {
   const backend = backendOf(options);
   if (scenario.requiresModel && !options.model) {
     return scenarioRecord(scenario, 'Requires a real local model; pass --model NAME to run it.', options);
@@ -445,12 +457,19 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   record.startedAt = new Date(deps.now()).toISOString();
   if (scenario.requiresModel) record.observations.model = options.model;
   const started = deps.now();
-  const ctx = createContext({ record, options, serverConsole, bridge: where.bridge, deps, signal });
+  const proxied = scenario.proxy && options.backend === 'fabric' ? proxy : null;
+  const ctx = createContext({ record, options, serverConsole, bridge: where.bridge, deps, signal, proxy: proxied });
   let bot = null;
   let threw = false;
   try {
     for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
-    const session = { port: options.port, account: options.account, bridge: where.bridge, home: where.home, signal };
+    const session = {
+      port: proxied?.port ?? options.port,
+      account: options.account,
+      bridge: where.bridge,
+      home: where.home,
+      signal,
+    };
     bot = await ctx.step(backend.startStep, () =>
       options.backend === 'fabric'
         ? deps.startFabricClient({ ...session, gameDir: where.client, log: where.clientLog, java: options.java })
@@ -478,6 +497,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
       record.cleanup.push({ command: backend.stopStep, ok: false, error: error.message });
   } finally {
     // Cleanup ignores the run signal so an interrupted scenario still leaves no bot activity or fixtures behind.
+    proxied?.resume();
     const clean = async (command, fn) => {
       const begun = deps.now();
       try {
@@ -610,6 +630,7 @@ export const defaultDeps = {
   startCli,
   pressKey,
   startFakeModel,
+  startProxy,
   environment,
   writeResults: (path, value) => writePrivateJson(path, value),
   keepAlive,
@@ -669,6 +690,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     phase = null;
   };
   let server = null;
+  let proxy = null;
   let inspecting = false;
   try {
     begin('serverStartMs');
@@ -691,11 +713,23 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     end();
     begin('worldSetupMs');
     for (const command of WORLD_SETUP) await server.console.command(command, { signal });
+    // One forwarder for the run: scenarios marked `proxy` join through it so they can hold the server's replies.
+    if (fabric && options.scenarios.some((scenario) => scenario.proxy)) {
+      proxy = await deps.startProxy({ port: options.port });
+      results.proxy = { port: proxy.port, target: options.port };
+    }
     end();
     begin('scenariosMs');
     for (const scenario of options.scenarios) {
       deps.warn(`[${scenario.id}] ${scenario.title}`);
-      const record = await runScenario(scenario, { options, deps, serverConsole: server.console, signal, where });
+      const record = await runScenario(scenario, {
+        options,
+        deps,
+        serverConsole: server.console,
+        signal,
+        where,
+        proxy,
+      });
       results.scenarios.push(record);
       deps.warn(`[${scenario.id}] ${record.status}${record.reason ? `: ${record.reason}` : ''}`);
       signal.throwIfAborted();
@@ -713,6 +747,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     const remaining = options.scenarios.slice(results.scenarios.length);
     results.scenarios.push(...remaining.map((scenario) => scenarioRecord(scenario, results.error, options)));
   } finally {
+    await proxy?.close().catch(() => {});
     if (server) {
       begin('serverStopMs');
       try {
