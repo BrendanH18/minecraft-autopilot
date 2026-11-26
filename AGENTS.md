@@ -2,7 +2,18 @@
 
 ## Cloud sandboxes (Boat)
 
-Use a Boat sandbox for builds, tests, untrusted code, Docker, and long jobs. Never run them on this computer.
+Use Boat as the compute for your task (owner, 2026-11-25). Anything that runs
+a program to do work happens in a Boat sandbox, never on the machine the agent
+runs on: builds, tests, Gradle and the Java toolchain, the Minecraft server
+and clients, large downloads, Docker, untrusted code and long jobs. That
+machine is the owner's Mac or a Raspberry Pi with 8 GB of RAM shared by every
+agent and the T3 server, where one heavy command stalls them all. Only light
+work stays local: reading and editing files, git, searches such as `git grep`,
+the `boat` CLI and the exceptions this file lists. If you're unsure, use Boat.
+If Boat can't start a sandbox, don't fall back to local compute: tell the
+owner what still needs a Boat run. Work this file keeps on the Mac (no GPU or
+macOS on Boat) can't run on the Pi either; an agent there leaves it to the
+owner and says so in its hand-off.
 Docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; never quote prices from memory.
 
 Run checks with `scripts/boat-check.sh` (owner decision, 2026-11-21). It gives
