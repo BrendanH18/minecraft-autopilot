@@ -198,7 +198,9 @@ Scenarios, fixtures, fresh bot sessions and server reads are unchanged. Most
 of the remaining time is gameplay in `collect-and-store`, `stale-removal`,
 `blocked-lid` and the two inspection scenarios. `results.json` now records
 each run phase under `timings` and how long each cleanup step took. The
-Fabric dry run and a Fabric `withdraw` run still passed.
+Fabric dry run and a Fabric `withdraw` run still passed. With the release-candidate fix above also merged, `--all` passed 28
+scenarios (two real-model ones skipped) in 13 min 25 s, down from 19 min 16 s,
+and the three `recovery-*` scenarios passed on their own.
 
 **Fabric development-client pre-checks (25 November 2026).** In Boat, the
 development client of clean commit `88dc26d` passed all 25

@@ -43,7 +43,7 @@ Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks
 which also copies the results back:
 `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --fast`.
 A `--fast` run takes about 4.5 minutes in Boat, and a full offline `--all`
-run (28 scenarios) takes about ALL_MINUTES minutes. The three pit
+run (28 scenarios) takes about 13.5 minutes. The three pit
 scenarios each wait out the bot's 180-second mining deadline. See the
 [observed results](DEVELOPMENT.md#validation).
 
