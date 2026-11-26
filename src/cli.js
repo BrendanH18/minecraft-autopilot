@@ -142,12 +142,19 @@ async function closeIfStopping(resource) {
   await resource.close();
   abortController.signal.throwIfAborted();
 }
-process.once('SIGINT', () => {
-  shutdown().catch(console.error);
-});
-process.once('SIGTERM', () => {
-  shutdown().catch(console.error);
-});
+// Set once a command has nothing left to do after shutdown() closes its resources, so a signal ends the process.
+let exitAfterShutdown = false;
+function onSignal() {
+  shutdown()
+    .catch(console.error)
+    .finally(() => {
+      // Mineflayer 4.39's window waits (openContainer and friends) leave a 20-second timer armed after the window
+      // opens. Without this, a stopped `server` bot stayed alive up to 20 s after it had left the game.
+      if (exitAfterShutdown) process.exit();
+    });
+}
+process.once('SIGINT', onSignal);
+process.once('SIGTERM', onSignal);
 
 function number(value) {
   const parsed = Number(value);
@@ -1035,6 +1042,8 @@ program
       await driver.close();
       throw error;
     }
+    // From here on a signal closes the bridge, which closes the driver and disconnects; nothing else remains.
+    exitAfterShutdown = true;
     await closeIfStopping(activeBridge);
     log(
       `Connected as ${driver.bot.username}. Bridge ready. Use commands from a second terminal. Ctrl+C disconnects the bot.`,
