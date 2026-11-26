@@ -1686,8 +1686,11 @@ async function runEatRetreatTimeout(ctx, plan) {
     ctx.check(
       'eating attempts continued during the retreat and each failed (at least two observed failures)',
       attempts.filter(({ outcome }) => outcome === 'Could not eat.').length >= 2 &&
+        // The retreat deadline may cut off the last attempt: still open, or ended by Fabric's "Retreat timed out".
         attempts.every(
-          ({ outcome }, index) => outcome === 'Could not eat.' || (outcome === null && index === attempts.length - 1),
+          ({ outcome }, index) =>
+            outcome === 'Could not eat.' ||
+            (index === attempts.length - 1 && (outcome === null || outcome === 'Retreat timed out')),
         ),
       { attempts },
     );
