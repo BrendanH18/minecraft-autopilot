@@ -42,7 +42,8 @@ runs.
 Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks),
 which also copies the results back:
 `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --fast`.
-A full offline `--all` run took about 15 minutes in Boat. The three pit
+A `--fast` run takes about 4.5 minutes in Boat, and a full offline `--all`
+run (28 scenarios) takes about 13.5 minutes. The three pit
 scenarios each wait out the bot's 180-second mining deadline. See the
 [observed results](DEVELOPMENT.md#validation).
 
@@ -58,7 +59,7 @@ is kept for seven days, including when a scenario fails and produces evidence.
 
 ## What a run does
 
-1. Creates a private `.runtime/live-acceptance/run-<id>/` directory, copies the jar into its `server/` subdirectory, and writes `eula.txt` and `server.properties` (offline mode, `127.0.0.1`, fixed seed, superflat world, spawn protection 0, peaceful, and the tick watchdog off so a slow or swapping host cannot kill the server mid-run). The server creates a fresh world in that directory.
+1. Creates a private `.runtime/live-acceptance/run-<id>/` directory, copies the jar into its `server/` subdirectory, and writes `eula.txt` and `server.properties` (offline mode, `127.0.0.1`, fixed seed, superflat world, spawn protection 0, peaceful, the tick watchdog off so a slow or swapping host cannot kill the server mid-run, and `sync-chunk-writes=false` so a disk with slow synchronous writes cannot stall chunk loads behind world saves). The server creates a fresh world in that directory.
 2. Starts `java -jar server.jar nogui` with stdin as the console and mirrors all output to `server.out`. Readiness is the `Done (…s)! For help` line; the reported version must be 1.21.1.
 3. Applies world rules: peaceful, no daylight/weather cycle, no mob spawning, random tick speed 0, time 1000, clear weather.
 4. For each scenario, in its own 64-block lane (beyond the bot's 48-block collection search): force-loads the lane, builds the fixture, starts a **fresh bot session** with `node src/cli.js --bridge <run-dir>/bridge.json server --host 127.0.0.1 --port N --account LiveBot --auth offline --version 1.21.1` and sets `MC_AGENT_HOME` to `<run-dir>/agent-home`. Then it resets the player, teleports it, and waits until the bridge and server agree on its position and inventory.
@@ -119,10 +120,11 @@ minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, serverLo
 options: { port, account, keepServer, model, noThinking, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
+timings: { serverStartMs, worldSetupMs, scenariosMs, serverStopMs, totalMs }
 summary: { pass, fail, skipped, error }, error
 ```
 
-`steps` record every console command, bridge/CLI action, and read with timing and outcome. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
+`steps` record every console command, bridge/CLI action, and read with timing and outcome. Each cleanup step the scenario runner runs also has a `durationMs`, and `timings` gives the wall time of each run phase (`null` for a phase the run never reached; a phase that failed records how long it ran), so a slow run shows where its time went. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
 
 Cleanup failures fail the affected scenario. If the runner cannot stop the bot, it records the failure and skips the remaining scenarios. Failed runs include the last available bot output alongside the server log. A run exits unsuccessfully if it cannot hash the server log after shutdown or records zero passing scenarios, including a selection made up entirely of real-model scenarios without `--model`.
 

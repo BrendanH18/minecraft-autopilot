@@ -161,6 +161,47 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
+**Release candidate pre-checks (26 November 2026).** In Boat, clean commit
+`3fca55b` built and verified (`sourceModified: false`, archive SHA-256
+`93c8fd5bb8aad60b19bf71690e8b3c354684e386bc0a17c91e8a6f7fa6705c9f`). It ran
+with Minecraft 1.21.1, Fabric Loader 0.20.1, Fabric API 0.116.18+1.21.1,
+Baritone 1.11.3, Mineflayer 4.39.0, Node 24.22.1 and OpenJDK 21.0.13.1.
+`acceptance:bot --all` passed 28 scenarios and skipped the two real-model ones,
+in 19 min 16 s. The development client passed all 25
+`acceptance:fabric --fast` scenarios in 10 min 49 s. In `--takeover`, 29 of 31
+scenarios passed in 18 min 27 s; the two storage-screen-close items are the
+known expected failures. In `recovery-timeout` the bot stopped at its mining
+deadline with 16 of 64 logs and reported a failed return, which matched the
+server position. On `main` (`cea1ec8`), `--all` failed three runs out of three. About 14 minutes in,
+`withdraw-no-candidate`'s `forceload` got no reply within 15 s, and the
+remaining 17 scenarios failed with it. Thread dumps showed the server thread
+waiting on a region file while the sandbox took about 100 ms per synchronous
+write. The runner's test server now sets `sync-chunk-writes=false`, with a
+regression test. These are pre-checks, not release evidence: the packaged
+Fabric and bot review boxes in [RELEASE.md](RELEASE.md) stay open.
+
+**Fast bot acceptance (26 November 2026).** In Boat, two runs of
+`npm run acceptance:bot -- --accept-eula --fast` on commit `87cde78` passed
+all 25 scenarios in 4 min 19 s and 4 min 18 s, including server startup and
+shutdown. The second run also had an uncommitted docs edit. That meets the
+roadmap's five-minute target. The same preset took 12 min 2 s on `cea1ec8`
+earlier that day. Its timings showed that 19 of the 25 scenarios spent about
+19.5 s each stopping a bot that had already left the game. Mineflayer 4.39's
+window waits, such as `openContainer`, leave a 20-second timer running after
+the window opens, and it kept the stopped bot process alive. The `server`
+command now exits as soon as a signal has closed the bridge, the driver and
+the connection. Time outside the recorded scenario steps, nearly all of it
+stopping bots, fell from 367 s to 10 s across the run. Starting bot sessions fell from 146 s to 28 s. The runner now
+checks for a ready session every 200 ms instead of every 500 ms, but that
+accounts for only a few seconds of the drop. The rest wasn't isolated.
+Scenarios, fixtures, fresh bot sessions and server reads are unchanged. Most
+of the remaining time is gameplay in `collect-and-store`, `stale-removal`,
+`blocked-lid` and the two inspection scenarios. `results.json` now records
+each run phase under `timings` and how long each cleanup step took. The
+Fabric dry run and a Fabric `withdraw` run still passed. With the release-candidate fix above also merged, `--all` passed 28
+scenarios (two real-model ones skipped) in 13 min 25 s, down from 19 min 16 s,
+and the three `recovery-*` scenarios passed on their own.
+
 **Fabric development-client pre-checks (25 November 2026).** In Boat, the
 development client of clean commit `88dc26d` passed all 25
 `npm run acceptance:fabric -- --fast` scenarios in 9 min 28 s, and all three
@@ -192,9 +233,9 @@ with a real local Ollama model remains open.
 **Fast bot acceptance (21 November 2026).** A development run in Boat passed
 all 13 scenarios against offline vanilla Minecraft 1.21.1 with Mineflayer
 4.39.0, Node 24.22.1, and OpenJDK 21.0.13.1 on Linux x64. It took 13 min 31 s
-including server startup and shutdown. The roadmap's five-minute target is
-still open. The run checked collection, storage verification, withdrawal, and
-crafting. See [the bot runner guide](LIVE-ACCEPTANCE.md) for the preset and
+including server startup and shutdown. The roadmap's five-minute target was
+still open then; the 26 November entry above meets it. The run checked
+collection, storage verification, withdrawal, and crafting. See [the bot runner guide](LIVE-ACCEPTANCE.md) for the preset and
 workflow artifacts.
 
 **Fabric fixture helper (21 November 2026).** In Boat, all 14

@@ -405,6 +405,12 @@ test('preflight refuses without --accept-eula, the cached jar, or Java 21, point
   assert.match(serverProperties({ port: 25570, seed: 's' }), /^server-port=25570$/m);
 });
 
+test('the test server saves chunks without synchronous writes, so slow fsync cannot stall console commands', () => {
+  const properties = serverProperties({ port: 25570, seed: 's' });
+  assert.match(properties, /^sync-chunk-writes=false$/m);
+  assert.doesNotMatch(properties, /^sync-chunk-writes=true$/m);
+});
+
 /** A tiny server world answering console commands, plus a bridge view of the same bot. */
 function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
   const world = {
@@ -1097,10 +1103,14 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
       'scope',
       'startedAt',
       'summary',
+      'timings',
     ].sort(),
   );
   assert.equal(value.schema, 'minecraft-agent/live-bot-acceptance/1');
   assert.equal(value.review.reviewed, false);
+  for (const phase of ['serverStartMs', 'worldSetupMs', 'scenariosMs', 'serverStopMs', 'totalMs'])
+    assert.equal(typeof value.timings[phase], 'number', phase);
+  assert.ok(value.timings.totalMs >= value.timings.scenariosMs);
   assert.deepEqual(
     { commit: value.environment.commit, dirty: value.environment.dirty },
     { commit: 'abc123', dirty: false },
@@ -1121,10 +1131,31 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
     failed.steps.some((step) => step.name === 'start a fresh bot session via the repo CLI' && step.status === 'ok'),
   );
   assert.ok(
-    failed.cleanup.every((entry) => entry.ok),
+    failed.cleanup.every((entry) => entry.ok && typeof entry.durationMs === 'number'),
     JSON.stringify(failed.cleanup),
   );
   assert.equal(skip.status, 'skipped');
+});
+
+test('a phase that fails still records how long it ran', async () => {
+  const world = fakeWorld();
+  const clock = { now: 0 };
+  const deps = fakeDeps(world, { clock });
+  world.console.command = async () => {
+    clock.now += 15_000;
+    throw new Error('No reply within 15000 ms.');
+  };
+  const options = {
+    ...parseOptions(['--all', '--accept-eula']),
+    scenarios: [byId('stale-removal')],
+    out: '/fake/results.json',
+  };
+  const results = await runAcceptance(options, deps);
+  assert.match(results.error, /No reply/);
+  assert.equal(results.timings.worldSetupMs, 15_000);
+  assert.equal(results.timings.scenariosMs, null, 'never reached');
+  assert.equal(typeof results.timings.serverStopMs, 'number');
+  assert.equal(results.timings.totalMs, 15_000);
 });
 
 test('an interrupt during a scenario cleans up, skips the rest, and still stops everything', async () => {
@@ -1260,7 +1291,12 @@ test('failed bot shutdown retains the failed scenario and skips the remaining se
   const results = await runAcceptance(options, deps);
   const [failed, skipped] = results.scenarios;
   assert.equal(failed.status, 'fail');
-  assert.deepEqual(failed.cleanup.at(-1), { command: 'stop bot process', ok: false, error: 'bot remained running' });
+  assert.deepEqual(failed.cleanup.at(-1), {
+    command: 'stop bot process',
+    ok: false,
+    error: 'bot remained running',
+    durationMs: 0,
+  });
   assert.equal(skipped.id, 'craft-rounds-up');
   assert.equal(skipped.status, 'skipped');
   assert.match(skipped.reason, /Could not stop the bot/);
