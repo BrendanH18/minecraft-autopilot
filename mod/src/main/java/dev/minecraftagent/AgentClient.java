@@ -23,7 +23,7 @@ public final class AgentClient implements ClientModInitializer {
     private static final String TAKE_BACK = "Control returned to the player with F8.";
     private static AgentController controller;
     private static KeyBinding takeBack;
-    // The press that just returned control; an open screen must not also receive it (a rebound button would click a slot).
+    // The press that just returned control. An open screen must not also get it: a rebound button would click a slot.
     private static int takenBackKey = GLFW.GLFW_KEY_UNKNOWN;
     private static int takenBackButton = -1;
     private BridgeServer bridge;
