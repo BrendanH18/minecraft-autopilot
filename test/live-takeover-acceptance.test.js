@@ -4,6 +4,7 @@ import { LIFECYCLE_SCENARIOS } from '../src/lifecycle-scenarios.js';
 import { REPLIES } from '../scripts/live-acceptance/console.js';
 import { scenarios as shared } from '../scripts/live-acceptance/scenarios.js';
 import {
+  escapeCancelledStorage,
   FIRST_LANE,
   NOT_SCRIPTED,
   takeoverIds,
@@ -325,4 +326,17 @@ test('an expected failure is reported with its reason and counted apart from fai
   assert.match(text, /1 pass, 0 fail, 1 expected failures, 0 skipped/);
   assert.match(text, /XFAIL {3}menu-storage-close — Failed checks: x \(expected: Not observable\.\)/);
   assert.deepEqual(summarize({ scenarios: [{ status: 'pass' }] }), { pass: 1, fail: 0, skipped: 0, error: null });
+});
+
+test('the storage-close expected failure needs Escape to have cancelled the same job', () => {
+  const storage = /Storage screen was closed or replaced/i;
+  const job = (message, extra = {}) => ({ id: 'job-1', status: 'cancelled', message, ...extra });
+  assert.ok(escapeCancelledStorage('job-1', job('Control returned to the player: the game menu was opened.'), storage));
+  assert.ok(escapeCancelledStorage('job-1', job('Storage screen was closed or replaced.'), storage));
+  // An unrelated cancellation, another job, a missing job, or one still running is not the explained failure.
+  assert.ok(!escapeCancelledStorage('job-1', job('Cancelled by agent.'), storage));
+  assert.ok(!escapeCancelledStorage('job-1', job('Storage screen was closed or replaced.', { id: 'job-2' }), storage));
+  assert.ok(!escapeCancelledStorage('job-1', null, storage));
+  assert.ok(!escapeCancelledStorage('job-1', job('the game menu was opened', { status: 'running' }), storage));
+  assert.ok(!escapeCancelledStorage(null, job('the game menu was opened'), storage));
 });

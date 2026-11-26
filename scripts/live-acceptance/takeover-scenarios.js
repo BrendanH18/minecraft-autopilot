@@ -698,6 +698,19 @@ function transition(ctx, expect, jobId, { timeoutMs }) {
 
 const MENU = /game menu was opened/i;
 
+/**
+ * Escape cancelled this storage job: through the storage screen, or through the pause menu between stacks. The
+ * expected failure of the storage-close scenarios (STORAGE_SCREEN_UNREACHABLE) holds only with this evidence.
+ */
+export function escapeCancelledStorage(jobId, job, storageMessage) {
+  return (
+    !!jobId &&
+    job?.id === jobId &&
+    job.status === 'cancelled' &&
+    (MENU.test(job.message ?? '') || storageMessage.test(job.message ?? ''))
+  );
+}
+
 /** Whether this attempt missed the moment the checklist interrupts, so it is repeated. */
 function missed(spec, jobId, state) {
   if (spec.activity === 'eat') return state.job?.id === jobId && state.job.status === 'completed';
@@ -882,6 +895,12 @@ export async function runTakeover(ctx, plan, spec, lifecycle) {
       ctx.check('no job is started or resumed', !state.job || (jobId && state.job.id === jobId), {
         job: state.job,
       });
+    if (spec.expectedFailure)
+      ctx.check(
+        'Escape cancelled this job (through the storage screen or the pause menu between stacks)',
+        escapeCancelledStorage(jobId, state.job, new RegExp(expect.job.message, 'i')),
+        { jobId, job: state.job },
+      );
     if (spec.trigger === 'fill') {
       ctx.check('no log was held when the last slot filled', held(stateAtReady, LOG) === 0, {
         logsAtReady: held(stateAtReady, LOG),
