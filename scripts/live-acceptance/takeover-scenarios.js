@@ -335,11 +335,9 @@ function steps(spec, plan) {
   if (spec.trigger === 'suspend')
     lines.push('during the suspension: mc-agent job from a third process; then SIGCONT and let the model answer');
   if (spec.trigger === 'death') lines.push('after the refusal: press Tab and Enter on the death screen to respawn');
-  lines.push(
-    'independent reads 1 s after the transition and 5 s later',
-    'old lease: /v1/control heartbeat and /v1/actions must be refused',
-  );
-  const next = lifecycleById.get(spec.id).expect.next;
+  lines.push('independent reads 1 s after the transition and 5 s later');
+  const { next, mode } = lifecycleById.get(spec.id).expect;
+  if (mode === 'manual') lines.push('old lease: /v1/control heartbeat and /v1/actions must be refused');
   if (next.refused) lines.push('a new session must be refused while the player cannot play');
   if (next.lease === 'same') lines.push('the same lease then runs wait 1');
   else lines.push('only then: a new, explicitly started session runs wait 1');
@@ -832,8 +830,15 @@ export async function runTakeover(ctx, plan, spec, lifecycle) {
     );
     if (spec.trigger === 'escape-screen' && spec.activity !== 'craft-table')
       ctx.check(
-        'every Escape returned control at once, including between stacks (pause menu)',
-        attempts.every(({ after: each }) => !each || (each.ok && each.mode === 'manual')),
+        'every Escape returned control at once and cancelled its own job, including between stacks (pause menu)',
+        // A retried attempt cancelled by any other screen is a failure, not a missed interrupt point.
+        attempts.every(
+          ({ ready: start, after: each }) =>
+            !each ||
+            (each.ok &&
+              each.mode === 'manual' &&
+              escapeCancelledStorage(start.job?.id, each.job, new RegExp(expect.job.message, 'i'))),
+        ),
         { attempts: attempts.map(({ after: each }) => each && { mode: each.mode, job: each.job?.message }) },
       );
     if (spec.trigger === 'death') await deathChecks(ctx, expect);
