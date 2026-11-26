@@ -180,6 +180,24 @@ write. The runner's test server now sets `sync-chunk-writes=false`, with a
 regression test. These are pre-checks, not release evidence: the packaged
 Fabric and bot review boxes in [RELEASE.md](RELEASE.md) stay open.
 
+**Eating, retreat, full inventory and takeover while stopping (26 November
+2026).** In Boat, on `318a213` plus this branch's changes, the four new
+runner scenarios (`eat-timeout`, `low-health-retreat`, `eat-retreat-timeout`,
+`collect-full-inventory`) passed on both the bot and the Fabric development
+client. On Fabric, explicit `eat` of 30-second bread timed out after 5.6 s, the
+next automatic attempts started 9.8 s and 10.0 s after the previous failure,
+and the walled-in retreat failed with "Survival retreat timed out." 60.0 s
+after it started. The bot runs found that the bot had no eating backoff: a
+wounded bot holding food it couldn't eat retried at once, never retreated, and
+refused actions meanwhile. It now waits 10 s after a failed attempt, as Fabric
+does, with regression tests. `--fast` now runs 27 scenarios in 4 min 12 s;
+`eat-timeout` and `eat-retreat-timeout` are left out of it. The three
+`takeover-while-stopping-*` Fabric items are now scripted through a pausable
+loopback proxy that holds the server's replies after the agent clicks the
+container. The full `--takeover` run passed 32 of 34 scenarios in 17 min 38 s,
+and the two storage-screen-close items are still the expected failures. These
+are pre-checks, not release evidence.
+
 **Fast bot acceptance (26 November 2026).** In Boat, two runs of
 `npm run acceptance:bot -- --accept-eula --fast` on commit `87cde78` passed
 all 25 scenarios in 4 min 19 s and 4 min 18 s, including server startup and
