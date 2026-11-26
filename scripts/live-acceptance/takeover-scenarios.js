@@ -220,6 +220,9 @@ const TRIGGERS = {
 const STORAGE_SCREEN_UNREACHABLE =
   "Not observable on a local server: the agent's container screen opens when the server reply is handled at the start of a frame and closes in that frame's tick, so it never reaches the end-of-frame input poll and Escape always lands between stacks instead. Each attempt still checks that Escape between stacks returns control and stops the transfer.";
 
+// The only checks STORAGE_SCREEN_UNREACHABLE explains; any other failed check is a real failure.
+const STORAGE_SCREEN_CHECKS = ['the key press reached the game', 'the job ends cancelled with a message matching'];
+
 // One row per checklist item that runs without a person. `id` is the checklist id.
 const TABLE = [
   { id: 'f8-idle', fixture: 'ground', activity: 'idle', trigger: 'f8', release: 'takeover' },
@@ -355,7 +358,7 @@ export const takeoverScenarios = TABLE.map((spec, index) => {
     lifecycle: spec.id,
     spec,
     ...(spec.partial && { partial: spec.partial }),
-    ...(spec.expectedFailure && { expectedFailure: spec.expectedFailure }),
+    ...(spec.expectedFailure && { expectedFailure: spec.expectedFailure, expectedChecks: STORAGE_SCREEN_CHECKS }),
     release: [RELEASE_TAKEOVER[spec.release]],
     plan: (input) => ({ ...takeoverPlan(input, spec.fixture), bot: input.bot }),
     during: (plan) => TRIGGERS[spec.trigger].during?.(plan) ?? [],

@@ -446,6 +446,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   const started = deps.now();
   const ctx = createContext({ record, options, serverConsole, bridge: where.bridge, deps, signal });
   let bot = null;
+  let threw = false;
   try {
     for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
     const session = { port: options.port, account: options.account, bridge: where.bridge, home: where.home, signal };
@@ -468,6 +469,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         ? null
         : 'No checks ran.';
   } catch (error) {
+    threw = true;
     record.status = 'fail';
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     if (error.botOutput) ctx.note('botOutput', error.botOutput);
@@ -528,8 +530,13 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         .join(' | ');
     }
     if (record.status === 'fail' && bot?.output?.length) ctx.note('botOutput', bot.output.join('').trim().slice(-3000));
-    // A failure the scenario table explains is reported as such, but only when its own checks failed.
-    if (record.status === 'fail' && scenario.expectedFailure && !failures.length && !signal.aborted) {
+    // A failure the scenario table explains is reported as such, but only when the checks it names are all that failed.
+    const failedChecks = record.checks.filter((check) => !check.pass);
+    const explained =
+      !threw &&
+      failedChecks.length > 0 &&
+      failedChecks.every(({ name }) => scenario.expectedChecks?.some((prefix) => name.startsWith(prefix)));
+    if (record.status === 'fail' && scenario.expectedFailure && explained && !failures.length && !signal.aborted) {
       record.status = 'xfail';
       record.expectedFailure = scenario.expectedFailure;
     }

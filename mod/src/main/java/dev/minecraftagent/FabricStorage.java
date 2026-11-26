@@ -295,9 +295,13 @@ final class FabricStorage {
             if (phase == Phase.CRAFTING) return crafting.tick(now);
             if (phase == Phase.RETURN) {
                 // Back in the start block, not merely near it: a step below counted as near, and repeated inspections
-                // crept away from a completed return home (#78).
+                // crept away from a completed return home (#78). Near counts only once Baritone has stopped short.
                 return switch (Arrival.state(
-                        atStart(), client.player.isOnGround(), pathing(), false, now - phaseStarted > 3_000_000_000L)) {
+                        atStart(),
+                        client.player.isOnGround(),
+                        pathing(),
+                        client.player.getPos().distanceTo(start) <= 1.75,
+                        now - phaseStarted > 3_000_000_000L)) {
                     case ARRIVED ->
                         new Result(
                                 true,

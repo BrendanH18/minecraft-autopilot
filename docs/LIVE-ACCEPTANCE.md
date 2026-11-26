@@ -273,7 +273,8 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   are expected failures (`XFAIL`): the agent's container screen opens and
   closes within one frame, so no key press reaches it. Escape lands between
   stacks instead, and that path is checked. An expected failure is reported
-  and counted apart from failures, and doesn't fail the run. The first runs
+  and counted apart from failures, and doesn't fail the run, but only when the
+  key-press and job-message checks are the only ones that failed. The first runs
   found two Fabric bugs, now fixed: a takeover key press (F8) or the pause
   menu between storage stacks was lost, so the transfer went on, and a new
   session at the death screen was refused as "paused" instead of asking the
