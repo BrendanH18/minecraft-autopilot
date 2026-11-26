@@ -107,6 +107,10 @@ export function serverProperties({ port, seed }) {
     // A swapping or overloaded host can stall one tick past the 60 s watchdog, which kills the server mid-run;
     // no check depends on tick timing, so the watchdog is off.
     'max-tick-time=-1',
+    // The dedicated server's default writes every chunk with O_DSYNC. Where synchronous writes are slow (about
+    // 100 ms each in a Boat sandbox), saves fall minutes behind and a later forceload blocks the server thread
+    // on the region file until a console command times out. Checks read the live world, never the saved one.
+    'sync-chunk-writes=false',
     'enable-rcon=false',
     'enable-query=false',
     'motd=minecraft-agent live acceptance',
