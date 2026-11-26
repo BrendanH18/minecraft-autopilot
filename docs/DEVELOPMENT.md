@@ -125,7 +125,7 @@ authenticated handoff and Ollama runs stay on the Mac, and the script refuses
 The one client run allowed in a sandbox is the headless
 [Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)
 of the live runner (`npm run acceptance:fabric`). For that command the remote
-script installs Xvfb and Mesa if they're missing, checks the client asset cache with
+script installs Xvfb, Mesa and xdotool (which presses keys for the `--takeover` scenarios) if they're missing, checks the client asset cache with
 `downloadAssets --allow-downloads`, which fetches only missing objects, and runs the command
 under `xvfb-run`. Mesa's llvmpipe gives OpenGL 4.5 core in software, which is
 enough for Minecraft 1.21.1. The client's low render settings keep it to about

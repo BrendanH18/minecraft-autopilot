@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- `npm run acceptance:fabric -- --takeover` scripts the Fabric checklist items that need no person: F8, the pause menu and inventory screen, closing the agent's storage or crafting screen, emergency stop, cancel, lease expiry, death, disconnect, dimension change and a full inventory. It presses real keys with xdotool on the headless client and checks each outcome with independent server reads. These are pre-checks for the keyboard session, not release evidence.
+
 - `npm run acceptance:fabric` runs the live acceptance scenarios against the Fabric development client, with a fresh client per scenario. It runs headless in a Boat sandbox under Xvfb with software OpenGL. Its results are pre-checks for the packaged keyboard sessions and never count as release evidence.
 
 - `study examples` and `study example GROUP COMMAND` list and run worked
@@ -157,6 +159,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Fixed
 
+- Fabric: F8, or opening the pause menu or inventory, between storage stacks no longer gets lost. Each container screen the agent opened cleared the pending key press before the end of the tick, or replaced the player's menu, so the deposit or withdrawal went on. The takeover binding now acts when the key arrives, and the player's menu returns control as it opens.
+- A new session at the death screen is refused with "Your character is dead. Respawn manually", not "Minecraft is paused", because Fabric's death screen also reports paused.
 - Fabric's bridge now sends `"items": null` for containers it hasn't opened. It used to leave the field out, so the planner rejected Fabric state, and every storage task with an unopened chest nearby failed verification. The scripted Fabric run found this.
 - Fabric job messages now match the bot's wording for deposits, withdrawals and crafting. For example, `Deposited 8 oak_log into the chest at X Y Z.` and `Placed a crafting table at X Y Z.`, with no `minecraft:` prefixes. A Fabric deposit with too few items held now fails as a job, as on the bot, instead of the request being refused.
 
