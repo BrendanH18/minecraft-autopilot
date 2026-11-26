@@ -19,6 +19,8 @@ import net.minecraft.block.Block;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.GameMenuScreen;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.AbstractInventoryScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.world.ClientWorld;
@@ -620,6 +622,13 @@ public final class AgentController {
 
     boolean hasControl() {
         return lease.active();
+    }
+
+    /** The pause menu and the player's own inventory only ever open from the player's keys during a session. */
+    void playerScreenOpened(Screen screen) {
+        if (lease.active() && (screen instanceof GameMenuScreen || screen instanceof AbstractInventoryScreen<?>))
+            release("A game menu was opened (" + screen.getClass().getSimpleName()
+                    + "). Control returned to the player.");
     }
 
     boolean playerStorageInteraction() {

@@ -13,6 +13,11 @@ test('takeover accepts only the pause menu opened by switching away from the gam
     () => assertPlayable({ connected: true, paused: true, focusPaused: true, player: { health: 0 } }),
     /dead/,
   );
+  // Fabric's death screen is a screen, so a dead player is also paused; the refusal must still say to respawn.
+  assert.throws(
+    () => assertPlayable({ connected: true, paused: true, focusPaused: false, player: { health: 0 } }),
+    /dead\. Respawn manually/,
+  );
 });
 
 test('deposit actions name an item, default to everything held, with bounded counts', async () => {

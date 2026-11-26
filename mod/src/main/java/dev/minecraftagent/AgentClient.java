@@ -20,13 +20,37 @@ import org.slf4j.LoggerFactory;
 
 public final class AgentClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("minecraft-agent");
+    private static final String TAKE_BACK = "Control returned to the player with F8.";
+    private static AgentController controller;
+    private static KeyBinding takeBack;
     private BridgeServer bridge;
+
+    /**
+     * Opening any screen clears every binding's pending presses (KeyBinding.unpressAll), and the agent opens and
+     * closes container screens between stacks, so a takeover press must not wait for the end of the tick.
+     */
+    public static void takeBackKey(long window, int key, int scancode, int action) {
+        if (action == GLFW.GLFW_PRESS && pressedInGame(window) && takeBack.matchesKey(key, scancode))
+            controller.release(TAKE_BACK);
+    }
+
+    public static void takeBackButton(long window, int button, int action) {
+        if (action == GLFW.GLFW_PRESS && pressedInGame(window) && takeBack.matchesMouse(button))
+            controller.release(TAKE_BACK);
+    }
+
+    private static boolean pressedInGame(long window) {
+        return controller != null
+                && takeBack != null
+                && controller.hasControl()
+                && window == MinecraftClient.getInstance().getWindow().getHandle();
+    }
 
     @Override
     public void onInitializeClient() {
         MinecraftClient client = MinecraftClient.getInstance();
-        AgentController controller = new AgentController(client);
-        KeyBinding takeBack = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+        controller = new AgentController(client);
+        takeBack = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.minecraft_agent.take_back", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F8, "category.minecraft_agent"));
         UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
             if (!world.isClient()) return ActionResult.PASS;
@@ -36,8 +60,11 @@ public final class AgentClient implements ClientModInitializer {
             if (!world.isClient()) return ActionResult.PASS;
             return controller.playerStorageInteraction() ? ActionResult.PASS : ActionResult.FAIL;
         });
-        // Handled screens consume ordinary keybinding presses, including while the agent opens storage.
         ScreenEvents.AFTER_INIT.register((game, screen, width, height) -> {
+            // Release when the player's menu opens, not on the next tick: by then a container screen the agent's
+            // pending opening receives can already have replaced it, and the player's Escape would be lost.
+            controller.playerScreenOpened(screen);
+            // Handled screens consume ordinary keybinding presses, including while the agent opens storage.
             ScreenKeyboardEvents.allowKeyPress(screen).register((current, key, scan, modifiers) -> {
                 if (!controller.hasControl() || !takeBack.matchesKey(key, scan)) return true;
                 controller.release("Control returned to the player with the takeover binding.");
@@ -51,7 +78,7 @@ public final class AgentClient implements ClientModInitializer {
         });
         ClientTickEvents.END_CLIENT_TICK.register(game -> {
             while (takeBack.wasPressed()) {
-                controller.release("Control returned to the player with F8.");
+                controller.release(TAKE_BACK);
                 if (game.player != null)
                     game.player.sendMessage(Text.literal("Minecraft Agent: you have control."), true);
             }
