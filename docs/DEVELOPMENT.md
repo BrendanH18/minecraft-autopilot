@@ -161,6 +161,25 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
 
+**Release candidate pre-checks (26 November 2026).** In Boat, clean commit
+`3fca55b` built and verified (`sourceModified: false`, archive SHA-256
+`93c8fd5bb8aad60b19bf71690e8b3c354684e386bc0a17c91e8a6f7fa6705c9f`). It ran
+with Minecraft 1.21.1, Fabric Loader 0.20.1, Fabric API 0.116.18+1.21.1,
+Baritone 1.11.3, Mineflayer 4.39.0, Node 24.22.1 and OpenJDK 21.0.13.1.
+`acceptance:bot --all` passed 28 scenarios and skipped the two real-model ones,
+in 19 min 16 s. The development client passed all 25
+`acceptance:fabric --fast` scenarios in 10 min 49 s. In `--takeover`, 29 of 31
+scenarios passed in 18 min 27 s; the two storage-screen-close items are the
+known expected failures. In `recovery-timeout` the bot stopped at its mining
+deadline with 16 of 64 logs and reported a failed return, which matched the
+server position. On `main` (`cea1ec8`), `--all` failed three runs out of three. About 14 minutes in,
+`withdraw-no-candidate`'s `forceload` got no reply within 15 s, and the
+remaining 17 scenarios failed with it. Thread dumps showed the server thread
+waiting on a region file while the sandbox took about 100 ms per synchronous
+write. The runner's test server now sets `sync-chunk-writes=false`, with a
+regression test. These are pre-checks, not release evidence: the packaged
+Fabric and bot review boxes in [RELEASE.md](RELEASE.md) stay open.
+
 **Fabric development-client pre-checks (25 November 2026).** In Boat, the
 development client of clean commit `88dc26d` passed all 25
 `npm run acceptance:fabric -- --fast` scenarios in 9 min 28 s, and all three
