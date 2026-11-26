@@ -68,50 +68,7 @@ import {
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { registerSupplies } from './supplies.js';
-import { registerSurvey } from './survey.js';
-import { registerNavigation } from './navigation.js';
-import { registerRoutineTools } from './routine-tools.js';
-import { registerStockTools } from './stock-tools.js';
-import { registerSceneTools } from './scene-tools.js';
-import { registerGeometryTools } from './geometry-tools.js';
-import { registerRoutineWorkbench } from './routine-workbench.js';
-import { registerTimelineTools } from './timeline-tools.js';
-import { registerTerrainTools } from './terrain-tools.js';
-import { registerLogisticsTools } from './logistics-tools.js';
-import { registerRoutineAudit } from './routine-audit.js';
-import { registerExpeditionTools } from './expedition-tools.js';
-import { registerBlueprintTools } from './blueprint-tools.js';
-import { registerCheckpointTools } from './snapshot-checks.js';
-import { registerRoutineCompose } from './routine-compose.js';
-import { registerItineraryTools } from './itinerary-tools.js';
-import { registerWorkareaTools } from './workarea-tools.js';
-import { registerLedgerTools } from './ledger-tools.js';
-import { registerDepotTools } from './depot-tools.js';
-import { registerJournalTools } from './journal-tools.js';
-import { registerDiagnoseTools } from './diagnose-tools.js';
-import { registerRoutineCompare } from './routine-compare.js';
-import { registerRoutineSelect } from './routine-select.js';
-import { registerBearingTools } from './bearing-tools.js';
-import { registerGridTools } from './grid-tools.js';
-import { registerShapeTools } from './shape-tools.js';
-import { registerEarthworksTools } from './earthworks-tools.js';
-import { registerRailplanTools } from './railplan-tools.js';
-import { registerLightplanTools } from './lightplan-tools.js';
-import { registerPerimeterTools } from './perimeter-tools.js';
-import { registerPackingTools } from './packing-tools.js';
-import { registerProductionTools } from './production-tools.js';
-import { registerFuelplanTools } from './fuelplan-tools.js';
-import { registerTradeplanTools } from './tradeplan-tools.js';
-import { registerFarmplanTools } from './farmplan-tools.js';
-import { registerRationTools } from './ration-tools.js';
-import { registerAllocationTools } from './allocation-tools.js';
-import { registerInventorySeriesTools } from './inventory-series-tools.js';
-import { registerStorageSeriesTools } from './storage-series-tools.js';
-import { registerVitalsSeriesTools } from './vitals-series-tools.js';
-import { registerRoutineMetricsTools } from './routine-metrics-tools.js';
-import { registerEventQueryTools } from './event-query-tools.js';
-import { registerSnapshotQueryTools } from './snapshot-query-tools.js';
+import { registerToolGroups } from './tool-groups.js';
 
 const program = new Command();
 program
@@ -1053,51 +1010,6 @@ program
     if (options.strict && !result.ready) process.exitCode = 1;
   });
 
-registerSupplies(program, { view, print });
-registerSurvey(program, { view, print });
-registerNavigation(program, { print });
-registerRoutineTools(program, { print });
-registerStockTools(program, { view });
-registerSceneTools(program, { view });
-registerGeometryTools(program, { print });
-registerRoutineWorkbench(program, { print });
-registerTimelineTools(program, { print });
-registerTerrainTools(program, { view });
-registerLogisticsTools(program, { view });
-registerRoutineAudit(program, { print });
-registerExpeditionTools(program, { view });
-registerBlueprintTools(program, { print });
-registerCheckpointTools(program, { print });
-registerRoutineCompose(program, { print });
-registerItineraryTools(program, { print });
-registerWorkareaTools(program, { print });
-registerLedgerTools(program, { print });
-registerDepotTools(program, { print });
-registerJournalTools(program, { print });
-registerDiagnoseTools(program, { print });
-registerRoutineCompare(program, { print });
-registerRoutineSelect(program, { print });
-registerBearingTools(program, { print });
-registerGridTools(program, { print });
-registerShapeTools(program, { print });
-registerEarthworksTools(program, { print });
-registerRailplanTools(program, { print });
-registerLightplanTools(program, { print });
-registerPerimeterTools(program, { print });
-registerPackingTools(program, { print });
-registerProductionTools(program, { print });
-registerFuelplanTools(program, { print });
-registerTradeplanTools(program, { print });
-registerFarmplanTools(program, { print });
-registerRationTools(program, { print });
-registerAllocationTools(program, { print });
-registerInventorySeriesTools(program, { print });
-registerStorageSeriesTools(program, { print });
-registerVitalsSeriesTools(program, { print });
-registerRoutineMetricsTools(program, { print });
-registerEventQueryTools(program, { print });
-registerSnapshotQueryTools(program, { print });
-
 function firstCommand(args) {
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
@@ -1109,11 +1021,13 @@ function firstCommand(args) {
 
 try {
   const commandName = firstCommand(process.argv.slice(2));
-  // Root help and unknown-command suggestions still use the full command tree.
-  const coreCommand = program.commands.some(
-    (command) => command.name() === commandName || command.aliases().includes(commandName),
-  );
-  const fullHelp = !coreCommand && !['acceptance', '-V', '--cli-version'].includes(commandName);
+  const registered = () =>
+    program.commands.some((command) => command.name() === commandName || command.aliases().includes(commandName));
+  // Load each tier only when the command isn't in an earlier one. Root help and
+  // unknown-command suggestions still get the full command tree.
+  const skipOffline = registered() || ['acceptance', '-V', '--cli-version'].includes(commandName);
+  if (!skipOffline) await registerToolGroups(program, { view, print });
+  const fullHelp = !skipOffline && !registered();
   if (fullHelp) {
     const [planning, studies] = await Promise.all([import('./planning-tools.js'), import('./planning-studies.js')]);
     planning.registerPlanningTools(program, { print });

@@ -1,18 +1,25 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { TOOL_GROUPS } from '../src/tool-groups.js';
 
-const rejectPlannerImport = `
-  export async function resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('./planning-') || specifier === './acceptance-tools.js')
-      throw new Error('Unexpected offline tool import: ' + specifier);
-    return nextResolve(specifier, context);
-  }
-`;
-const loader = `data:text/javascript,${encodeURIComponent(rejectPlannerImport)}`;
-const preload = `data:text/javascript,${encodeURIComponent(
-  `import { register } from 'node:module'; register(${JSON.stringify(loader)});`,
-)}`;
+function rejectingPreload({ toolGroups }) {
+  const rejected = toolGroups ? TOOL_GROUPS.map(([specifier]) => specifier) : [];
+  const loader = `
+    const rejected = new Set(${JSON.stringify(rejected)});
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier.startsWith('./planning-') || specifier === './acceptance-tools.js' || rejected.has(specifier))
+        throw new Error('Unexpected offline tool import: ' + specifier);
+      return nextResolve(specifier, context);
+    }
+  `;
+  const url = `data:text/javascript,${encodeURIComponent(loader)}`;
+  return `data:text/javascript,${encodeURIComponent(
+    `import { register } from 'node:module'; register(${JSON.stringify(url)});`,
+  )}`;
+}
+// Core commands load no offline tool group, planner, or acceptance tooling.
+const preload = rejectingPreload({ toolGroups: true });
 
 for (const [command, ...options] of [
   ['stop'],
@@ -20,7 +27,7 @@ for (const [command, ...options] of [
   ['status', '--bridge=unused.json', '--json'],
   ['mcp'],
 ]) {
-  test(`${command} starts without importing offline planners or acceptance tooling`, () => {
+  test(`${command} starts without importing offline tool groups, planners, or acceptance tooling`, () => {
     const result = spawnSync(process.execPath, ['--import', preload, 'src/cli.js', ...options, command, '--help'], {
       encoding: 'utf8',
     });
@@ -29,10 +36,28 @@ for (const [command, ...options] of [
   });
 }
 
+test('an offline tool group command loads without planners or acceptance tooling', () => {
+  const result = spawnSync(
+    process.execPath,
+    ['--import', rejectingPreload({ toolGroups: false }), 'src/cli.js', 'supplies', '--help'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: mc-agent supplies\b/);
+});
+
+test('every offline tool group exports its register function', async () => {
+  for (const [specifier, name] of TOOL_GROUPS) {
+    const module = await import(new URL(specifier, new URL('../src/', import.meta.url)));
+    assert.equal(typeof module[name], 'function', `${specifier} exports ${name}`);
+  }
+});
+
 test('root help still lists core and offline planner commands', () => {
   const result = spawnSync(process.execPath, ['src/cli.js', '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /\bobserve\|status\b/);
+  assert.match(result.stdout, /\bsupplies\b/);
   assert.match(result.stdout, /\bscaffold-plan\b/);
   assert.match(result.stdout, /\bstudy\b/);
 });

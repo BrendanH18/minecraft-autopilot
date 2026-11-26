@@ -4,6 +4,10 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ## Unreleased — intended for v0.1.0
 
+### Changed
+
+- Core commands such as `stop`, `observe` and `mcp` no longer load the 44 offline tool groups (supplies, survey, ledger and the rest). Those load only for their own commands, root help and unknown-command suggestions. Help output is unchanged.
+
 ### Added
 
 - `npm run acceptance:fabric -- --takeover` scripts the Fabric checklist items that need no person: F8, the pause menu and inventory screen, closing the agent's storage or crafting screen, emergency stop, cancel, lease expiry, death, disconnect, dimension change and a full inventory. It presses real keys with xdotool on the headless client and checks each outcome with independent server reads. These are pre-checks for the keyboard session, not release evidence.
