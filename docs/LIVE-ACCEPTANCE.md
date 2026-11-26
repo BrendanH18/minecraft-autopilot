@@ -210,9 +210,12 @@ opened containers, saved home or last job.
 - **Slow starts.** Each scenario waits up to ten minutes for the bridge, because
   Gradle starts again every time. Settling at the start position allows 60
   seconds, not 15, because the client has to load the teleported chunks.
-- **Known failure.** `inspect-preserves-home` ends about five blocks from home
-  on Fabric ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)).
-  The other `--fast` scenarios passed on 25 November 2026.
+- **Results.** On 25 November 2026 all 25 `--fast` scenarios passed, in about
+  ten minutes, and so did the three `recovery-*` scenarios, which `--fast`
+  leaves out (run them with `--scenario`; each takes about 3.5 minutes).
+  `inspect-preserves-home` used to end five blocks from home
+  ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)); its
+  results now record the server `Pos` before each planner request.
 - **Not covered.** F8, menus, the packaged mods folder, the normal launcher and
   handoff can't be scripted here. They stay in the [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist).
 

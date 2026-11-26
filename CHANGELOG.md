@@ -157,6 +157,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Fixed
 
+- Fabric `home` now walks into the saved home block, and an inventory inspection walks back into the block it started in. Both used to stop as soon as the player was within 1.75 blocks, which could be half way up a step. The planner's final inspection then counted the step below as "returned", and each retried inspection started where the last stopped, so `inspect-preserves-home` ended five blocks from home ([#78](https://github.com/BrendanH18/minecraft-autopilot/issues/78)). If Baritone can't enter the home block, `home` still finishes beside it.
 - Fabric's bridge now sends `"items": null` for containers it hasn't opened. It used to leave the field out, so the planner rejected Fabric state, and every storage task with an unopened chest nearby failed verification. The scripted Fabric run found this.
 - Fabric job messages now match the bot's wording for deposits, withdrawals and crafting. For example, `Deposited 8 oak_log into the chest at X Y Z.` and `Placed a crafting table at X Y Z.`, with no `minecraft:` prefixes. A Fabric deposit with too few items held now fails as a job, as on the bot, instead of the request being refused.
 
