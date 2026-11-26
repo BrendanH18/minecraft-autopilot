@@ -405,6 +405,12 @@ test('preflight refuses without --accept-eula, the cached jar, or Java 21, point
   assert.match(serverProperties({ port: 25570, seed: 's' }), /^server-port=25570$/m);
 });
 
+test('the test server saves chunks without synchronous writes, so slow fsync cannot stall console commands', () => {
+  const properties = serverProperties({ port: 25570, seed: 's' });
+  assert.match(properties, /^sync-chunk-writes=false$/m);
+  assert.doesNotMatch(properties, /^sync-chunk-writes=true$/m);
+});
+
 /** A tiny server world answering console commands, plus a bridge view of the same bot. */
 function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
   const world = {

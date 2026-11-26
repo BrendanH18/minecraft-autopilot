@@ -66,9 +66,11 @@ Strict acceptance start verifies the installable ZIP and its pinned dependencies
 
 Before packaged Fabric session 1, run `npm run acceptance:fabric -- --accept-eula --fast` and `npm run acceptance:fabric -- --accept-eula --takeover` on the candidate in Boat. Then the keyboard session starts from the known Fabric failures, not from finding them. `--takeover` scripts the [Fabric checklist](LIFECYCLE-SCENARIOS.md#fabric-checklist) items that need no person (F8, menus, stop, cancel, expiry, death, disconnect, dimension change, full inventory) with real key presses on the headless client; the session still runs them with the packaged jars, because Xvfb key presses aren't evidence for those gates.
 
+**Agent candidate run done (26 November).** Candidate `3fca55b` passed `acceptance:bot --all` (28 offline scenarios; the two real-model ones skipped), all 25 Fabric `--fast` scenarios, and 29 of 31 `--takeover` scenarios, the other two being the known storage-screen-close expected failures. The run found one bug, in the runner: the test server's synchronous chunk writes stalled a `forceload` in Boat and failed the second half of every `--all` run. It is fixed with a test. No Fabric failures were found, so session 1 starts from the packaged-only items. Details are in [DEVELOPMENT.md](DEVELOPMENT.md#validation).
+
 | Item | Done when | Who and where |
 | --- | --- | --- |
-| Build a clean candidate in Boat and run `acceptance:bot --all`. | Every offline scenario passes on the candidate commit. | Agent, Boat. |
+| Build a clean candidate in Boat and run `acceptance:bot --all`. | Every offline scenario passes on the candidate commit. | Agent, Boat. **Done (26 November)** on `3fca55b`. |
 | Review the bot results for `bot-mining-timeout`, `bot-withdraw-craft`, `collect-and-store-verification`, and the bot half of `collection-pit-recovery`. | A person records the review in [DEVELOPMENT.md](DEVELOPMENT.md#validation) and ticks the boxes the evidence supports. | Person. |
 | Run `stale-removal-model` and `withdraw-craft-model` with a real local model. | Both pass and are recorded. | Person, Mac with Ollama. |
 | Packaged Fabric session 1: `fabric-packaged-install`, `fabric-f8-takeover`, `cobblestone-hostiles-dimension`, and the Fabric half of `collection-pit-recovery`. | Each gate has a finished `mc-agent acceptance` session with independent server reads, and each failure has an issue. | Person at the keyboard, Mac. |
