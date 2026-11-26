@@ -460,7 +460,8 @@ async function waitForSession({ child, label, bridge, connect, timeoutMs, signal
       } catch (error) {
         lastError = error;
       }
-      await delay(500);
+      // A local bridge read is cheap; a short interval keeps each scenario from idling after the session is ready.
+      await delay(200);
     }
     await bot.stop();
     throw new Error(

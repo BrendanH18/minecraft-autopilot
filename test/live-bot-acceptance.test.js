@@ -1097,10 +1097,14 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
       'scope',
       'startedAt',
       'summary',
+      'timings',
     ].sort(),
   );
   assert.equal(value.schema, 'minecraft-agent/live-bot-acceptance/1');
   assert.equal(value.review.reviewed, false);
+  for (const phase of ['serverStartMs', 'worldSetupMs', 'scenariosMs', 'serverStopMs', 'totalMs'])
+    assert.equal(typeof value.timings[phase], 'number', phase);
+  assert.ok(value.timings.totalMs >= value.timings.scenariosMs);
   assert.deepEqual(
     { commit: value.environment.commit, dirty: value.environment.dirty },
     { commit: 'abc123', dirty: false },
@@ -1121,7 +1125,7 @@ test('a failing scenario still stops the bot, cleans fixtures, stops the server,
     failed.steps.some((step) => step.name === 'start a fresh bot session via the repo CLI' && step.status === 'ok'),
   );
   assert.ok(
-    failed.cleanup.every((entry) => entry.ok),
+    failed.cleanup.every((entry) => entry.ok && typeof entry.durationMs === 'number'),
     JSON.stringify(failed.cleanup),
   );
   assert.equal(skip.status, 'skipped');
@@ -1260,7 +1264,12 @@ test('failed bot shutdown retains the failed scenario and skips the remaining se
   const results = await runAcceptance(options, deps);
   const [failed, skipped] = results.scenarios;
   assert.equal(failed.status, 'fail');
-  assert.deepEqual(failed.cleanup.at(-1), { command: 'stop bot process', ok: false, error: 'bot remained running' });
+  assert.deepEqual(failed.cleanup.at(-1), {
+    command: 'stop bot process',
+    ok: false,
+    error: 'bot remained running',
+    durationMs: 0,
+  });
   assert.equal(skipped.id, 'craft-rounds-up');
   assert.equal(skipped.status, 'skipped');
   assert.match(skipped.reason, /Could not stop the bot/);

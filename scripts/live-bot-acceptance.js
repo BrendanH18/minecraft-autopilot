@@ -478,10 +478,11 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   } finally {
     // Cleanup ignores the run signal so an interrupted scenario still leaves no bot activity or fixtures behind.
     const clean = async (command, fn) => {
+      const begun = deps.now();
       try {
-        record.cleanup.push({ command, ok: true, ...(await fn()) });
+        record.cleanup.push({ command, ok: true, ...(await fn()), durationMs: deps.now() - begun });
       } catch (error) {
-        record.cleanup.push({ command, ok: false, error: error.message });
+        record.cleanup.push({ command, ok: false, error: error.message, durationMs: deps.now() - begun });
       }
     };
     if (bot)
@@ -651,12 +652,19 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     },
     ...(fabric && { client: { log: where.clientLog, logSha256: null, gameDirectory: where.client } }),
     scenarios: [],
+    // Wall time of each run phase; each scenario's steps and cleanup entries carry their own durationMs.
+    timings: { serverStartMs: null, worldSetupMs: null, scenariosMs: null, serverStopMs: null, totalMs: null },
     summary: null,
     error: null,
+  };
+  const runStarted = deps.now();
+  const phase = (name, since) => {
+    results.timings[name] = deps.now() - since;
   };
   let server = null;
   let inspecting = false;
   try {
+    let since = deps.now();
     await deps.prepareServerDirectory({
       directory: where.server,
       jar: options.jar,
@@ -673,7 +681,11 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       throw new Error(
         `Expected Minecraft ${MINECRAFT_VERSION}, found ${server.console.version ?? 'an unknown version'}.`,
       );
+    phase('serverStartMs', since);
+    since = deps.now();
     for (const command of WORLD_SETUP) await server.console.command(command, { signal });
+    phase('worldSetupMs', since);
+    since = deps.now();
     for (const scenario of options.scenarios) {
       deps.warn(`[${scenario.id}] ${scenario.title}`);
       const record = await runScenario(scenario, { options, deps, serverConsole: server.console, signal, where });
@@ -683,6 +695,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       if (record.cleanup.some(({ command, ok }) => command === backend.stopStep && !ok))
         throw new Error(`Could not stop the ${backend.label} after ${scenario.id}. Remaining scenarios were skipped.`);
     }
+    phase('scenariosMs', since);
     if (options.keepServer) {
       inspecting = true;
       await deps.keepAlive(server, signal);
@@ -693,8 +706,10 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     results.scenarios.push(...remaining.map((scenario) => scenarioRecord(scenario, results.error, options)));
   } finally {
     if (server) {
+      const stopping = deps.now();
       try {
         await server.stop();
+        phase('serverStopMs', stopping);
         results.minecraft.serverLogSha256 = await deps.sha256File(where.serverLog).catch((error) => {
           results.error ??= `Server log checksum failed: ${error.message}`;
           return null;
@@ -708,6 +723,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     const { commit, dirty } = deps.environment({ java: options.java });
     results.environment.sourceAtFinish = { commit, dirty };
     results.finishedAt = new Date(deps.now()).toISOString();
+    phase('totalMs', runStarted);
     results.summary = summarize(results);
     await deps.writeResults(where.out, results);
     deps.print(formatSummary(results, where.out));
