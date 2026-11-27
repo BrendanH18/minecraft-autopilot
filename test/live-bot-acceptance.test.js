@@ -2365,6 +2365,16 @@ test('a packaged run verifies the archive jars first, launches the production cl
   );
 });
 
+test('a packaged scenario that checks nothing fails even though the smoke check passed', async () => {
+  const { deps } = packagedDeps(fakeWorld());
+  const options = parseOptions(['--scenario', 'craft-rounds-up', '--accept-eula', '--backend', 'fabric', '--packaged']);
+  const scenarios = options.scenarios.map((scenario) => ({ ...scenario, run: async () => {} }));
+  const results = await runAcceptance({ ...options, scenarios, account: BOT }, deps);
+  assert.ok(results.scenarios[0].checks.some(({ name, pass }) => name === 'packaged-smoke' && pass));
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.equal(results.scenarios[0].reason, 'No checks ran.');
+});
+
 test('a failed packaged smoke check fails the scenario, and a bad archive stops the run before the server starts', async () => {
   const world = fakeWorld();
   const { deps } = packagedDeps(world, {

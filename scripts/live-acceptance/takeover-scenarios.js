@@ -914,7 +914,11 @@ async function rejoinChecks(ctx, plan, expect, { jobId, leaseId, handle, atKick 
     series.every((read) => nothingResumed(jobId, read.bridge)),
     { jobId, bridge: series.map(({ bridge }) => ({ mode: bridge.mode, stopping: bridge.stopping, job: bridge.job })) },
   );
-  const moved = Math.max(distance(atRejoin.position, second.position), distance(second.position, third.position));
+  const moved = Math.max(
+    distance(atRejoin.position, second.position),
+    distance(second.position, third.position),
+    distance(atRejoin.position, third.position),
+  );
   ctx.check(
     `independently after rejoining: ${HALTS.movement.text} (Pos at the rejoin, 1 s and 5 s later match)`,
     moved <= 0.2,

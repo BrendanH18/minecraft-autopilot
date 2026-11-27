@@ -573,12 +573,15 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
       // Software-rendered Fabric clients load teleported chunks more slowly than the bot.
       settle(ctx, plan, options.backend === 'fabric' ? 60_000 : 15_000),
     );
+    // The packaged smoke check doesn't count: the scenario itself must check something.
+    const before = record.checks.length;
     await scenario.run(ctx, plan);
     const failed = record.checks.filter((check) => !check.pass);
-    record.status = failed.length || !record.checks.length ? 'fail' : 'pass';
+    const ran = record.checks.length > before;
+    record.status = failed.length || !ran ? 'fail' : 'pass';
     record.reason = failed.length
       ? `Failed checks: ${failed.map((check) => check.name).join('; ')}`
-      : record.checks.length
+      : ran
         ? null
         : 'No checks ran.';
   } catch (error) {
