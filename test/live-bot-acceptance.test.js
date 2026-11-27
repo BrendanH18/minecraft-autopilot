@@ -1844,7 +1844,7 @@ test('--backend fabric selects the development client with its own default playe
   assert.equal(parseOptions(['--all', '--backend', 'fabric', '--account', 'Tester']).account, 'Tester');
   assert.deepEqual(
     fabric.scenarios.map(({ id }) => id),
-    parseOptions(['--fast']).scenarios.map(({ id }) => id),
+    [...parseOptions(['--fast']).scenarios.map(({ id }) => id), 'fabric-collect-mcp'],
   );
 });
 
@@ -2215,6 +2215,24 @@ test("a scenario's storage pacing reaches its Fabric client, and a failed check 
   assert.equal(plain.start.storageStepDelayTicks, undefined);
   assert.equal(plain.record.status, 'fail');
   assert.equal(plain.record.expectedFailure, undefined);
+});
+
+test('Fabric agent pre-checks are Fabric-only and Ollama requires a model', () => {
+  const model = 'fabric-collect-model';
+  const mcp = 'fabric-collect-mcp';
+  for (const id of [model, mcp])
+    assert.throws(() => parseOptions(['--scenario', id]), /runs only with --backend fabric/);
+
+  const fabric = ['--backend', 'fabric', '--packaged'];
+  const selected = [...fabric, '--scenario', model, '--scenario', mcp];
+  const withoutModel = buildPlan(parseOptions(selected)).scenarios;
+  assert.equal(withoutModel.find(({ id }) => id === model).willSkip, true);
+  assert.equal(withoutModel.find(({ id }) => id === mcp).willSkip, false);
+
+  const withModel = buildPlan(parseOptions([...selected, '--model', 'qwen3.5:4b'], { MCA_BOAT_CHECK: '1' }));
+  const planned = withModel.scenarios.find(({ id }) => id === model);
+  assert.equal(planned.willSkip, false);
+  assert.match(planned.release[0], /pre-check only \(Fabric packaged jars.*small model on a Boat CPU/);
 });
 
 test('--packaged needs the Fabric backend, defaults to the dist archive and refuses a misnamed --archive', () => {
