@@ -15,6 +15,6 @@
 
 ## Runnable spatial planner examples
 
-Entries 11–250 are the 240 examples in [the spatial example catalog](../src/planning-examples-spatial.js), in source order. Each pairs a distinct existing planner operation with its arguments and an independently worked expected result. The examples previously served as test fixtures and now also serve the planner example CLI. All 250 original spatial reference cases remain in the [test suite](../test/planning-spatial.test.js).
+Entries 11–250 are the 240 examples in [the spatial example catalog](../packages/planners/src/planning-examples-spatial.js), in source order. Each pairs a distinct existing planner operation with its arguments and an independently worked expected result. The examples previously served as test fixtures and now also serve the planner example CLI. All 250 original spatial reference cases remain in the [test suite](../packages/planners/test/planning-spatial.test.js).
 
 The Fabric changes passed the Java tests, build, formatting check, and installer archive verification in Boat. The spatial fixtures passed the focused Node suite and Biome. The in-game lease and crafting behavior still needs packaged Fabric acceptance.

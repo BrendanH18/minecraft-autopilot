@@ -6,6 +6,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Changed
 
+- The offline planners, planning studies and the 44 report and tool groups moved into the `@minecraft-autopilot/planners` npm workspace package in `packages/planners/`, with their tests and reference docs. `npm install` in the repository root still installs them, and the commands are unchanged. The core CLI runs without the package: core commands never load it, and other commands then report that the package isn't installed.
+
 - Core commands such as `stop`, `observe` and `mcp` no longer load the 44 offline tool groups (supplies, survey, ledger and the rest). Those load only for their own commands, root help and unknown-command suggestions. Help output is unchanged.
 
 ### Added
@@ -18,7 +20,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 - `study examples` and `study example GROUP COMMAND` list and run worked
   planner examples. Reports show the inputs, computed result, and
-  independently calculated expected output. See [worked examples](docs/PLANNING-STUDIES.md#worked-examples).
+  independently calculated expected output. See [worked examples](packages/planners/docs/PLANNING-STUDIES.md#worked-examples).
 
 - Packaged Fabric acceptance fixtures for keyboard and lease takeover, plus cobblestone collection, hostile observations, and dimension-change release.
 
@@ -50,7 +52,7 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - 200 offline build planners for scaffolds, beacon bases, tunnel ventilation
   layouts, canal locks, underwater draining, ice roads, furnace banks, and
   brewing benches. Each command calculates from supplied assumptions and can
-  run without a bridge. All 200 also support the nine [study workflows](docs/PLANNING-STUDIES.md). See [the command inventory](docs/IMPROVEMENTS.md#batch-14-200-offline-build-planners).
+  run without a bridge. All 200 also support the nine [study workflows](packages/planners/docs/PLANNING-STUDIES.md). See [the command inventory](docs/IMPROVEMENTS.md#batch-14-200-offline-build-planners).
 
 - Fabric parity for task-scoped storage verification and the full-inventory
   collection stop. Fabric deposit jobs now report `container` (canonical
@@ -110,14 +112,14 @@ Changes being prepared for the initial experimental release. Acceptance is track
 - Constraint screening for all 1,000 typed planners: 1,000 new planner/workflow
   combinations, bringing the study catalog to 6,000. Check up to 20 explicit
   criteria per candidate with per-check outcomes and pass/fail totals; see
-  [constraint screening](docs/PLANNING-STUDIES.md#constraint-screening).
+  [constraint screening](packages/planners/docs/PLANNING-STUDIES.md#constraint-screening).
   This is one reusable offline workflow and does not extend gameplay claims.
 
 - Five offline study workflows for each of the 1,000 typed planners: 5,000
   planner/workflow combinations for batch evaluation, baseline comparison,
   parameter sweeps, sensitivity, and ranking. Includes a machine-readable
   catalog, bounded JSON/file/stdin requests, and atomic failure reporting;
-  see [planning studies](docs/PLANNING-STUDIES.md). These are reusable workflows,
+  see [planning studies](packages/planners/docs/PLANNING-STUDIES.md). These are reusable workflows,
   not 5,000 new algorithms, and leave live gameplay acceptance gates open.
 
 - 1,000 offline planning and analysis commands in 40 groups of 25, covering

@@ -17,9 +17,13 @@
   "bin": {
     "mc-agent": "src/cli.js"
   },
+  "workspaces": [
+    "packages/planners"
+  ],
   "scripts": {
     "start": "node src/cli.js",
     "test": "node --test test/*.test.js",
+    "test:planners": "npm test --workspace @minecraft-autopilot/planners",
     "check": "node scripts/check.js",
     "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",

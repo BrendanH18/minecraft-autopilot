@@ -31,7 +31,7 @@
 
 ## Worked resource planning examples
 
-The 227 unique entries in [the resource catalog](../src/planning-examples-resources.js)
+The 227 unique entries in [the resource catalog](../packages/planners/src/planning-examples-resources.js)
 are now available through `mc-agent study example GROUP COMMAND`. The inputs and
 independently calculated expected results come from the existing resource planner
 regressions. Those regressions still run all 250 original cases.
