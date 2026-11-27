@@ -305,14 +305,7 @@ const TABLE = [
   { id: 'cancel-eat', fixture: 'food', activity: 'eat', trigger: 'cancel', release: 'eating', food: PECKISH },
   { id: 'expiry-idle', fixture: 'ground', activity: 'idle-cli', trigger: 'suspend', release: 'takeover' },
   { id: 'expiry-goto', fixture: 'ground', activity: 'goto-cli', trigger: 'kill', release: 'takeover' },
-  {
-    id: 'disconnect-collect',
-    fixture: 'trees-offline',
-    activity: 'collect',
-    trigger: 'kick',
-    release: 'takeover',
-    partial: 'Rejoining after the kick is not scripted: the client stays on the disconnected screen.',
-  },
+  { id: 'disconnect-collect', fixture: 'trees-offline', activity: 'collect', trigger: 'kick', release: 'takeover' },
   { id: 'death-goto', fixture: 'death', activity: 'goto', trigger: 'death', release: 'takeover' },
   { id: 'dimension-idle', fixture: 'nether', activity: 'idle', trigger: 'teleport', release: 'dimension' },
   { id: 'dimension-goto', fixture: 'nether', activity: 'goto', trigger: 'teleport', release: 'dimension' },
@@ -354,6 +347,23 @@ export const NOT_SCRIPTED = Object.freeze({});
 // for 15 s and the client gives up after 30 s without a packet; the hold stays well under both.
 export const HOLD = Object.freeze({ clickMs: 2000, newSessionMs: 2500, maxMs: 8000 });
 
+// Rejoining after the kick goes through the client's own screens, as a person would: the disconnect screen's only
+// button (Back to server list; Tab focuses it, Enter presses it), the server list's Direct Connection button (quick
+// play adds its server hidden, so the list has no entry to join), then the address and Enter. Each screen gets
+// `settleMs` to open; the join must finish within `joinMs` (the software-rendered client loads terrain slowly).
+export const REJOIN = Object.freeze({ settleMs: 1500, joinMs: 60_000 });
+
+const REJOIN_STEPS = [
+  'at the disconnect screen: mc-agent job from another process',
+  "rejoin through the client's screens: Tab and Enter on the disconnect screen (Back to server list), click Direct Connection on the server list, type the server address, Enter; not rejoining within 60 s fails as not observed",
+  'after the rejoin: the bridge must show the player again; mode, job and independent reads (position, inventory, the target logs) at the rejoin, 1 s later and 5 s later; mc-agent job; the old lease must still be refused',
+];
+
+const REJOIN_EXPECT = [
+  "after rejoining through the client's screens, the bridge shows the player again, mode stays manual and no job is started or resumed",
+  'independently after rejoining: Pos and Inventory reads at the rejoin, 1 s and 5 s later match, and the target logs are as the kick left them',
+];
+
 const lifecycleById = new Map(LIFECYCLE_SCENARIOS.map((scenario) => [scenario.id, scenario]));
 
 function heldSteps(spec, plan) {
@@ -392,6 +402,7 @@ function steps(spec, plan) {
   const { next, mode } = lifecycleById.get(spec.id).expect;
   if (mode === 'manual') lines.push('old lease: /v1/control heartbeat and /v1/actions must be refused');
   if (next.refused) lines.push('a new session must be refused while the player cannot play');
+  if (spec.trigger === 'kick') lines.push(...REJOIN_STEPS);
   if (next.lease === 'same') lines.push('the same lease then runs wait 1');
   else lines.push('only then: a new, explicitly started session runs wait 1');
   return lines;
@@ -410,7 +421,6 @@ export const takeoverScenarios = TABLE.map((spec, index) => {
     proxy: true,
     lifecycle: spec.id,
     spec,
-    ...(spec.partial && { partial: spec.partial }),
     ...(spec.expectedFailure && { expectedFailure: spec.expectedFailure, expectedChecks: STORAGE_SCREEN_CHECKS }),
     release: [RELEASE_TAKEOVER[spec.release]],
     plan: (input) => ({ ...takeoverPlan(input, spec.fixture), bot: input.bot }),
@@ -419,7 +429,7 @@ export const takeoverScenarios = TABLE.map((spec, index) => {
     expect: [
       ...describeExpectation(lifecycle.expect),
       ...lifecycle.expect.halts.map((halt) => `independently: ${HALTS[halt].observe}`),
-      ...(spec.partial ? [`not scripted: ${spec.partial}`] : []),
+      ...(spec.trigger === 'kick' ? REJOIN_EXPECT : []),
     ],
     run: (ctx, plan) =>
       spec.trigger === 'stop-held' ? runHeldStop(ctx, plan, spec, lifecycle) : runTakeover(ctx, plan, spec, lifecycle),
@@ -828,6 +838,113 @@ async function oldLease(adapter, leaseId) {
   };
 }
 
+/**
+ * Nothing came back with the player: manual control, no stopping window, and no job but the interrupted one, which
+ * stays ended. `state` is a bridge state or `mc-agent job` output.
+ */
+export function nothingResumed(jobId, state) {
+  if (state?.mode !== 'manual' || state.stopping) return false;
+  return !state.job || (!!jobId && state.job.id === jobId && state.job.status !== 'running');
+}
+
+/** The address the client joined: the runner's proxy when the scenario goes through it, else the server itself. */
+export const serverAddress = (ctx) => `127.0.0.1:${ctx.proxy?.port ?? ctx.options.port}`;
+
+/**
+ * disconnect-collect after the kick: `mc-agent job` at the disconnect screen, rejoin through the client's screens,
+ * then check that nothing resumed (bridge, independent reads, the target logs, the old lease). Returns whether the
+ * client rejoined, so the explicit new session runs only then; a missing rejoin fails as "not observed".
+ */
+async function rejoinChecks(ctx, plan, expect, { jobId, leaseId, handle, atKick }) {
+  const job = async (name) => {
+    const output = await ctx.step(name, () => ctx.cli.run(['job']));
+    return { ok: output.code === 0 && nothingResumed(jobId, parseJson(output.stdout ?? '')), output };
+  };
+  const atScreen = await job('mc-agent job at the disconnect screen');
+  ctx.check('mc-agent job at the disconnect screen shows manual control and no running job', atScreen.ok, atScreen);
+
+  const address = serverAddress(ctx);
+  const rejoined = await ctx.step(
+    `rejoin: Tab and Enter (Back to server list), click Direct Connection, type ${address}, Enter`,
+    async () => {
+      const sent = [await ctx.keys.press('tab'), await ctx.keys.press('enter')];
+      await ctx.sleep(REJOIN.settleMs);
+      sent.push(await ctx.keys.click('direct-connection'));
+      await ctx.sleep(REJOIN.settleMs);
+      sent.push(await ctx.keys.type(address), await ctx.keys.press('enter'));
+      const joined = await poll(
+        ctx,
+        async () => {
+          const state = await ctx.bridge.observe();
+          const ok = !!state.connected && state.player?.name === ctx.bot && !state.paused;
+          return { ok, connected: state.connected, paused: state.paused, mode: state.mode, job: state.job };
+        },
+        { timeoutMs: REJOIN.joinMs, intervalMs: 250 },
+      );
+      return { address, sent, joined, proxy: ctx.proxy?.stats?.() ?? null };
+    },
+  );
+  const online = await ctx.server.command('list');
+  const back = rejoined.joined.ok && new RegExp(`online: (?:.*\\W)?${ctx.bot}(?:\\W|$)`).test(online);
+  ctx.check(
+    back
+      ? 'the client rejoined through the disconnect screen and the server list, and the bridge shows the player again'
+      : 'not observed: the client did not rejoin through the disconnect screen and the server list',
+    back,
+    { rejoined, online },
+  );
+  if (!back) return false;
+
+  // Independent reads at the rejoin, 1 s later and 5 s after that, with the bridge state beside each.
+  const both = async () => ({
+    ...(await reads(ctx, plan, expect.halts)),
+    ...(await reads(ctx, plan, expect.halts, { offline: true })),
+    bridge: await ctx.bridge.observe(),
+  });
+  const atRejoin = await ctx.step('independent reads at the rejoin', both);
+  await ctx.sleep(1000);
+  const second = await ctx.step('independent reads 1 s after the rejoin', both);
+  await ctx.sleep(5000);
+  const third = await ctx.step('independent reads 5 s later', both);
+  const series = [atRejoin, second, third];
+  ctx.note('rejoinReads', { atKick, atRejoin, second, third });
+
+  ctx.check(
+    'after rejoining, mode stays manual and no job is started or resumed (bridge at the rejoin, 1 s and 5 s later)',
+    series.every((read) => nothingResumed(jobId, read.bridge)),
+    { jobId, bridge: series.map(({ bridge }) => ({ mode: bridge.mode, stopping: bridge.stopping, job: bridge.job })) },
+  );
+  const moved = Math.max(distance(atRejoin.position, second.position), distance(second.position, third.position));
+  ctx.check(
+    `independently after rejoining: ${HALTS.movement.text} (Pos at the rejoin, 1 s and 5 s later match)`,
+    moved <= 0.2,
+    { positions: series.map(({ position }) => position), moved },
+  );
+  ctx.check(
+    `independently after rejoining: ${HALTS.mining.text} (Inventory at the rejoin, 1 s and 5 s later match, and the target logs are as the kick left them)`,
+    sameTotals(atRejoin.inventory, second.inventory) &&
+      sameTotals(second.inventory, third.inventory) &&
+      series.every(({ logBlocks }) => logBlocks === atKick.logBlocks),
+    {
+      inventory: series.map(({ inventory }) => inventory),
+      logBlocks: [atKick.logBlocks, ...series.map((r) => r.logBlocks)],
+    },
+  );
+  const after = await job('mc-agent job after rejoining');
+  ctx.check('mc-agent job after rejoining shows manual control and no running job', after.ok, after);
+  if (leaseId) {
+    const old = await ctx.step('old lease after rejoining: heartbeat and action', () =>
+      oldLease(handle.adapter, leaseId),
+    );
+    ctx.check(
+      'after rejoining, the old session still cannot heartbeat or act',
+      old.heartbeat.refused && old.action.refused,
+      old,
+    );
+  }
+  return true;
+}
+
 /** One scripted checklist item: start → reach the interrupt point → transition → independent halts → next session. */
 export async function runTakeover(ctx, plan, spec, lifecycle) {
   const { expect } = lifecycle;
@@ -1022,10 +1139,7 @@ export async function runTakeover(ctx, plan, spec, lifecycle) {
       );
       ctx.check(`a new session is refused with a message matching /${expect.next.refused}/i`, refused.matches, refused);
     }
-    if (offline) {
-      ctx.note('notScripted', spec.partial);
-      return;
-    }
+    if (offline && !(await rejoinChecks(ctx, plan, expect, { jobId, leaseId, handle, atKick: last }))) return;
     if (expect.next.lease === 'same') {
       const next = await ctx.step('the same lease runs wait 1', async () => {
         try {

@@ -1,5 +1,5 @@
-// Process helpers for the Fabric takeover scenarios: real key presses on the client window (xdotool on the Xvfb
-// display), a second CLI process that can be suspended or killed, and a local stand-in for Ollama that holds a
+// Process helpers for the Fabric takeover scenarios: real key presses, clicks and typing in the client window
+// (xdotool on the Xvfb display), a second CLI process that can be suspended or killed, and a local stand-in for Ollama that holds a
 // planner request open so the agent stays "waiting for model inference" for as long as a scenario needs.
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -43,16 +43,15 @@ const run = (execFileImpl, [command, ...args], timeout = 10_000) =>
     });
   });
 
-/** Presses one key in the Minecraft client window on $DISPLAY. Returns what was sent, for the results file. */
-export async function pressKey(key, { env = process.env, execFileImpl = execFile } = {}) {
+/** The client's visible window on $DISPLAY (the first match). */
+async function findWindow(env, execFileImpl) {
   if (!env.DISPLAY)
     throw new Error(
       'No X display ($DISPLAY is unset). The takeover scenarios press keys on the headless client under Xvfb; run them through scripts/boat-check.sh.',
     );
-  const { search } = keyPressCommands(key);
   let found;
   try {
-    found = await run(execFileImpl, search);
+    found = await run(execFileImpl, keyPressCommands('f8').search);
   } catch (error) {
     // xdotool search exits 1 when no window matches.
     if (/not installed/.test(error.message)) throw error;
@@ -60,9 +59,97 @@ export async function pressKey(key, { env = process.env, execFileImpl = execFile
   }
   const window = found.split(/\s+/).find(Boolean);
   if (!window) throw new Error(`No visible window titled ${WINDOW_NAME} on display ${env.DISPLAY}.`);
+  return window;
+}
+
+/** Presses one key in the Minecraft client window on $DISPLAY. Returns what was sent, for the results file. */
+export async function pressKey(key, { env = process.env, execFileImpl = execFile } = {}) {
+  const window = await findWindow(env, execFileImpl);
   const { press } = keyPressCommands(key, window);
   await run(execFileImpl, press);
   return { key, keysym: KEYS[key], window, display: env.DISPLAY };
+}
+
+/**
+ * Minecraft's automatic GUI scale for a window (Window.calculateScaleFactor with guiScale 0, which the runner's
+ * options.txt leaves as is): the largest factor that keeps the scaled screen at least 320 × 240. 854 × 480 gives 2.
+ */
+export function guiScale(width, height) {
+  let scale = 1;
+  while (
+    scale < width &&
+    scale < height &&
+    Math.floor(width / (scale + 1)) >= 320 &&
+    Math.floor(height / (scale + 1)) >= 240
+  )
+    scale++;
+  return scale;
+}
+
+/**
+ * The window pixel at the centre of the server list's Direct Connection button. Minecraft 1.21.1 lays the list's
+ * buttons out as two 308-wide rows (20 high, 4 apart) centred in the bottom 64 scaled pixels. Direct Connection is
+ * the middle of the top row (Join Server, Direct Connection, Add Server), so it is centred across the screen and its
+ * centre is 44 scaled pixels above the bottom. The button is 100 × 20 scaled, so a pixel or two of rounding is safe.
+ */
+export function directConnectionPoint({ width, height }) {
+  const scale = guiScale(width, height);
+  const scaledWidth = Math.ceil(width / scale);
+  const scaledHeight = Math.ceil(height / scale);
+  return { x: Math.floor(scaledWidth / 2) * scale, y: (scaledHeight - 44) * scale, scale };
+}
+
+/** Points a scenario may click, each computed from the client window's size. */
+export const CLICK_TARGETS = Object.freeze({ 'direct-connection': directConnectionPoint });
+
+/** `xdotool getwindowgeometry --shell` output → { width, height }. */
+export function parseWindowGeometry(text) {
+  const value = (name) => Number(new RegExp(`^${name}=(\\d+)$`, 'm').exec(String(text))?.[1]);
+  const width = value('WIDTH');
+  const height = value('HEIGHT');
+  if (!(width > 0 && height > 0)) throw new Error(`Could not read the client window size from: ${String(text).trim()}`);
+  return { width, height };
+}
+
+/**
+ * The xdotool commands to read the window's size and to left-click a window-relative point (focus, move, click in
+ * one xdotool process, so the order is kept).
+ */
+export function clickCommands(window, point = null) {
+  const id = String(window);
+  return {
+    geometry: ['xdotool', 'getwindowgeometry', '--shell', id],
+    click: point
+      ? ['xdotool', 'windowfocus', id, 'mousemove', '--window', id, String(point.x), String(point.y), 'click', '1']
+      : null,
+  };
+}
+
+/** The xdotool command that selects all in the focused text field (Ctrl+A) and types `text` over it. */
+export function typeCommand(window, text) {
+  if (!/^[\x20-\x7e]+$/.test(String(text)))
+    throw new Error(`Only printable ASCII can be typed, got ${JSON.stringify(text)}.`);
+  // `type` takes every remaining argument as text, so it comes last.
+  return ['xdotool', 'windowfocus', String(window), 'key', 'ctrl+a', 'type', '--delay', '50', String(text)];
+}
+
+/** Left-clicks a named point (CLICK_TARGETS) in the client window. Returns what was clicked, for the results file. */
+export async function clickTarget(target, { env = process.env, execFileImpl = execFile } = {}) {
+  if (!Object.hasOwn(CLICK_TARGETS, target))
+    throw new Error(`Unknown click target ${JSON.stringify(target)}; use one of ${Object.keys(CLICK_TARGETS)}.`);
+  const window = await findWindow(env, execFileImpl);
+  const size = parseWindowGeometry(await run(execFileImpl, clickCommands(window).geometry));
+  const point = CLICK_TARGETS[target](size);
+  await run(execFileImpl, clickCommands(window, point).click);
+  return { target, window, size, point, display: env.DISPLAY };
+}
+
+/** Types `text` into the client's focused text field, replacing what it held. */
+export async function typeText(text, { env = process.env, execFileImpl = execFile } = {}) {
+  typeCommand('0', text);
+  const window = await findWindow(env, execFileImpl);
+  await run(execFileImpl, typeCommand(window, text), 20_000);
+  return { typed: text, window, display: env.DISPLAY };
 }
 
 /**
