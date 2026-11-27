@@ -132,7 +132,7 @@ These cover the Mac-only exceptions above; everything else runs on Boat.
 - actionlint (version pinned in `.github/workflows/ci.yml`) checks workflows in
   the CI `node` job. Pin every action to a full commit SHA with a `# vX.Y.Z`
   comment, and run jobs on GitHub-hosted standard runners (`ubuntu-24.04`).
-- The main ruleset requires the `node` and `mod` CI jobs to pass. A new CI
+- The main ruleset requires the `node`, `planners` and `mod` CI jobs to pass. A new CI
   job must be added to the ruleset's required checks to block merges.
 
 ## Current implementation scope
