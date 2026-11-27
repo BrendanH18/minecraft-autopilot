@@ -617,15 +617,21 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   async function switchSession(kind) {
     await ctx.close();
     await ctx.step(`confirm the ${activeBackend.label} left before the next join`, async () => {
+      const stopped = session;
       // Allow the full Fabric shutdown escalation (35 s), plus time for the server to notice the disconnect.
-      const left = await stopSession(session, serverConsole, options.account, activeBackend.label, 55_000);
+      const left = await stopSession(stopped, serverConsole, options.account, activeBackend.label, 55_000);
       session = null;
-      const roster = await ctx.server.command('list');
-      if (!left || !/^There are 0 of a max of \d+ players online: ?$/.test(roster))
-        throw new Error(
-          `Expected the ${activeBackend.label} departure and an empty roster, got ${left ?? 'no departure'} and "${roster}".`,
-        );
-      return { left, roster };
+      try {
+        const roster = await ctx.server.command('list');
+        if (!left || !/^There are 0 of a max of \d+ players online: ?$/.test(roster))
+          throw new Error(
+            `Expected the ${activeBackend.label} departure and an empty roster, got ${left ?? 'no departure'} and "${roster}".`,
+          );
+        return { left, roster };
+      } catch (error) {
+        if (stopped.output?.length) ctx.note('botOutput', stopped.output.join('').trim().slice(-3000));
+        throw error;
+      }
     });
     signal.throwIfAborted();
     await startSession(kind);

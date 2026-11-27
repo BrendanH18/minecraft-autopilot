@@ -659,13 +659,14 @@ data get entity PLAYER Inventory
    for the rest of the session.
 2. Disconnect in Minecraft. Wait for the server's leave entry and run `list`
    to confirm that the player is absent. Then start the bot from the same
-   candidate checkout. Use the same Microsoft account and the server's actual
-   host and port. Give the bot its own discovery file so the Fabric profile
-   can stay attached.
+   candidate checkout. Replace `SERVER_HOST` and `SERVER_PORT` with the
+   server's actual host and port, and `ACCOUNT_IDENTIFIER` with the identifier
+   for the same Microsoft account. Give the bot its own discovery file so the
+   Fabric profile can stay attached.
 
    ```sh
    npm start -- --bridge .runtime/handoff-bot-bridge.json server \
-     --host SERVER_HOST --port 25565 --account ACCOUNT_IDENTIFIER \
+     --host SERVER_HOST --port SERVER_PORT --account ACCOUNT_IDENTIFIER \
      --auth microsoft --version 1.21.1
    ```
 
@@ -679,10 +680,21 @@ data get entity PLAYER Inventory
    Fabric leave, bot join, bot leave, and Fabric rejoin. Record the connect and
    disconnect times and the observations for the two gaps in the session.
 
-Record each numbered result with
-`acceptance step <session> <n> pass|fail --note <observation>`.
-Finish with `acceptance finish <session> pass` when all four steps pass, or
-finish as `fail` or `blocked` with a note explaining what happened. Review the
-record with `acceptance report --session <session>`. Keep the gate open until
-the owner reviews the evidence against the
+Set `SESSION` to the ID printed by `acceptance start`. Record each numbered
+result, substituting its step number and observation. Use `fail` in place of
+`pass` when a step fails.
+
+```sh
+npm start -- acceptance step "$SESSION" 1 pass --note "First Fabric join, UUID and inventory recorded"
+```
+
+Finish the session, then review the report. Use `fail` or `blocked` with
+`--note "Reason"` when the session cannot pass.
+
+```sh
+npm start -- acceptance finish "$SESSION" pass
+npm start -- acceptance report --session "$SESSION"
+```
+
+Keep the gate open until the owner reviews the evidence against the
 [release checklist](RELEASE.md#live-checks-required-before-shipping).

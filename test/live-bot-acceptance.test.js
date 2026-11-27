@@ -2454,6 +2454,7 @@ test('the packaged handoff verifies the same server player and requires both con
       world.online = true;
       const session = await launch(options);
       return {
+        output: [`${kind} diagnostic output`],
         async stop() {
           if (kind === 'bot' && failBotStop) throw new ShutdownError('Mineflayer is still running');
           world.online = keepOnline;
@@ -2497,6 +2498,7 @@ test('the packaged handoff verifies the same server player and requires both con
   const missing = await rehearse({ omitBotDeparture: true });
   assert.equal(missing.record.status, 'fail');
   assert.match(missing.record.reason, /no departure/);
+  assert.equal(missing.record.observations.botOutput, 'bot diagnostic output');
   assert.deepEqual(missing.launches, ['fabric', 'bot']);
 
   const stuck = await rehearse({ failBotStop: true });
