@@ -230,3 +230,24 @@ test('review-bot never counts Fabric development-client pre-check results as bot
   assert.equal(report.runs.length, 0);
   assert.equal(report.rejected.length, 1);
 });
+
+test('review-bot rejects packaged-jar Fabric pre-checks, and any Fabric result relabelled with the bot schema', async (t) => {
+  const passing = [{ id: 'withdraw', status: 'pass' }];
+  const packaged = { archive: '/dist/minecraft-agent-0.1.0.zip', archiveSha256: 'c'.repeat(64), jars: [] };
+  const { reports, parse } = await review(t, [
+    { ...run(1, passing), schema: 'minecraft-agent/live-fabric-packaged-acceptance/1', backend: 'fabric', packaged },
+    { ...run(2, passing), backend: 'fabric', packaged },
+    { ...run(3, passing), packaged },
+    { ...run(4, passing), backend: 'fabric' },
+  ]);
+  await assert.rejects(parse, /4 bot result file\(s\) rejected/);
+  const [report] = reports;
+  assert.equal(report.runs.length, 0);
+  for (const { reason } of report.rejected)
+    assert.match(
+      reason,
+      /Fabric pre-check results \(development client or packaged jars\) are never bot or release evidence/,
+    );
+  const gate = report.gates.find(({ gate }) => gate === 'bot-withdraw-craft');
+  assert.equal(gate.offline.find(({ id }) => id === 'withdraw').status, 'missing');
+});

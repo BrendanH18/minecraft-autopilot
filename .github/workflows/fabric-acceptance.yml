@@ -78,11 +78,17 @@ jobs:
             xvfb xauth libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 xdotool
       - run: npm ci
       - name: Prepare the mod, the server jar and the client assets
+        env:
+          SUITE: ${{ matrix.suite }}
         run: |
           node scripts/setup-mod.js --allow-downloads
           node scripts/gradle.js build --allow-downloads
           node scripts/package-mod.js --allow-downloads
           node scripts/gradle.js downloadAssets --allow-downloads
+          # The packaged suite runs Fabric Loader in production mode, which also needs the intermediary jar.
+          if [ "$SUITE" = packaged ]; then
+            node scripts/gradle.js prepareProductionClient --allow-downloads
+          fi
       - name: Run the ${{ matrix.suite }} scenarios
         id: acceptance
         env:

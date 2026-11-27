@@ -66,7 +66,13 @@ export async function reviewBotEvidence(files, commit) {
   const latestSkip = new Map();
   for (const file of files) {
     try {
-      const result = resultSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+      const raw = JSON.parse(await readFile(file, 'utf8'));
+      // Whatever its schema says, a Fabric run (development client or packaged jars on Loom's launcher) is a pre-check.
+      if (raw?.backend === 'fabric' || raw?.packaged)
+        throw new Error(
+          'Fabric pre-check results (development client or packaged jars) are never bot or release evidence.',
+        );
+      const result = resultSchema.parse(raw);
       if (result.environment.commit !== commit)
         throw new Error(`Recorded commit ${result.environment.commit ?? 'unknown'} does not match the candidate.`);
       if (result.environment.dirty !== false) throw new Error('The run did not record a clean worktree.');

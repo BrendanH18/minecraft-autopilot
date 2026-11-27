@@ -32,7 +32,8 @@ if (!downloadsAllowed) {
       `Gradle ${gradleVersion} is not cached in this project. No download was made. Use --allow-downloads only after approving the download.`,
     );
   argumentsToPass.unshift('--offline');
-  if (argumentsToPass.includes('runClient')) {
+  // Both client runs depend on Loom's asset download; the production one is the packaged-jar pre-check.
+  if (argumentsToPass.some((task) => task === 'runClient' || task === 'runProductionClient')) {
     const assetsRoot = join(root, '.gradle-user/caches/fabric-loom/assets');
     let index;
     try {
