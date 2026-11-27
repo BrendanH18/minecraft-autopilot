@@ -143,8 +143,16 @@ fi
 export MCA_BOAT_CHECK=1
 model_flag='--model[= ]+([A-Za-z0-9._:/-]+)'
 model=""
-# Set up even when the command also has a dry run: a chained live run still needs the model.
-[[ $cmd =~ $model_flag ]] && model=${BASH_REMATCH[1]}
+# The first chained command (split at &&, || and ;) that has --model and isn't a dry run picks the
+# model; a dry run alone starts nothing. A failed =~ clears BASH_REMATCH, so the name is kept first.
+segments=${cmd//&&/$'\n'}
+segments=${segments//||/$'\n'}
+segments=${segments//;/$'\n'}
+while IFS= read -r segment; do
+    [[ $segment =~ $model_flag ]] || continue
+    candidate=${BASH_REMATCH[1]}
+    [[ $segment =~ --dry-run ]] || { model=$candidate; break; }
+done <<<"$segments"
 if [ -n "$model" ]; then
     ollama_version=0.40.17
     case "$(uname -m)" in
