@@ -16,6 +16,7 @@ on:
           - fast
           - takeover
           - packaged
+          - packaged-takeover
   # Pull requests that change the mod, the CLI (the runner's agent and bridge
   # client reach nearly all of src/), the scenario runner, the server jar setup
   # or this workflow run the --fast scenarios.
@@ -85,8 +86,8 @@ jobs:
           node scripts/gradle.js build --allow-downloads
           node scripts/package-mod.js --allow-downloads
           node scripts/gradle.js downloadAssets --allow-downloads
-          # The packaged suite runs Fabric Loader in production mode, which also needs the intermediary jar.
-          if [ "$SUITE" = packaged ]; then
+          # Fabric Loader production mode also needs the intermediary jar.
+          if [[ "$SUITE" == packaged* ]]; then
             node scripts/gradle.js prepareProductionClient --allow-downloads
           fi
       - name: Run the ${{ matrix.suite }} scenarios
@@ -98,6 +99,7 @@ jobs:
             fast) args=(--fast) ;;
             takeover) args=(--takeover) ;;
             packaged) args=(--packaged --fast) ;;
+            packaged-takeover) args=(--packaged --takeover) ;;
             *) echo "unknown suite: $SUITE" >&2; exit 2 ;;
           esac
           xvfb-run -a -s "-screen 0 854x480x24 -nolisten tcp" \

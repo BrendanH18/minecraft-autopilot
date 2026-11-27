@@ -441,6 +441,13 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && 
 scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --accept-eula --packaged --scenario f8-collect'
 ```
 
+For a release candidate on GitHub, manually run the **Fabric acceptance**
+workflow on the candidate ref and select `packaged-takeover`. It builds the
+release ZIP and runs the full takeover suite against its jars. Download the
+`fabric-acceptance-packaged-takeover` artifact for `results.json` and the
+server and client logs, retained for seven days. This is a headless pre-check
+for the normal-launcher keyboard session.
+
 - **The archive.** By default the runner uses `dist/minecraft-agent-0.1.0.zip`
   and refuses if it's missing: run `npm run build:mod` first. `--archive PATH`
   names another copy; it must keep that name and have its
