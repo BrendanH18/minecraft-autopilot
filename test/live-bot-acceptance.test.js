@@ -2433,12 +2433,20 @@ test('a packaged run verifies the archive jars first, launches the production cl
 });
 
 test('the packaged handoff verifies the same server player and requires both confirmed departures', async () => {
-  async function rehearse({ keepOnline = false, omitBotDeparture = false, changePlayer = () => {} } = {}) {
+  async function rehearse({
+    keepOnline = false,
+    omitBotDeparture = false,
+    failBotStop = false,
+    changePlayer = () => {},
+  } = {}) {
     const world = fakeWorld();
     const { deps, calls } = packagedDeps(world);
     const waitFor = world.console.waitFor.bind(world.console);
-    world.console.waitFor = (match, options) =>
-      waitFor(match, options.label === 'the bot to leave' ? { ...options, timeoutMs: 10 } : options);
+    const fabricLeaveTimeouts = [];
+    world.console.waitFor = (match, options) => {
+      if (options.label === 'the Fabric client to leave') fabricLeaveTimeouts.push(options.timeoutMs);
+      return waitFor(match, options.label === 'the bot to leave' ? { ...options, timeoutMs: 10 } : options);
+    };
     const launches = [];
     const start = (kind, launch) => async (options) => {
       assert.ok(!world.online);
@@ -2447,6 +2455,7 @@ test('the packaged handoff verifies the same server player and requires both con
       const session = await launch(options);
       return {
         async stop() {
+          if (kind === 'bot' && failBotStop) throw new ShutdownError('Mineflayer is still running');
           world.online = keepOnline;
           if (kind !== 'bot' || !omitBotDeparture) await session.stop();
         },
@@ -2470,15 +2479,14 @@ test('the packaged handoff verifies the same server player and requires both con
       '--scenario',
       'handoff-rehearsal',
     ]);
-    const {
-      scenarios: [record],
-    } = await runAcceptance(options, deps);
-    return { record, launches, calls };
+    const results = await runAcceptance(options, deps);
+    return { record: results.scenarios[0], error: results.error, launches, calls, fabricLeaveTimeouts };
   }
-  const { record, launches, calls } = await rehearse();
+  const { record, launches, calls, fabricLeaveTimeouts } = await rehearse();
   assert.equal(record.status, 'pass', record.reason);
   assert.deepEqual(launches, ['fabric', 'bot', 'fabric']);
   assert.equal(calls.checks.length, 2);
+  assert.ok(fabricLeaveTimeouts[0] > 35_000, 'the departure wait covers all Fabric shutdown signals');
   assert.equal(record.steps.filter(({ detail }) => detail?.left === `${BOT} left the game`).length, 2);
 
   const occupied = await rehearse({ keepOnline: true });
@@ -2490,6 +2498,12 @@ test('the packaged handoff verifies the same server player and requires both con
   assert.equal(missing.record.status, 'fail');
   assert.match(missing.record.reason, /no departure/);
   assert.deepEqual(missing.launches, ['fabric', 'bot']);
+
+  const stuck = await rehearse({ failBotStop: true });
+  assert.equal(stuck.record.status, 'fail');
+  assert.match(stuck.error, /Could not stop the bot/);
+  assert.ok(stuck.record.cleanup.some(({ command, ok }) => command === 'stop bot process' && !ok));
+  assert.deepEqual(stuck.launches, ['fabric', 'bot']);
 
   for (const changePlayer of [
     (world) => {

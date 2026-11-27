@@ -538,11 +538,11 @@ function scenarioRecord(scenario, reason = null, options = {}) {
   };
 }
 
-async function stopSession(session, serverConsole, account, label) {
+async function stopSession(session, serverConsole, account, label, timeoutMs = 20_000) {
   const wait = new AbortController();
   const left = serverConsole
     .waitFor((message) => message === `${account} left the game`, {
-      timeoutMs: 20_000,
+      timeoutMs,
       signal: wait.signal,
       label: `the ${label} to leave`,
     })
@@ -617,7 +617,8 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   async function switchSession(kind) {
     await ctx.close();
     await ctx.step(`confirm the ${activeBackend.label} left before the next join`, async () => {
-      const left = await stopSession(session, serverConsole, options.account, activeBackend.label);
+      // Allow the full Fabric shutdown escalation (35 s), plus time for the server to notice the disconnect.
+      const left = await stopSession(session, serverConsole, options.account, activeBackend.label, 55_000);
       session = null;
       const roster = await ctx.server.command('list');
       if (!left || !/^There are 0 of a max of \d+ players online: ?$/.test(roster))
@@ -653,7 +654,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     if (error.botOutput) ctx.note('botOutput', error.botOutput);
     if (error instanceof ShutdownError)
-      record.cleanup.push({ command: backend.stopStep, ok: false, error: error.message });
+      record.cleanup.push({ command: activeBackend.stopStep, ok: false, error: error.message });
   } finally {
     // Cleanup ignores the run signal so an interrupted scenario still leaves no bot activity or fixtures behind.
     proxied?.resume();
@@ -681,7 +682,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
       else await runCleanup(command);
     }
     if (session) {
-      await clean(backend.stopStep, async () => {
+      await clean(activeBackend.stopStep, async () => {
         const left = await stopSession(session, serverConsole, options.account, activeBackend.label);
         return { leftGame: left !== null };
       });
@@ -907,8 +908,13 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       if (packaged) results.packaged.smoke ??= record.observations.packagedSmoke ?? null;
       deps.warn(`[${scenario.id}] ${record.status}${record.reason ? `: ${record.reason}` : ''}`);
       signal.throwIfAborted();
-      if (record.cleanup.some(({ command, ok }) => command === backend.stopStep && !ok))
-        throw new Error(`Could not stop the ${backend.label} after ${scenario.id}. Remaining scenarios were skipped.`);
+      const failedStop = [backend, BACKENDS.bot].find(({ stopStep }) =>
+        record.cleanup.some(({ command, ok }) => command === stopStep && !ok),
+      );
+      if (failedStop)
+        throw new Error(
+          `Could not stop the ${failedStop.label} after ${scenario.id}. Remaining scenarios were skipped.`,
+        );
     }
     end();
     if (options.keepServer) {
