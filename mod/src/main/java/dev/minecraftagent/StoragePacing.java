@@ -42,6 +42,11 @@ final class StoragePacing {
         held = 0;
     }
 
+    /** True once this opening's hold has begun; the opening deadline no longer applies then. Never true unpaced. */
+    boolean holding() {
+        return held > 0;
+    }
+
     /** Called once per client tick while the opened screen has fresh contents; true once the stack may move. */
     boolean ready() {
         if (held >= delayTicks) return true;

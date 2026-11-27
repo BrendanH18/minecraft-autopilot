@@ -31,6 +31,21 @@ class StoragePacingTest {
     }
 
     @Test
+    void onlyAStartedHoldCountsAsHolding() {
+        StoragePacing unpaced = new StoragePacing(0);
+        unpaced.restart();
+        assertTrue(unpaced.ready());
+        assertFalse(unpaced.holding(), "unpaced openings keep the opening deadline");
+        StoragePacing paced = new StoragePacing(2);
+        paced.restart();
+        assertFalse(paced.holding());
+        assertFalse(paced.ready());
+        assertTrue(paced.holding());
+        paced.restart();
+        assertFalse(paced.holding(), "a reopened container waits for the server again");
+    }
+
+    @Test
     void eachOpeningIsHeldForTheConfiguredTicks() {
         StoragePacing pacing = new StoragePacing(3);
         for (int opening = 0; opening < 2; opening++) {

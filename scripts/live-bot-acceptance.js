@@ -779,7 +779,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     }),
     startedAt: new Date(deps.now()).toISOString(),
     finishedAt: null,
-    review: { reviewed: false, note: backend.reviewNote },
+    review: { reviewed: false, note: options.modelPrecheck ? MODEL_PRECHECK_NOTE : backend.reviewNote },
     // Never real-model evidence: acceptance review-bot rejects any file that carries it.
     ...(options.modelPrecheck && { modelPrecheck: { host: 'boat', note: MODEL_PRECHECK_NOTE } }),
     scope: backend.scope,

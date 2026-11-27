@@ -357,15 +357,14 @@ final class FabricStorage {
                                     : "Could not reach the container.");
                 return null;
             }
-            if (owned == null || !StoragePackets.ready(owned.syncId, openingGeneration, owned.slots.size())) {
-                // Only the wait for the server counts; an opt-in pacing hold starts once the contents are fresh.
-                if (now - phaseStarted > 5_000_000_000L)
-                    throw new IllegalStateException(
-                            mode == Mode.CRAFT
-                                    ? "The crafting table did not open."
-                                    : "The container did not open with fresh server contents; its lid may be blocked.");
-                return null;
-            }
+            boolean fresh = owned != null && StoragePackets.ready(owned.syncId, openingGeneration, owned.slots.size());
+            // Only the wait for the server counts; an opt-in pacing hold that began within it is not cut short.
+            if (now - phaseStarted > 5_000_000_000L && (!fresh || !pacing.holding()))
+                throw new IllegalStateException(
+                        mode == Mode.CRAFT
+                                ? "The crafting table did not open."
+                                : "The container did not open with fresh server contents; its lid may be blocked.");
+            if (!fresh) return null;
             if ((mode == Mode.DEPOSIT || mode == Mode.WITHDRAW) && !pacing.ready()) return null;
             if (mode == Mode.CRAFT) {
                 phase = Phase.CRAFTING;
