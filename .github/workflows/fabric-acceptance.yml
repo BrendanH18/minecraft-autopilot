@@ -16,14 +16,14 @@ on:
           - fast
           - takeover
           - packaged
-  # Pull requests that change the mod, the Fabric side of the CLI, the scenario
-  # runner, the server jar setup or this workflow run the --fast scenarios.
+  # Pull requests that change the mod, the CLI (the runner's agent and bridge
+  # client reach nearly all of src/), the scenario runner, the server jar setup
+  # or this workflow run the --fast scenarios.
   pull_request:
     paths:
       - '.github/workflows/fabric-acceptance.yml'
       - 'mod/**'
-      - 'src/fabric-*.js'
-      - 'src/bridge*.js'
+      - 'src/**'
       - 'scripts/live-bot-acceptance.js'
       - 'scripts/live-acceptance/**'
       - 'scripts/setup-mod.js'
@@ -36,7 +36,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fabric-acceptance-${{ github.event_name }}-${{ github.head_ref || github.run_id }}
+  group: fabric-acceptance-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -110,7 +110,7 @@ jobs:
           path: |
             .runtime/live-acceptance/run-*/results.json
             .runtime/live-acceptance/run-*/server/server.out
-            .runtime/live-acceptance/run-*/client*/logs/latest.log
+            .runtime/live-acceptance/run-*/client/client.out
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

@@ -840,11 +840,11 @@ async function oldLease(adapter, leaseId) {
 
 /**
  * Nothing came back with the player: manual control, no stopping window, and no job but the interrupted one, which
- * stays ended. `state` is a bridge state or `mc-agent job` output.
+ * stays cancelled. `state` is a bridge state or `mc-agent job` output.
  */
 export function nothingResumed(jobId, state) {
   if (state?.mode !== 'manual' || state.stopping) return false;
-  return !state.job || (!!jobId && state.job.id === jobId && state.job.status !== 'running');
+  return !state.job || (!!jobId && state.job.id === jobId && state.job.status === 'cancelled');
 }
 
 /** The address the client joined: the runner's proxy when the scenario goes through it, else the server itself. */

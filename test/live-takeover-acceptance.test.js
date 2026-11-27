@@ -699,6 +699,7 @@ test('nothing resumed means manual control and at most the interrupted job, ende
   assert.ok(!nothingResumed('job-1', { mode: 'manual', stopping: true, job: cancelled }));
   assert.ok(!nothingResumed('job-1', { mode: 'manual', job: { ...cancelled, status: 'running' } }));
   assert.ok(!nothingResumed('job-1', { mode: 'manual', job: { ...cancelled, id: 'job-2' } }));
+  assert.ok(!nothingResumed('job-1', { mode: 'manual', job: { ...cancelled, status: 'failed' } }));
   assert.ok(!nothingResumed(null, { mode: 'manual', job: cancelled }));
   assert.ok(!nothingResumed('job-1', null));
   assert.equal(serverAddress({ proxy: { port: 40001 }, options: { port: 25565 } }), '127.0.0.1:40001');
