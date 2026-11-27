@@ -8,11 +8,25 @@ import {
   FIRST_LANE,
   HOLD,
   NOT_SCRIPTED,
+  nothingResumed,
   probeAcquire,
+  serverAddress,
   takeoverIds,
   takeoverScenarios,
 } from '../scripts/live-acceptance/takeover-scenarios.js';
-import { KEYS, keyPressCommands, pressKey, startFakeModel } from '../scripts/live-acceptance/takeover-tools.js';
+import {
+  clickCommands,
+  clickTarget,
+  directConnectionPoint,
+  guiScale,
+  KEYS,
+  keyPressCommands,
+  parseWindowGeometry,
+  pressKey,
+  startFakeModel,
+  typeCommand,
+  typeText,
+} from '../scripts/live-acceptance/takeover-tools.js';
 import { buildPlan, formatPlan, formatSummary, main, parseOptions, summarize } from '../scripts/live-bot-acceptance.js';
 
 const FABRIC = ['--backend', 'fabric'];
@@ -107,6 +121,13 @@ test('the takeover dry run lists each scenario with known console replies, its o
   assert.deepEqual(byId['death-goto'].during, ['kill LiveFabric']);
   assert.deepEqual(byId['disconnect-collect'].during, ['kick LiveFabric']);
   assert.ok(byId['disconnect-collect'].cleanup.every((command) => !command.includes('LiveFabric')));
+  assert.match(
+    byId['disconnect-collect'].actions.join('\n'),
+    /Tab and Enter on the disconnect screen.*Direct Connection/,
+  );
+  assert.match(byId['disconnect-collect'].actions.at(-1), /explicitly started session runs wait 1/);
+  assert.ok(byId['disconnect-collect'].expect.some((text) => /after rejoining/.test(text)));
+  assert.ok(!byId['disconnect-collect'].expect.some((text) => /not scripted/.test(text)));
   assert.match(byId['dimension-goto'].during[0], /^execute in minecraft:the_nether run tp LiveFabric /);
   assert.ok(byId['f8-eat'].fixture.includes('difficulty easy'));
   assert.ok(byId['f8-eat'].cleanup.includes('difficulty peaceful'));
@@ -611,4 +632,258 @@ test('probeAcquire reports a refusal as awaiting the server and releases an acce
     ],
   );
   assert.equal(calls[0][2], calls[1][2]);
+});
+
+test("the Direct Connection button is found from the window size and Minecraft's automatic GUI scale", () => {
+  assert.equal(guiScale(854, 480), 2);
+  assert.equal(guiScale(640, 480), 2);
+  assert.equal(guiScale(639, 480), 1);
+  assert.equal(guiScale(1920, 1080), 4);
+  // 854 × 480 scales to 427 × 240, where the button spans x 163–263 and y 186–206.
+  assert.deepEqual(directConnectionPoint({ width: 854, height: 480 }), { x: 426, y: 392, scale: 2 });
+  assert.deepEqual(directConnectionPoint({ width: 1920, height: 1080 }), { x: 960, y: 904, scale: 4 });
+  assert.deepEqual(parseWindowGeometry('WINDOW=4194311\nX=0\nY=0\nWIDTH=854\nHEIGHT=480\nSCREEN=0\n'), {
+    width: 854,
+    height: 480,
+  });
+  assert.throws(() => parseWindowGeometry('WINDOW=1\n'), /Could not read the client window size/);
+  assert.deepEqual(clickCommands(7, { x: 426, y: 392 }), {
+    geometry: ['xdotool', 'getwindowgeometry', '--shell', '7'],
+    click: ['xdotool', 'windowfocus', '7', 'mousemove', '--window', '7', '426', '392', 'click', '1'],
+  });
+  assert.deepEqual(typeCommand(7, '127.0.0.1:40000'), [
+    'xdotool',
+    'windowfocus',
+    '7',
+    'key',
+    'ctrl+a',
+    'type',
+    '--delay',
+    '50',
+    '127.0.0.1:40000',
+  ]);
+  assert.throws(() => typeCommand(7, 'a\nb'), /Only printable ASCII/);
+});
+
+test('clickTarget reads the window size before clicking, and typeText types into the focused field', async () => {
+  const calls = [];
+  const execFileImpl = (command, args, _options, callback) => {
+    calls.push([command, ...args]);
+    const out = { search: '4194311\n', getwindowgeometry: 'WINDOW=4194311\nWIDTH=854\nHEIGHT=480\n' }[args[0]] ?? '';
+    callback(null, out, '');
+  };
+  const env = { DISPLAY: ':99' };
+  assert.deepEqual(await clickTarget('direct-connection', { env, execFileImpl }), {
+    target: 'direct-connection',
+    window: '4194311',
+    size: { width: 854, height: 480 },
+    point: { x: 426, y: 392, scale: 2 },
+    display: ':99',
+  });
+  assert.deepEqual(calls.splice(0), [
+    ['xdotool', 'search', '--onlyvisible', '--name', '^Minecraft'],
+    ['xdotool', 'getwindowgeometry', '--shell', '4194311'],
+    ['xdotool', 'windowfocus', '4194311', 'mousemove', '--window', '4194311', '426', '392', 'click', '1'],
+  ]);
+  await typeText('127.0.0.1:40000', { env, execFileImpl });
+  assert.deepEqual(calls.at(-1), typeCommand('4194311', '127.0.0.1:40000'));
+  await assert.rejects(clickTarget('join', { env, execFileImpl }), /Unknown click target "join"/);
+  await assert.rejects(clickTarget('direct-connection', { env: {}, execFileImpl }), /\$DISPLAY is unset/);
+});
+
+test('nothing resumed means manual control and at most the interrupted job, ended', () => {
+  const cancelled = { id: 'job-1', status: 'cancelled', message: 'Disconnected or player died.' };
+  assert.ok(nothingResumed('job-1', { mode: 'manual', stopping: false, job: cancelled }));
+  assert.ok(nothingResumed('job-1', { mode: 'manual', stopping: false, job: null }));
+  assert.ok(!nothingResumed('job-1', { mode: 'agent', stopping: false, job: cancelled }));
+  assert.ok(!nothingResumed('job-1', { mode: 'manual', stopping: true, job: cancelled }));
+  assert.ok(!nothingResumed('job-1', { mode: 'manual', job: { ...cancelled, status: 'running' } }));
+  assert.ok(!nothingResumed('job-1', { mode: 'manual', job: { ...cancelled, id: 'job-2' } }));
+  assert.ok(!nothingResumed(null, { mode: 'manual', job: cancelled }));
+  assert.ok(!nothingResumed('job-1', null));
+  assert.equal(serverAddress({ proxy: { port: 40001 }, options: { port: 25565 } }), '127.0.0.1:40001');
+  assert.equal(serverAddress({ proxy: null, options: { port: 25565 } }), '127.0.0.1:25565');
+});
+
+/** A fake client and server for disconnect-collect: a kick, then a rejoin through the client's screens. */
+function fakeDisconnect({ rejoins = true, resumes = false } = {}) {
+  let clock = 0;
+  const world = {
+    connected: true,
+    online: true,
+    mode: 'manual',
+    lease: null,
+    job: null,
+    logs: 0,
+    broken: 0,
+    position: { x: 100.5, y: -60, z: 0.5 },
+    input: [],
+  };
+  const checks = [];
+  let interrupt = null;
+  let leases = 0;
+  let typed = false;
+  const inWorld = () => {
+    if (!world.connected) throw new Error('Enter a Minecraft world first.');
+  };
+  const adapter = () => {
+    const self = {
+      leaseId: null,
+      async execute(action) {
+        inWorld();
+        self.leaseId = `lease-${++leases}`;
+        world.lease = self.leaseId;
+        world.mode = 'agent';
+        if (action.type === 'wait') {
+          world.mode = 'manual';
+          world.lease = null;
+          return { status: 'completed', message: 'Wait finished.' };
+        }
+        world.job = { id: 'job-1', type: action.type, status: 'running', message: 'Started collect' };
+        world.logs = 1;
+        world.broken = 1;
+        return new Promise((_resolve, reject) => {
+          interrupt = reject;
+        });
+      },
+      async acquire() {
+        inWorld();
+      },
+      async request(_path, body) {
+        if (body.leaseId !== world.lease || world.mode !== 'agent')
+          throw new Error('Control was released or expired. Explicitly start a new session.');
+        return { ok: true };
+      },
+      async close() {},
+    };
+    return self;
+  };
+  const ctx = {
+    bot: 'LiveFabric',
+    options: { port: 25565 },
+    proxy: { port: 40001, stats: () => ({ connections: world.online ? 2 : 1 }) },
+    now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+      // A collect that is still running keeps breaking logs.
+      if (world.job?.status === 'running' && world.connected) {
+        world.logs++;
+        world.broken++;
+      }
+    },
+    step: async (_name, fn) => fn(),
+    note() {},
+    check: (name, pass, detail) => checks.push({ name, pass: !!pass, detail }),
+    connect: async () => adapter(),
+    keys: {
+      press: async (key) => {
+        world.input.push(key);
+        if (key === 'enter' && typed && rejoins) {
+          world.connected = true;
+          world.online = true;
+          if (resumes) world.job = { ...world.job, status: 'running' };
+        }
+        return { key };
+      },
+      click: async (target) => {
+        world.input.push(`click ${target}`);
+        return { target };
+      },
+      type: async (text) => {
+        world.input.push(`type ${text}`);
+        typed = true;
+        return { typed: text };
+      },
+    },
+    cli: {
+      run: async (args) => {
+        assert.deepEqual(args, ['job']);
+        return { code: 0, stdout: JSON.stringify({ mode: world.mode, stopping: false, job: world.job }), stderr: '' };
+      },
+    },
+    bridge: {
+      observe: async () => ({
+        connected: world.connected,
+        player: world.connected ? { name: 'LiveFabric' } : null,
+        mode: world.mode,
+        stopping: false,
+        paused: false,
+        job: world.job && { ...world.job },
+        inventory: world.logs ? [{ name: 'minecraft:oak_log', count: world.logs }] : [],
+      }),
+    },
+    server: {
+      position: async () => world.position,
+      inventory: async () => (world.logs ? [{ id: 'minecraft:oak_log', count: world.logs }] : []),
+      // The fake's tree cells are numbered by x; the first `broken` of them are gone.
+      testBlock: async (cell) => cell.x >= world.broken,
+      command: async (command) => {
+        if (command === 'kick LiveFabric') {
+          Object.assign(world, { connected: false, online: false, mode: 'manual', lease: null });
+          world.job = { ...world.job, status: 'cancelled', message: 'Disconnected or player died.' };
+          interrupt?.(new Error('Disconnected or player died.'));
+          return 'Kicked LiveFabric: Kicked by an operator';
+        }
+        if (command === 'list')
+          return world.online
+            ? 'There are 1 of a max of 4 players online: LiveFabric'
+            : 'There are 0 of a max of 4 players online: ';
+        return 'ok';
+      },
+    },
+  };
+  return { ctx, world, checks };
+}
+
+test('disconnect-collect rejoins through the client screens and checks that nothing resumed', async () => {
+  const scenario = takeoverScenarios.find(({ id }) => id === 'disconnect-collect');
+  const plan = scenario.plan({ bot: 'LiveFabric', lane: scenario.lane });
+  plan.points.trees = Array.from({ length: 18 }, (_, x) => ({ x, y: 0, z: 0 }));
+
+  const good = fakeDisconnect();
+  await scenario.run(good.ctx, plan);
+  assert.deepEqual(
+    good.checks.filter((check) => !check.pass).map(({ name }) => name),
+    [],
+  );
+  assert.deepEqual(good.world.input, ['tab', 'enter', 'click direct-connection', 'type 127.0.0.1:40001', 'enter']);
+  const names = good.checks.map(({ name }) => name);
+  for (const expected of [
+    /new session is refused with a message matching \/Enter a/,
+    /mc-agent job at the disconnect screen/,
+    /rejoined through the disconnect screen and the server list/,
+    /after rejoining, mode stays manual and no job is started or resumed/,
+    /independently after rejoining: no further movement/,
+    /independently after rejoining: no further blocks broken/,
+    /mc-agent job after rejoining/,
+    /after rejoining, the old session still cannot heartbeat or act/,
+    /new session starts only when explicitly requested and is then accepted/,
+  ])
+    assert.ok(
+      names.some((name) => expected.test(name)),
+      String(expected),
+    );
+
+  // A client that never gets back is "not observed", and no new session is tried.
+  const stuck = fakeDisconnect({ rejoins: false });
+  await scenario.run(stuck.ctx, plan);
+  assert.deepEqual(
+    stuck.checks.filter((check) => !check.pass).map(({ name }) => name),
+    ['not observed: the client did not rejoin through the disconnect screen and the server list'],
+  );
+  assert.ok(!stuck.checks.some(({ name }) => /explicitly requested/.test(name)));
+
+  // A collect that resumes after the rejoin fails the bridge, the independent reads and mc-agent job.
+  const resumed = fakeDisconnect({ resumes: true });
+  await scenario.run(resumed.ctx, plan);
+  const failed = resumed.checks.filter((check) => !check.pass).map(({ name }) => name);
+  for (const expected of [
+    /after rejoining, mode stays manual and no job is started or resumed/,
+    /independently after rejoining: no further blocks broken/,
+    /mc-agent job after rejoining/,
+  ])
+    assert.ok(
+      failed.some((name) => expected.test(name)),
+      String(expected),
+    );
 });

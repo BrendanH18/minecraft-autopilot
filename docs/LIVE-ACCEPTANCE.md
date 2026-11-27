@@ -287,7 +287,12 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
 - **How the transitions happen.** Keys are real X key presses: `xdotool`
   focuses the client window on the Xvfb display and presses F8, Escape or E
   (Tab and Enter press Respawn on the death screen). A key counts only when the
-  bridge then shows the transition. "Waiting for model inference" is the
+  bridge then shows the transition. After the kick, `disconnect-collect`
+  rejoins through the client's own screens: Tab and Enter press "Back to
+  server list" on the disconnect screen, a click presses Direct Connection
+  (quick play adds its server hidden, so the list has no entry to join; the
+  point comes from the window size and Minecraft's automatic GUI scale), and
+  the address is typed over the field's text before Enter. "Waiting for model inference" is the
   in-process agent with a scripted planner whose first request is held open.
   For `expiry-idle` the real `mc-agent agent` runs as a second process against a
   loopback stand-in for Ollama, and is suspended with SIGSTOP. `mc-agent stop`
@@ -318,7 +323,14 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   (position, inventory, `foodLevel`, `Dimension`, both halves of the chest);
   that the old lease can neither heartbeat nor act; and that a new session is
   refused while the player is dead or disconnected, runs only when explicitly
-  started (`wait 1`), or, after a cancel, that the same lease goes on.
+  started (`wait 1`), or, after a cancel, that the same lease goes on. After
+  the rejoin, `disconnect-collect` also checks that the bridge shows the player
+  again; that mode, job and independent reads (position, inventory and the
+  target logs) at the rejoin, 1 s later and 5 s after that show nothing
+  resumed; that `mc-agent job` shows manual control at the disconnect screen
+  and after the rejoin; and that the old lease is still refused. If the client
+  doesn't rejoin within 60 s, the scenario fails with `not observed: ...` and
+  starts no new session.
 - **Retries.** Eating lasts 1.6 s, so an eat scenario repeats (up to three
   times) when the food is eaten before the key lands. Escape reaches a storage
   screen only while the agent has it open, which is about one tick per stack, so
@@ -333,8 +345,7 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   launcher with the packaged jars. `fabric-f8-takeover` and the RELEASE.md
   boxes still need the keyboard sessions; `acceptance review-bot` rejects these
   results like any Fabric result.
-- **Not scripted.** `disconnect-collect` doesn't rejoin after the kick. The
-  proxy doesn't help `menu-storage-close`: the server sends the container screen
+- **Not scripted.** The proxy doesn't help `menu-storage-close`: the server sends the container screen
   and its contents together, so holding or delaying them still opens and closes
   the screen within one frame.
 - **Results (26 November 2026).** On the development client in Boat, 32 of the
@@ -351,7 +362,12 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   26 November, pass at about 28 s each: the replies were held for 3.3 to 3.7 s,
   `stopping` was `true` throughout, `mc-agent goto` started no job until the
   release and then completed, and the chest or inventory didn't change after
-  the stop. They found no bugs.
+  the stop. They found no bugs. The rejoin in `disconnect-collect`, scripted on
+  26 November, passed three runs out of three in Boat (55 to 62 s each, all 18
+  checks): the client was back in the world about 5 s after the first key
+  press, through a second proxy connection, and the collect job stayed
+  `cancelled`, with the same position, one held log and 17 target logs at the
+  rejoin, 1 s later and 5 s later. It found no bugs.
 
 ### Packaged jars
 

@@ -24,7 +24,7 @@ import { runAgent } from '../src/agent.js';
 import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from './live-acceptance/nbt-parse.js';
 import { scenarios as sharedScenarios, scenarioPlan } from './live-acceptance/scenarios.js';
 import { takeoverIds, takeoverScenarios } from './live-acceptance/takeover-scenarios.js';
-import { pressKey, startCli, startFakeModel } from './live-acceptance/takeover-tools.js';
+import { clickTarget, pressKey, startCli, startFakeModel, typeText } from './live-acceptance/takeover-tools.js';
 import { startProxy } from './live-acceptance/proxy.js';
 import {
   DEFAULT_ARCHIVE,
@@ -419,7 +419,11 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       run: (args) => deps.runCli(args, { bridge }),
       start: (args) => deps.startCli(args, { bridge }),
     },
-    keys: { press: (key) => deps.pressKey(key) },
+    keys: {
+      press: (key) => deps.pressKey(key),
+      click: (target) => deps.clickTarget(target),
+      type: (text) => deps.typeText(text),
+    },
     // The pausable forwarder between the client and the server, for scenarios that join through it; else null.
     proxy,
     fakeModel: (decisions) => deps.startFakeModel(decisions),
@@ -729,6 +733,8 @@ export const defaultDeps = {
   runCli: (args, options) => runCli(args, options),
   startCli,
   pressKey,
+  clickTarget,
+  typeText,
   startFakeModel,
   startProxy,
   environment,
