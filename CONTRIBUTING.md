@@ -20,17 +20,20 @@ Add regression coverage for behavior changes. Documentation edits generally need
 
 ## Validation and pull requests
 
-CI runs the full check suite on every pull request; the `node` and `mod` jobs must pass before merging. It covers this list:
+CI runs the full check suite on every pull request; the `node`, `planners` and `mod` jobs must pass before merging. It covers this list:
 
 ```sh
 npm run lint
 npm run lint:mod
 npm run check
 npm test
+npm run test:planners
 npm start -- demo --smoke
 npm run build:mod
 npm run verify:mod
 ```
+
+`npm test` runs the core tests, and the `node` job runs them with the offline planner package removed, since the core must work without it. `npm run test:planners` runs the tests of the [planner package](packages/planners/README.md) in `packages/planners/`.
 
 While working, run the checks that cover your change: the affected tests plus lint and syntax for the areas you touched (`npm run lint:mod` and `node scripts/gradle.js test` for the mod). Push and let CI run the rest. When a CI job fails, reproduce that job or its failing test, fix it, and push again. `scripts/boat-check.sh` runs the whole list in a Boat sandbox, for reproducing CI failures; see [Boat checks](docs/DEVELOPMENT.md#boat-checks). CI on pull requests doesn't run the headless bot acceptance, so run the affected [scenarios](docs/LIVE-ACCEPTANCE.md) yourself when a change affects bot gameplay. In the pull request, list the checks you ran. Report exact blockers for checks you cannot run. Distinguish fixtures, simulation, mocked inference, and live gameplay. Record live versions/results in the development guide and leave unverified release checks open.
 

@@ -43,8 +43,24 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run check
+      # The core must work without the offline planners, so its tests and the smoke check run with the
+      # @minecraft-autopilot/planners workspace link removed. The planners job tests the package.
+      - name: Remove the planner package
+        run: rm node_modules/@minecraft-autopilot/planners
       - run: npm test
       - run: npm start -- demo --smoke
+
+  planners:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:planners
 
   mod:
     runs-on: ubuntu-24.04

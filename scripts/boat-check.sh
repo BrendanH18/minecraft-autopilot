@@ -68,7 +68,7 @@ busy_ttl=1800 keepalive_every=600
 [[ $key =~ ^[A-Za-z0-9_-]{1,40}$ ]] || die 2 "MCA_BOAT_KEY may only use letters, digits, - and _ (at most 40)"
 if [ -z "$cmd" ]; then
     # The hand-off checks, as CONTRIBUTING.md lists them.
-    cmd="npm run lint && npm run lint:mod && npm run check && npm test && npm start -- demo --smoke && npm run build:mod && npm run verify:mod"
+    cmd="npm run lint && npm run lint:mod && npm run check && npm test && npm run test:planners && npm start -- demo --smoke && npm run build:mod && npm run verify:mod"
 elif [[ $cmd =~ (dev:mod|runClient|--model|--ollama) ]]; then
     # The headless Fabric acceptance runner (npm run acceptance:fabric) is the one client run allowed here.
     die 2 "interactive Minecraft clients and Ollama runs stay on the Mac (AGENTS.md); use npm run acceptance:fabric for a headless client check"
