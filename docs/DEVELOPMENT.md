@@ -180,6 +180,24 @@ write. The runner's test server now sets `sync-chunk-writes=false`, with a
 regression test. These are pre-checks, not release evidence: the packaged
 Fabric and bot review boxes in [RELEASE.md](RELEASE.md) stay open.
 
+**Packaged jars and the disconnect rejoin, headless (26 November 2026).** In
+Boat, `npm run acceptance:fabric -- --packaged --fast` ran all 27 `--fast`
+scenarios on the three jars from the release archive with Fabric Loader in
+production mode (Loom's production client run on the official client jar,
+remapped to intermediary at launch). All 27 passed in 10 min 34 s. Four
+takeover scenarios (`f8-collect`, `stop-goto`, `menu-collect`,
+`takeover-while-stopping-deposit`) also passed under `--packaged` in 2 min 6 s.
+Loader loaded 57 mods, the nested nether-pathfinder 1.6 among them, and the
+client log had no mixin, refmap or linkage errors. No packaging bugs were found.
+`disconnect-collect` now rejoins after the kick through the disconnect screen
+and Direct Connection. It passed three runs out of three (55 to 62 s each,
+about 5 s of that the rejoin), and nothing resumed after the rejoin. The
+`--takeover` count is unchanged: 32 of 34 pass and the two
+`menu-storage-close*` items are expected failures. These runs used an
+uncommitted tree. They are pre-checks, not release evidence: a development
+launcher isn't a normal launcher profile, and Xvfb key presses aren't a person
+at the keyboard.
+
 **Eating, retreat, full inventory and takeover while stopping (26 November
 2026).** In Boat, on `318a213` plus this branch's changes, the four new
 runner scenarios (`eat-timeout`, `low-health-retreat`, `eat-retreat-timeout`,
@@ -484,4 +502,4 @@ The next milestone is **validated everyday use**. The [roadmap](ROADMAP.md) sets
 2. **Microsoft-authenticated multiplayer handoff.** Record UUID and inventory in the normal client, disconnect, connect the bot, perform a bounded task, disconnect the bot, then reconnect the normal client. Verify the same UUID and server-side inventory, and confirm both clients were never connected simultaneously.
 3. **Remaining gameplay coverage.** Validate cobblestone collection with a pickaxe, hostile-mob observations, and release on dimension change. Include partial collection recovery in a pit for both backends. The collection recovery changes have Node regression coverage but still need fresh live gameplay validation.
 
-CI runs on GitHub-hosted standard runners (`ubuntu-24.04`) for pushes to `main`, pull requests, a weekly schedule, and manual dispatch. The Node job runs actionlint on the workflows, the Biome lint, the syntax check, tests, and the simulation smoke check. The mod job caches `.gradle-user/` and `.deps/`, builds once with `--allow-downloads` (the build includes the Spotless Java format check), then rebuilds from a clean output with the offline `npm run build:mod` and runs `npm run verify:mod`, so a build step that would need an implicit download fails CI. The weekly run skips the mod cache to catch broken upstream downloads. Successful mod jobs on pushes to `main`, the weekly schedule, and manual runs upload the offline-built `dist/` as the `minecraft-agent-installation` artifact, kept for 7 days; pull requests build and verify it without uploading. Dependabot proposes grouped weekly updates for npm, the Gradle build in `mod/`, and GitHub Actions; the Baritone and Fabric API jars pinned by hash in `scripts/` are updated by hand. The [v0.1 release checklist](RELEASE.md) tracks shipping scope, live acceptance checks, and how to publish the verified archive.
+CI runs on GitHub-hosted standard runners (`ubuntu-24.04`) for pushes to `main`, pull requests, a weekly schedule, and manual dispatch. The Node job runs actionlint on the workflows, the Biome lint, the syntax check, tests, and the simulation smoke check. The mod job caches `.gradle-user/` and `.deps/`, builds once with `--allow-downloads` (the build includes the Spotless Java format check), then rebuilds from a clean output with the offline `npm run build:mod` and runs `npm run verify:mod`, so a build step that would need an implicit download fails CI. The weekly run skips the mod cache to catch broken upstream downloads. Successful mod jobs on pushes to `main`, the weekly schedule, and manual runs upload the offline-built `dist/` as the `minecraft-agent-installation` artifact, kept for 7 days; pull requests build and verify it without uploading. The non-required `Fabric acceptance` workflow runs the headless Fabric client under Xvfb on `ubuntu-24.04`: `--fast` on pull requests that touch the mod, the Fabric side of the CLI or the runner, and `--fast`, `--takeover` and `--packaged --fast` weekly or on demand. It uploads `results.json`, the server log and the client log for 7 days. Like `bot-acceptance`, its results are pre-checks, never release evidence. Dependabot proposes grouped weekly updates for npm, the Gradle build in `mod/`, and GitHub Actions; the Baritone and Fabric API jars pinned by hash in `scripts/` are updated by hand. The [v0.1 release checklist](RELEASE.md) tracks shipping scope, live acceptance checks, and how to publish the verified archive.

@@ -10,6 +10,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- `npm run acceptance:fabric -- --packaged` runs the Fabric scenarios on the three jars from the release archive, with Fabric Loader in production mode, after checking the jars against the archive. It also checks the client log for the loaded mods and for mixin or refmap errors. The new `Fabric acceptance` workflow runs `--fast` on mod pull requests, plus `--takeover` and `--packaged` weekly. `disconnect-collect` now rejoins after the kick through the disconnect screen. All of these are pre-checks, not release evidence.
+
 - `npm run acceptance:fabric -- --takeover` scripts the Fabric checklist items that need no person: F8, the pause menu and inventory screen, closing the agent's storage or crafting screen, emergency stop, cancel, lease expiry, death, disconnect, dimension change and a full inventory. It presses real keys with xdotool on the headless client and checks each outcome with independent server reads. These are pre-checks for the keyboard session, not release evidence.
 
 - `npm run acceptance:fabric` runs the live acceptance scenarios against the Fabric development client, with a fresh client per scenario. It runs headless in a Boat sandbox under Xvfb with software OpenGL. Its results are pre-checks for the packaged keyboard sessions and never count as release evidence.
