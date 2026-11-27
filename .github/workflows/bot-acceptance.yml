@@ -4,6 +4,14 @@ on:
   schedule:
     - cron: '43 6 * * 1'
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Scenario set to run
+        type: choice
+        default: fast
+        options:
+          - fast
+          - full
   # Run on pull requests that change the bot, the scenario runner, the server
   # jar setup or this workflow. The bot process runs src/cli.js, which reaches
   # nearly all of src/.
@@ -27,7 +35,7 @@ permissions:
 jobs:
   bot-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.suite == 'full' && 50 || 35 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,7 +55,20 @@ jobs:
           node scripts/gradle.js help --allow-downloads
       - name: Run offline bot scenarios
         id: acceptance
-        run: npm run acceptance:bot -- --accept-eula --fast
+        env:
+          SUITE: ${{ inputs.suite || 'fast' }}
+        run: |
+          case "$SUITE" in
+            fast) npm run acceptance:bot -- --accept-eula --fast ;;
+            full) npm run acceptance:bot -- --accept-eula --all ;;
+            *) exit 2 ;;
+          esac
+      - name: Group candidate results by release gate
+        if: ${{ !cancelled() && inputs.suite == 'full' && hashFiles('.runtime/live-acceptance/run-*/results.json') != '' }}
+        run: |
+          for result in .runtime/live-acceptance/run-*/results.json; do
+            node src/cli.js acceptance review-bot --commit "$GITHUB_SHA" "$result" > "${result%/*}/review.json"
+          done
       - name: Upload acceptance evidence
         if: ${{ !cancelled() && steps.acceptance.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -55,6 +76,7 @@ jobs:
           name: bot-acceptance
           path: |
             .runtime/live-acceptance/run-*/results.json
+            .runtime/live-acceptance/run-*/review.json
             .runtime/live-acceptance/run-*/server/server.out
           include-hidden-files: true
           if-no-files-found: error

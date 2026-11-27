@@ -204,6 +204,17 @@ Cleanup failures fail the affected scenario. If the runner cannot stop the bot, 
 
 ## Reviewing a run
 
+To gather the offline bot results for a release candidate in GitHub Actions,
+open **Bot acceptance**, select **Run workflow**, choose a branch or tag at the
+candidate commit that contains the **full** suite option, and select **full**.
+Confirm that the run's commit matches `sourceCommit` in the verified
+candidate's `BUILD.json`. The
+`bot-acceptance` artifact contains `results.json`, `server/server.out`, and
+`review.json`, which groups the results by release gate. Download it within
+seven days. The default manual suite, pull requests, and weekly runs use
+`--fast`. The full suite runs `--all` without a model, so the real-model
+scenarios still need a separate run.
+
 Use the archive's `sourceCommit` from `dist/BUILD.json` to review one or more
 runner results together:
 
