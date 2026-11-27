@@ -166,7 +166,7 @@ Run `npm start -- doctor` to check prerequisites without connecting to Minecraft
 
 ### Offline planning tools
 
-The CLI also ships offline calculators for routes, resource and storage budgets, routine checks, build and farm estimates, and planning studies. Browse them with `mc-agent study catalog`, or try one of the 1,000 runnable comparisons listed by `mc-agent study recipes`. [Planning tools index](docs/IMPROVEMENTS.md) · [Recipe usage](docs/PLANNING-STUDIES.md#runnable-comparison-recipes)
+The CLI also ships offline calculators for routes, resource and storage budgets, routine checks, build and farm estimates, and planning studies. They live in the [`@minecraft-autopilot/planners`](packages/planners/README.md) workspace package, which `npm install` sets up with the rest; the core commands work without it. Browse them with `mc-agent study catalog`, or try one of the 1,000 runnable comparisons listed by `mc-agent study recipes`. [Planning tools index](docs/IMPROVEMENTS.md) · [Recipe usage](packages/planners/docs/PLANNING-STUDIES.md#runnable-comparison-recipes)
 
 ## Contributing and license
 

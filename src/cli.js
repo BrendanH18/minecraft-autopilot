@@ -68,8 +68,6 @@ import {
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { registerToolGroups } from './tool-groups.js';
-
 const program = new Command();
 program
   .name('mc-agent')
@@ -1028,6 +1026,22 @@ function firstCommand(args) {
   }
 }
 
+// The offline tool groups, planners and studies live in a separate workspace package. The core never imports it
+// statically, and every core command runs without it.
+const PLANNER_PACKAGE = '@minecraft-autopilot/planners';
+const PLANNERS_MISSING =
+  'Offline planner and report commands (supplies, survey, nav, routine, study and others) are in the ' +
+  `${PLANNER_PACKAGE} workspace package, which isn't installed. Run npm install in the repository root to add it.`;
+async function loadPlanners() {
+  try {
+    return await import(PLANNER_PACKAGE);
+  } catch (error) {
+    // Only the package itself being absent is expected; a broken install still fails loudly.
+    if (error?.code === 'ERR_MODULE_NOT_FOUND' && error.message.includes(`'${PLANNER_PACKAGE}'`)) return undefined;
+    throw error;
+  }
+}
+
 try {
   const commandName = firstCommand(process.argv.slice(2));
   const registered = () =>
@@ -1035,18 +1049,21 @@ try {
   // Load each tier only when the command isn't in an earlier one. Root help and
   // unknown-command suggestions still get the full command tree.
   const skipOffline = registered() || ['acceptance', '-V', '--cli-version'].includes(commandName);
-  if (!skipOffline) await registerToolGroups(program, { view, print });
+  const planners = skipOffline ? undefined : await loadPlanners();
+  if (planners) await planners.registerToolGroups(program, { view, print });
   const fullHelp = !skipOffline && !registered();
-  if (fullHelp) {
-    const [planning, studies] = await Promise.all([import('./planning-tools.js'), import('./planning-studies.js')]);
-    planning.registerPlanningTools(program, { print });
-    planning.registerPlanningExtensions(program, { print });
-    planning.registerBuildPlanningTools(program, { print });
-    studies.registerPlanningStudies(program, { print });
-  }
+  if (fullHelp && planners) await planners.registerPlanners(program, { print });
   if (fullHelp || commandName === 'acceptance') {
     const { registerAcceptanceTools } = await import('./acceptance-tools.js');
     registerAcceptanceTools(program, { print });
+  }
+  if (fullHelp && !planners) {
+    // Root help and unknown commands say where the missing commands went.
+    program.addHelpText('after', `\n${PLANNERS_MISSING}`);
+    program.configureOutput({
+      outputError: (text, write) =>
+        write(text.startsWith('error: unknown command') ? `${text}${PLANNERS_MISSING}\n` : text),
+    });
   }
   await program.parseAsync();
 } catch (error) {

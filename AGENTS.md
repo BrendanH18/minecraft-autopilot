@@ -23,7 +23,8 @@ stop and resume, keepalive, retries, settings) is in
 
 CI is the gate (owner decision, 2026-11-22). It runs the full check suite once,
 on the pushed commit: the CI `node` job runs actionlint, `npm run lint`,
-`npm run check`, `npm test` and the demo smoke, and the `mod` job builds the mod
+`npm run check`, `npm test` (without the planner package) and the demo smoke,
+the `planners` job runs `npm run test:planners`, and the `mod` job builds the mod
 (Gradle's `check`, so Spotless and the Java tests), packages it and runs
 `npm run verify:mod`. That covers every command in the CONTRIBUTING.md list, so
 don't run the full `scripts/boat-check.sh` before handing work back.
@@ -36,6 +37,9 @@ don't run the full `scripts/boat-check.sh` before handing work back.
     for the affected test files, `npm run lint` (Biome, a few seconds) and
     `npm run check`. Add `npm start -- demo --smoke` when the CLI, bridge or
     simulated harness changed.
+  - Offline planners (`packages/planners/`, see its README):
+    `node --test packages/planners/test/<name>.test.js`. The core must never
+    import the planner package statically.
   - Mod side (`mod/`): `npm run lint:mod` (Spotless) and
     `node scripts/gradle.js test` (compiles and runs the Java tests). Add
     `npm run build:mod && npm run verify:mod` only when packaging,
@@ -128,7 +132,7 @@ These cover the Mac-only exceptions above; everything else runs on Boat.
 - actionlint (version pinned in `.github/workflows/ci.yml`) checks workflows in
   the CI `node` job. Pin every action to a full commit SHA with a `# vX.Y.Z`
   comment, and run jobs on GitHub-hosted standard runners (`ubuntu-24.04`).
-- The main ruleset requires the `node` and `mod` CI jobs to pass. A new CI
+- The main ruleset requires the `node`, `planners` and `mod` CI jobs to pass. A new CI
   job must be added to the ruleset's required checks to block merges.
 
 ## Current implementation scope

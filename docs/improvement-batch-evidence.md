@@ -20,6 +20,6 @@
 
 ## Planner examples
 
-The 233 analytic examples in [the example catalog](../src/planning-examples-analysis.js) each cover a distinct planner. They expose previously test-only inputs and independently calculated outputs through the study examples CLI. The full set of 250 original analytic cases still runs in the planner tests.
+The 233 analytic examples in [the example catalog](../packages/planners/src/planning-examples-analysis.js) each cover a distinct planner. They expose previously test-only inputs and independently calculated outputs through the study examples CLI. The full set of 250 original analytic cases still runs in the planner tests.
 
 This batch contains 250 improvements. The total combines the 17 entries above and the 233 previously unavailable worked examples.

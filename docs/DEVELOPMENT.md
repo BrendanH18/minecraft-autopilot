@@ -28,7 +28,8 @@ After that, everyday commands run offline:
 
 ```sh
 npm run check        # JavaScript syntax
-npm test             # Node tests
+npm test             # Node tests for the core
+npm run test:planners  # tests of the offline planner package
 npm start -- demo --smoke
 npm run build:mod    # compile, Java tests, package to dist/
 npm run verify:mod   # verify the loose installation, pinned hashes, and ZIP (requires unzip)
@@ -479,7 +480,10 @@ tail -f console.in | java -Xmx2G -jar server.jar nogui > server.out 2>&1   # run
 | `src/config.js`, `src/runtime.js`, `src/bridge-server.js` | Paths, private files, process ownership, cleanup, HTTP serving |
 | `mod/src/main/java/dev/minecraftagent/` | Fabric controller, client events, bridge, and Java lease/storage helpers |
 | `scripts/` | Dependency setup, offline build wrapper, packaging, syntax checks, Boat checks |
-| `test/`, `mod/src/test/` | Regression tests |
+| `test/`, `mod/src/test/` | Regression tests for the core and the mod |
+| `packages/planners/` | The [`@minecraft-autopilot/planners`](../packages/planners/README.md) workspace package: offline planners, studies, the 44 report and tool groups, their tests and reference docs |
+
+The core in `src/` never imports `packages/planners/` statically. `src/cli.js` loads the package with a dynamic import for commands it doesn't define, and runs without it; the package imports the core modules it reuses by relative path. `npm test` runs the core tests and `npm run test:planners` the package's.
 
 ### Local storage
 
@@ -502,4 +506,4 @@ The next milestone is **validated everyday use**. The [roadmap](ROADMAP.md) sets
 2. **Microsoft-authenticated multiplayer handoff.** Record UUID and inventory in the normal client, disconnect, connect the bot, perform a bounded task, disconnect the bot, then reconnect the normal client. Verify the same UUID and server-side inventory, and confirm both clients were never connected simultaneously.
 3. **Remaining gameplay coverage.** Validate cobblestone collection with a pickaxe, hostile-mob observations, and release on dimension change. Include partial collection recovery in a pit for both backends. The collection recovery changes have Node regression coverage but still need fresh live gameplay validation.
 
-CI runs on GitHub-hosted standard runners (`ubuntu-24.04`) for pushes to `main`, pull requests, a weekly schedule, and manual dispatch. The Node job runs actionlint on the workflows, the Biome lint, the syntax check, tests, and the simulation smoke check. The mod job caches `.gradle-user/` and `.deps/`, builds once with `--allow-downloads` (the build includes the Spotless Java format check), then rebuilds from a clean output with the offline `npm run build:mod` and runs `npm run verify:mod`, so a build step that would need an implicit download fails CI. The weekly run skips the mod cache to catch broken upstream downloads. Successful mod jobs on pushes to `main`, the weekly schedule, and manual runs upload the offline-built `dist/` as the `minecraft-agent-installation` artifact, kept for 7 days; pull requests build and verify it without uploading. The non-required `Fabric acceptance` workflow runs the headless Fabric client under Xvfb on `ubuntu-24.04`: `--fast` on pull requests that touch the mod, the CLI or the runner, and `--fast`, `--takeover` and `--packaged --fast` weekly or on demand. It uploads `results.json`, the server log and the client log for 7 days. Like `bot-acceptance`, its results are pre-checks, never release evidence. Dependabot proposes grouped weekly updates for npm, the Gradle build in `mod/`, and GitHub Actions; the Baritone and Fabric API jars pinned by hash in `scripts/` are updated by hand. The [v0.1 release checklist](RELEASE.md) tracks shipping scope, live acceptance checks, and how to publish the verified archive.
+CI runs on GitHub-hosted standard runners (`ubuntu-24.04`) for pushes to `main`, pull requests, a weekly schedule, and manual dispatch. The Node job runs actionlint on the workflows, the Biome lint, the syntax check, then removes the planner package's `node_modules` link and runs the core tests and the simulation smoke check, so the core is checked without the planners. The `planners` job runs `npm run test:planners`. The mod job caches `.gradle-user/` and `.deps/`, builds once with `--allow-downloads` (the build includes the Spotless Java format check), then rebuilds from a clean output with the offline `npm run build:mod` and runs `npm run verify:mod`, so a build step that would need an implicit download fails CI. The weekly run skips the mod cache to catch broken upstream downloads. Successful mod jobs on pushes to `main`, the weekly schedule, and manual runs upload the offline-built `dist/` as the `minecraft-agent-installation` artifact, kept for 7 days; pull requests build and verify it without uploading. The non-required `Fabric acceptance` workflow runs the headless Fabric client under Xvfb on `ubuntu-24.04`: `--fast` on pull requests that touch the mod, the CLI or the runner, and `--fast`, `--takeover` and `--packaged --fast` weekly or on demand. It uploads `results.json`, the server log and the client log for 7 days. Like `bot-acceptance`, its results are pre-checks, never release evidence. Dependabot proposes grouped weekly updates for npm, the Gradle build in `mod/`, and GitHub Actions; the Baritone and Fabric API jars pinned by hash in `scripts/` are updated by hand. The [v0.1 release checklist](RELEASE.md) tracks shipping scope, live acceptance checks, and how to publish the verified archive.

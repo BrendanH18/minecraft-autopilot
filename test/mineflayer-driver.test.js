@@ -1337,8 +1337,8 @@ test('scoped storage inspection refuses unknown positions and never substitutes 
   );
 });
 
-test('real bot observation includes threat coordinates usable by spatial scene queries', async (t) => {
-  const { sceneReport } = await import('../src/scene-tools.js');
+// packages/planners/test/scene-tools.test.js runs the spatial scene queries on this observation's threats.
+test('real bot observation includes threat coordinates', async (t) => {
   const bot = new EventEmitter();
   Object.assign(bot, {
     registry: minecraftData('1.21.1'),
@@ -1369,8 +1369,4 @@ test('real bot observation includes threat coordinates usable by spatial scene q
     { type: 'minecraft:zombie', distance: 5, x: 3, y: 64, z: 4 },
     { type: 'minecraft:skeleton', distance: 10, x: 6, y: 64, z: 8 },
   ]);
-  assert.equal(sceneReport(state, 'threats-around', ['0,64,0', '5']).entries.length, 1);
-  assert.equal(sceneReport(state, 'threat-separation').pair.distance, 5);
-  state.blocks = [{ name: 'minecraft:oak_log', x: 3, y: 64, z: 3 }];
-  assert.equal(sceneReport(state, 'block-clearance', ['oak_log']).entries[0].nearestObservedThreat, 1);
 });
