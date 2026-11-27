@@ -28,6 +28,7 @@ import { runAgent } from '../src/agent.js';
 import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from './live-acceptance/nbt-parse.js';
 import { fabricMcpScenario } from './live-acceptance/fabric-mcp-scenario.js';
 import { fabricModelScenario } from './live-acceptance/fabric-model-scenario.js';
+import { handoffScenario } from './live-acceptance/handoff-scenario.js';
 import { scenarios as sharedScenarios, scenarioPlan } from './live-acceptance/scenarios.js';
 import { takeoverIds, takeoverScenarios } from './live-acceptance/takeover-scenarios.js';
 import { clickTarget, pressKey, startCli, startFakeModel, typeText } from './live-acceptance/takeover-tools.js';
@@ -67,7 +68,7 @@ import {
 
 export { SEED, WORLD_SETUP };
 const fabricAgentScenarios = [fabricModelScenario, fabricMcpScenario];
-const scenarios = [...sharedScenarios, ...fabricAgentScenarios, ...takeoverScenarios];
+const scenarios = [...sharedScenarios, ...fabricAgentScenarios, ...takeoverScenarios, handoffScenario];
 const scenarioIds = scenarios.map((scenario) => scenario.id);
 const runsOn = (scenario, backend) => !scenario.backends || scenario.backends.includes(backend);
 const REVIEW_NOTE =
@@ -110,7 +111,7 @@ export const PACKAGED_FABRIC = {
   title: 'Live Fabric acceptance (packaged jars, development launcher)',
   schema: 'minecraft-agent/live-fabric-packaged-acceptance/1',
   scope:
-    "The release archive's three jars in Fabric Loader production mode, started by Loom's runProductionClient with quick play; not a normal launcher, the bot, or authenticated handoff.",
+    "The release archive's three jars in Fabric Loader production mode, started by Loom's runProductionClient with quick play. Offline pre-checks only; normal-launcher and authenticated sessions are separate.",
   startStep: 'start a fresh Fabric client with the packaged jars via Gradle runProductionClient',
   reviewNote: PACKAGED_REVIEW_NOTE,
   releasePrefix: 'pre-check only (Fabric packaged jars, development launcher)',
@@ -132,7 +133,8 @@ const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... |
   change and full inventory. They press keys with xdotool on the X display, so run them under Xvfb (Boat).
 Scenarios: ${sharedScenarios.map(({ id }) => id).join(', ')}
 Fabric agent scenarios: ${fabricAgentScenarios.map(({ id }) => id).join(', ')}
-Fabric takeover scenarios: ${takeoverIds.join(', ')}`;
+Fabric takeover scenarios: ${takeoverIds.join(', ')}
+Packaged-only scenario: ${handoffScenario.id}`;
 
 export function parseOptions(argv, env = process.env) {
   const { values } = parseArgs({
@@ -192,11 +194,12 @@ export function parseOptions(argv, env = process.env) {
       throw new Error(`Unknown scenario ${JSON.stringify(id)}. Choose from: ${scenarioIds.join(', ')}.`);
     const scenario = scenarios.find((entry) => entry.id === id);
     if (!runsOn(scenario, backend)) throw new Error(`Scenario ${id} runs only with --backend fabric.`);
+    if (scenario.packagedOnly && !values.packaged) throw new Error(`Scenario ${id} requires --packaged.`);
   }
   if (!values.help && !values.all && !values.fast && !values.takeover && !values.scenario && !values['dry-run'])
     throw new Error(`Choose --scenario <id> (repeatable), --all, --fast, or --takeover.\n${USAGE}`);
   const selected = scenarios.filter((scenario) => {
-    if (!runsOn(scenario, backend)) return false;
+    if (!runsOn(scenario, backend) || (scenario.packagedOnly && !values.packaged)) return false;
     if (values.fast) return !scenario.longRunning && !scenario.requiresModel && !scenario.takeover;
     if (values.takeover) return !!scenario.takeover;
     return !values.scenario || values.scenario.includes(scenario.id);
@@ -402,6 +405,7 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       command: (command) => serverConsole.command(command, { signal }),
       items: async ({ x, y, z }) => serverConsole.blockData(x, y, z, 'Items', { signal }),
       inventory: async () => serverConsole.entityData(options.account, 'Inventory', { signal }),
+      uuid: async () => serverConsole.entityData(options.account, 'UUID', { signal }),
       position: async () => toPosition(await serverConsole.entityData(options.account, 'Pos', { signal })),
       // `execute if block X Y Z BLOCK`: true when the server reports "Test passed".
       testBlock: async ({ x, y, z }, block) =>
@@ -534,6 +538,23 @@ function scenarioRecord(scenario, reason = null, options = {}) {
   };
 }
 
+async function stopSession(session, serverConsole, account, label) {
+  const wait = new AbortController();
+  const left = serverConsole
+    .waitFor((message) => message === `${account} left the game`, {
+      timeoutMs: 20_000,
+      signal: wait.signal,
+      label: `the ${label} to leave`,
+    })
+    .catch(() => null);
+  try {
+    await session.stop();
+    return await left;
+  } finally {
+    wait.abort();
+  }
+}
+
 /** Fixture → fresh bot or client session → prepare → run → stop job → cleanup → stop session. Cleanup always runs. */
 export async function runScenario(scenario, { options, deps, serverConsole, signal, where, proxy = null }) {
   const backend = backendOf(options);
@@ -550,30 +571,32 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   const started = deps.now();
   const proxied = scenario.proxy && options.backend === 'fabric' ? proxy : null;
   const ctx = createContext({ record, options, serverConsole, bridge: where.bridge, deps, signal, proxy: proxied });
-  let bot = null;
-  try {
-    for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
-    const session = {
+  let session = null;
+  let activeBackend = backend;
+  const packaged = isPackaged(options);
+  async function startSession(kind) {
+    activeBackend = kind === 'fabric' ? backend : BACKENDS.bot;
+    const joiningBot = kind === 'bot' && options.backend === 'fabric';
+    const connection = {
       port: proxied?.port ?? options.port,
       account: options.account,
-      bridge: where.bridge,
+      bridge: joiningBot ? join(where.home, 'handoff-bot.json') : where.bridge,
       home: where.home,
       signal,
     };
-    const packaged = isPackaged(options);
-    bot = await ctx.step(backend.startStep, () =>
-      options.backend === 'fabric'
+    session = await ctx.step(activeBackend.startStep, () =>
+      kind === 'fabric'
         ? deps.startFabricClient({
-            ...session,
+            ...connection,
             gameDir: where.client,
             log: where.clientLog,
             java: options.java,
             ...(packaged && { packaged: true }),
             ...(scenario.storageStepDelayTicks && { storageStepDelayTicks: scenario.storageStepDelayTicks }),
           })
-        : deps.startBot(session),
+        : deps.startBot(connection),
     );
-    if (packaged) {
+    if (packaged && kind === 'fabric') {
       // Every session proves it ran the packaged jars in production mode; a scenario on anything else means nothing.
       const smoke = await ctx.step(
         'packaged-smoke: production mode, the archive mods, no mixin or linkage errors',
@@ -590,6 +613,25 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         remappedJars: smoke.remappedJars,
       });
     }
+  }
+  async function switchSession(kind) {
+    await ctx.close();
+    await ctx.step(`confirm the ${activeBackend.label} left before the next join`, async () => {
+      const left = await stopSession(session, serverConsole, options.account, activeBackend.label);
+      session = null;
+      const roster = await ctx.server.command('list');
+      if (!left || !/^There are 0 of a max of \d+ players online: ?$/.test(roster))
+        throw new Error(
+          `Expected the ${activeBackend.label} departure and an empty roster, got ${left ?? 'no departure'} and "${roster}".`,
+        );
+      return { left, roster };
+    });
+    signal.throwIfAborted();
+    await startSession(kind);
+  }
+  try {
+    for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
+    await startSession(options.backend ?? 'bot');
     for (const command of plan.prepare) await ctx.step(`prepare: ${command}`, () => ctx.server.command(command));
     await ctx.step('wait for bridge and server to agree on start position and inventory', () =>
       // Software-rendered Fabric clients load teleported chunks more slowly than the bot.
@@ -597,7 +639,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
     );
     // The packaged smoke check doesn't count: the scenario itself must check something.
     const before = record.checks.length;
-    await scenario.run(ctx, plan);
+    await scenario.run(ctx, plan, switchSession);
     const failed = record.checks.filter((check) => !check.pass);
     const ran = record.checks.length > before;
     record.status = failed.length || !ran ? 'fail' : 'pass';
@@ -623,7 +665,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         record.cleanup.push({ command, ok: false, error: error.message, durationMs: deps.now() - begun });
       }
     };
-    if (bot)
+    if (session && activeBackend === backend)
       await clean('bridge: /v1/stop', async () => {
         await ctx.bridge.emergencyStop();
       });
@@ -638,22 +680,10 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
       if (keepFixture && !/^(?:clear|effect) /.test(command)) deferred.push(command);
       else await runCleanup(command);
     }
-    if (bot) {
+    if (session) {
       await clean(backend.stopStep, async () => {
-        const wait = new AbortController();
-        const left = serverConsole
-          .waitFor((message) => message === `${options.account} left the game`, {
-            timeoutMs: 20_000,
-            signal: wait.signal,
-            label: `the ${backend.label} to leave`,
-          })
-          .catch(() => null);
-        try {
-          await bot.stop();
-          return { leftGame: (await left) !== null };
-        } finally {
-          wait.abort();
-        }
+        const left = await stopSession(session, serverConsole, options.account, activeBackend.label);
+        return { leftGame: left !== null };
       });
     }
     if (signal.aborted) {
@@ -668,7 +698,8 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         .filter(Boolean)
         .join(' | ');
     }
-    if (record.status === 'fail' && bot?.output?.length) ctx.note('botOutput', bot.output.join('').trim().slice(-3000));
+    if (record.status === 'fail' && session?.output?.length)
+      ctx.note('botOutput', session.output.join('').trim().slice(-3000));
     record.durationMs = deps.now() - started;
   }
   return record;

@@ -50,6 +50,8 @@ npm start -- acceptance report --gate fabric-f8-takeover
 
 Record independent evidence in step notes, such as a server `data get` read or a separate `mc-agent observe`, not the agent's own report.
 
+For the combined client and bot gate, follow the [authenticated handoff session](LIVE-ACCEPTANCE.md#authenticated-handoff-session).
+
 Use `--candidate-dir <path>` when the bundle is outside the checkout's `dist/`.
 For a bundle fetched with [Boat checks](DEVELOPMENT.md#boat-checks), pass
 `--candidate-dir ".runtime/boat-check/<check>/dist"`. Keep the ZIP,

@@ -440,6 +440,12 @@ function fakeWorld({ start = { x: 0.5, y: -60, z: 0.5 } } = {}) {
       return `${rest[2]}, ${rest[3]}, ${rest[4]} has the following block data: [${world.chest.map((item, slot) => `{count: ${item.count}, Slot: ${slot}b, id: "${item.id}"}`).join(', ')}]`;
     if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'Inventory')
       return `${BOT} has the following entity data: [${world.inventory.map((item, slot) => `{count: ${item.count}, Slot: ${slot}b, id: "${item.id}"}`).join(', ')}]`;
+    if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'UUID')
+      return `${BOT} has the following entity data: [I; ${world.uuid?.join(', ') ?? '1, -2, 3, 4'}]`;
+    if (verb === 'list')
+      return world.online
+        ? `There are 1 of a max of 4 players online: ${BOT}`
+        : 'There are 0 of a max of 4 players online: ';
     if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'foodLevel')
       return `${BOT} has the following entity data: ${world.food}`;
     if (verb === 'data' && rest[0] === 'get' && rest.at(-1) === 'Health')
@@ -2272,6 +2278,17 @@ test('--packaged needs the Fabric backend, defaults to the dist archive and refu
   );
 });
 
+test('the handoff rehearsal requires packaged Fabric and stays out of the fast preset', () => {
+  const selection = ['--scenario', 'handoff-rehearsal'];
+  assert.throws(() => parseOptions(selection), /runs only with --backend fabric/);
+  assert.throws(() => parseOptions(['--backend', 'fabric', ...selection]), /requires --packaged/);
+  const packaged = ['--backend', 'fabric', '--packaged'];
+  assert.ok(!parseOptions([...packaged, '--fast']).scenarios.some(({ id }) => id === 'handoff-rehearsal'));
+  const [scenario] = buildPlan(parseOptions([...packaged, ...selection])).scenarios;
+  assert.ok(scenario.verify.includes('list'));
+  assert.ok(scenario.verify.some((command) => command.endsWith(' UUID')));
+});
+
 test('the packaged dry run names the production client, the archive and the smoke check without needing either', async () => {
   const options = parseOptions(['--scenario', 'withdraw', '--backend', 'fabric', '--packaged', '--port', '25570']);
   const plan = buildPlan(options);
@@ -2389,7 +2406,7 @@ test('a packaged run verifies the archive jars first, launches the production cl
   assert.equal(results.schema, 'minecraft-agent/live-fabric-packaged-acceptance/1');
   assert.equal(results.backend, 'fabric');
   assert.match(results.scope, /release archive's three jars in Fabric Loader production mode/);
-  assert.match(results.scope, /not a normal launcher/);
+  assert.match(results.scope, /Offline pre-checks only/);
   assert.match(results.review.note, /packaged-jar pre-check/);
   assert.match(results.review.note, /never evidence for a RELEASE\.md box/);
   assert.equal(results.packaged.archiveSha256, 'c'.repeat(64));
@@ -2413,6 +2430,79 @@ test('a packaged run verifies the archive jars first, launches the production cl
     summary,
     /Packaged smoke: Fabric Loader 0\.20\.1, minecraft_agent 0\.1\.0, fabric-api 0\.116\.18\+1\.21\.1/,
   );
+});
+
+test('the packaged handoff verifies the same server player and requires both confirmed departures', async () => {
+  async function rehearse({ keepOnline = false, omitBotDeparture = false, changePlayer = () => {} } = {}) {
+    const world = fakeWorld();
+    const { deps, calls } = packagedDeps(world);
+    const waitFor = world.console.waitFor.bind(world.console);
+    world.console.waitFor = (match, options) =>
+      waitFor(match, options.label === 'the bot to leave' ? { ...options, timeoutMs: 10 } : options);
+    const launches = [];
+    const start = (kind, launch) => async (options) => {
+      assert.ok(!world.online);
+      launches.push(kind);
+      world.online = true;
+      const session = await launch(options);
+      return {
+        async stop() {
+          world.online = keepOnline;
+          if (kind !== 'bot' || !omitBotDeparture) await session.stop();
+        },
+      };
+    };
+    deps.startFabricClient = start('fabric', deps.startFabricClient);
+    deps.startBot = start('bot', deps.startBot);
+    const original = deps.startBot;
+    deps.startBot = async (options) => {
+      const session = await original(options);
+      changePlayer(world);
+      return session;
+    };
+    const options = parseOptions([
+      '--backend',
+      'fabric',
+      '--packaged',
+      '--accept-eula',
+      '--account',
+      BOT,
+      '--scenario',
+      'handoff-rehearsal',
+    ]);
+    const {
+      scenarios: [record],
+    } = await runAcceptance(options, deps);
+    return { record, launches, calls };
+  }
+  const { record, launches, calls } = await rehearse();
+  assert.equal(record.status, 'pass', record.reason);
+  assert.deepEqual(launches, ['fabric', 'bot', 'fabric']);
+  assert.equal(calls.checks.length, 2);
+  assert.equal(record.steps.filter(({ detail }) => detail?.left === `${BOT} left the game`).length, 2);
+
+  const occupied = await rehearse({ keepOnline: true });
+  assert.equal(occupied.record.status, 'fail');
+  assert.match(occupied.record.reason, /empty roster/);
+  assert.deepEqual(occupied.launches, ['fabric']);
+
+  const missing = await rehearse({ omitBotDeparture: true });
+  assert.equal(missing.record.status, 'fail');
+  assert.match(missing.record.reason, /no departure/);
+  assert.deepEqual(missing.launches, ['fabric', 'bot']);
+
+  for (const changePlayer of [
+    (world) => {
+      world.uuid = [2, -2, 3, 4];
+    },
+    (world) => {
+      world.inventory.reverse();
+    },
+  ]) {
+    const changed = await rehearse({ changePlayer });
+    assert.equal(changed.record.status, 'fail');
+    assert.match(changed.record.reason, /same UUID and inventory/);
+  }
 });
 
 test('a packaged scenario that checks nothing fails even though the smoke check passed', async () => {
