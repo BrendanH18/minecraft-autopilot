@@ -26,6 +26,8 @@ import { writePrivateJson } from '../src/config.js';
 import { FabricAdapter } from '../src/fabric-adapter.js';
 import { runAgent } from '../src/agent.js';
 import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from './live-acceptance/nbt-parse.js';
+import { fabricMcpScenario } from './live-acceptance/fabric-mcp-scenario.js';
+import { fabricModelScenario } from './live-acceptance/fabric-model-scenario.js';
 import { scenarios as sharedScenarios, scenarioPlan } from './live-acceptance/scenarios.js';
 import { takeoverIds, takeoverScenarios } from './live-acceptance/takeover-scenarios.js';
 import { clickTarget, pressKey, startCli, startFakeModel, typeText } from './live-acceptance/takeover-tools.js';
@@ -64,8 +66,8 @@ import {
 } from './live-acceptance/processes.js';
 
 export { SEED, WORLD_SETUP };
-// The shared table runs on both backends; the takeover scenarios press keys in the client and run only on Fabric.
-const scenarios = [...sharedScenarios, ...takeoverScenarios];
+const fabricAgentScenarios = [fabricModelScenario, fabricMcpScenario];
+const scenarios = [...sharedScenarios, ...fabricAgentScenarios, ...takeoverScenarios];
 const scenarioIds = scenarios.map((scenario) => scenario.id);
 const runsOn = (scenario, backend) => !scenario.backends || scenario.backends.includes(backend);
 const REVIEW_NOTE =
@@ -129,6 +131,7 @@ const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... |
 --takeover (Fabric only) runs the scripted Fabric checklist items: F8, menus, stop, cancel, expiry, death, dimension
   change and full inventory. They press keys with xdotool on the X display, so run them under Xvfb (Boat).
 Scenarios: ${sharedScenarios.map(({ id }) => id).join(', ')}
+Fabric agent scenarios: ${fabricAgentScenarios.map(({ id }) => id).join(', ')}
 Fabric takeover scenarios: ${takeoverIds.join(', ')}`;
 
 export function parseOptions(argv, env = process.env) {
@@ -366,6 +369,7 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
   const ctx = {
     options,
     bot: options.account,
+    bridgePath: bridge,
     signal,
     observations: record.observations,
     now: deps.now,

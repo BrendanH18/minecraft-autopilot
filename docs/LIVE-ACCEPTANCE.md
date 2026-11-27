@@ -482,6 +482,28 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && 
   the storage pacing property reached the production client, and the unpaced
   `deposit-double-chest-omitted` passed beside them (2 min 12 s for all three).
 
+### Local model and MCP pre-checks
+
+To rehearse the local-model and MCP workflows with the packaged mod, run both
+Fabric agent scenarios on a large Boat sandbox. This gives the server, the
+software-rendered client and Ollama room to run together.
+
+```sh
+MCA_BOAT_TYPE=large scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --accept-eula --packaged --scenario fabric-collect-model --scenario fabric-collect-mcp --model qwen3.5:4b --no-thinking'
+```
+
+- `fabric-collect-model` runs the CLI with real Ollama inference and the
+  `--verify-collect oak_log:8` and `--verify-home` criteria. Independent server
+  inventory and position reads confirm collection and return. It requires
+  `--model` and is excluded from `--fast`.
+- `fabric-collect-mcp` starts `mc-agent mcp` over stdio and calls its tools to
+  observe, acquire control, collect one oak log and stop. The server confirms
+  the log was removed and picked up. The scenario runs in Fabric `--fast`.
+
+Both confirm that control returns to manual. The normal-launcher run with
+the owner's local model and an actual MCP agent is still required for the
+[release checklist](RELEASE.md#live-checks-required-before-shipping).
+
 ## Fabric fixtures
 
 The fixture helper starts a fresh vanilla 1.21.1 server for a packaged Fabric
