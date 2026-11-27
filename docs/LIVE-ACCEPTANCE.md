@@ -297,9 +297,12 @@ opened containers, saved home or last job.
   passed on the development client: two failed automatic eating attempts
   10.0 s apart, four failed attempts during a retreat that gave up 60.0 s after
   it started, and an inventory-full failure after exactly six logs.
-- **Not covered.** The normal launcher and handoff can't be scripted here; the
-  packaged jars run as a pre-check with [`--packaged`](#packaged-jars). F8, menus, stop, expiry, death and dimension changes
-  are covered as pre-checks by the [takeover scenarios](#takeover-scenarios).
+- **Packaged and manual checks.** Run the packaged jars with
+  [`--packaged`](#packaged-jars), including the
+  [offline handoff rehearsal](#offline-handoff-rehearsal). The normal launcher
+  and [authenticated handoff](#authenticated-handoff-session) require the
+  owner's session. The [takeover scenarios](#takeover-scenarios) pre-check F8,
+  menus, stop, expiry, death and dimension changes.
 
 ### Takeover scenarios
 
@@ -504,6 +507,21 @@ Both confirm that control returns to manual. The normal-launcher run with
 the owner's local model and an actual MCP agent is still required for the
 [release checklist](RELEASE.md#live-checks-required-before-shipping).
 
+### Offline handoff rehearsal
+
+Run the packaged Fabric client, Mineflayer, and the returning Fabric client
+in sequence against one disposable offline server in Boat:
+
+```sh
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --packaged --accept-eula --scenario handoff-rehearsal'
+```
+
+The rehearsal uses the same offline player name for both clients. Server
+reads check that the UUID and inventory match through all three sessions and
+that the player leaves before each next join. Review `results.json` and
+`server.out` together. The `authenticated-handoff` gate still requires the
+[account owner's run on an online-mode server](#authenticated-handoff-session).
+
 ## Fabric fixtures
 
 The fixture helper starts a fresh vanilla 1.21.1 server for a packaged Fabric
@@ -600,3 +618,83 @@ session and run the printed commands only after `Fixture ready`.
    tools, call sequence, and raw tool results. After stop, repeat the server
    reads to confirm the log block is gone and the player has one oak log. Record
    the inventory gain and `mode: manual` from a separate `mc-agent observe`.
+
+## Authenticated handoff session
+
+The account owner runs this session on the Mac with the candidate's three jars
+in a normal Fabric launcher profile. Use a Minecraft Java 1.21.1 dedicated
+server with `online-mode=true` and access to its console and timestamped log.
+Use the same server and world for the whole session. The account owner handles
+Microsoft device sign-in locally and keeps device codes, account identifiers,
+authentication caches, and bridge credentials out of shared evidence.
+
+From the clean candidate checkout, set `CANDIDATE_DIR` to the bundle directory
+and `MODS_DIR` to the launcher profile's `mods` directory. Record the actual
+launcher and server configuration in the session.
+
+```sh
+npm start -- acceptance show authenticated-handoff
+npm start -- acceptance preflight --backend both \
+  --candidate-dir "$CANDIDATE_DIR" --mods-dir "$MODS_DIR"
+npm start -- acceptance start authenticated-handoff --backend both \
+  --require-candidate --candidate-dir "$CANDIDATE_DIR" --mods-dir "$MODS_DIR" \
+  --launcher "Minecraft Launcher, Fabric Loader 0.20.1" \
+  --server "vanilla 1.21.1, online mode"
+```
+
+At each connected stage, run these commands in the **server console** with
+`PLAYER` replaced by the Minecraft profile name. Keep the raw timestamped
+reads with the private session evidence. Compare the UUID and the inventory
+by slot, including item counts and components.
+
+```text
+list
+data get entity PLAYER UUID
+data get entity PLAYER Inventory
+```
+
+1. Join in the packaged Fabric profile with the Microsoft account. Use a safe
+   location and a recognizable, nonempty inventory. Record the first UUID and
+   inventory reads and the server's join entry. Keep the inventory unchanged
+   for the rest of the session.
+2. Disconnect in Minecraft. Wait for the server's leave entry and run `list`
+   to confirm that the player is absent. Then start the bot from the same
+   candidate checkout. Replace `SERVER_HOST` and `SERVER_PORT` with the
+   server's actual host and port, and `ACCOUNT_IDENTIFIER` with the identifier
+   for the same Microsoft account. Give the bot its own discovery file so the
+   Fabric profile can stay attached.
+
+   ```sh
+   npm start -- --bridge .runtime/handoff-bot-bridge.json server \
+     --host SERVER_HOST --port SERVER_PORT --account ACCOUNT_IDENTIFIER \
+     --auth microsoft --version 1.21.1
+   ```
+
+   After the bot joins, record the server's join entry and repeat the UUID
+   and inventory reads. Both should match the Fabric baseline.
+3. Press Ctrl+C in the bot terminal and wait for the process to exit. Confirm
+   the server's leave entry and the player's absence in `list`. Rejoin in the
+   packaged Fabric profile, then record the server's join entry and repeat the
+   reads. Both should match the first two stages.
+4. Use the server log and `list` results to confirm the sequence of Fabric join,
+   Fabric leave, bot join, bot leave, and Fabric rejoin. Record the connect and
+   disconnect times and the observations for the two gaps in the session.
+
+Set `SESSION` to the ID printed by `acceptance start`. Record each numbered
+result, substituting its step number and observation. Use `fail` in place of
+`pass` when a step fails.
+
+```sh
+npm start -- acceptance step "$SESSION" 1 pass --note "First Fabric join, UUID and inventory recorded"
+```
+
+Finish the session, then review the report. Use `fail` or `blocked` with
+`--note "Reason"` when the session cannot pass.
+
+```sh
+npm start -- acceptance finish "$SESSION" pass
+npm start -- acceptance report --session "$SESSION"
+```
+
+Keep the gate open until the owner reviews the evidence against the
+[release checklist](RELEASE.md#live-checks-required-before-shipping).
