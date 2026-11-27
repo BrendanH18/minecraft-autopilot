@@ -72,6 +72,11 @@ export async function reviewBotEvidence(files, commit) {
         throw new Error(
           'Fabric pre-check results (development client or packaged jars) are never bot or release evidence.',
         );
+      // A --model run in a Boat check used a small model on the sandbox CPU; the whole file is a pre-check.
+      if (raw?.modelPrecheck)
+        throw new Error(
+          'Real-model pre-check results (a small model on a Boat CPU) are never bot, real-model or release evidence.',
+        );
       const result = resultSchema.parse(raw);
       if (result.environment.commit !== commit)
         throw new Error(`Recorded commit ${result.environment.commit ?? 'unknown'} does not match the candidate.`);

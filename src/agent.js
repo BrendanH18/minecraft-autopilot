@@ -6,8 +6,10 @@ import { createObjective } from './objective.js';
 import { MAX_INSPECT_CONTAINERS, normalizeAction } from './protocol.js';
 import { CRAFTABLE_ITEMS, MAX_CRAFT_COUNT } from './recipes.js';
 
+// The output schema bounds done's reason the same way, so a model writing its reasoning there must stop at this length.
+const MAX_REASON = 1000;
 const decisionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('done'), reason: z.string().max(1000) }).strict(),
+  z.object({ type: z.literal('done'), reason: z.string().max(MAX_REASON) }).strict(),
   z.object({ type: z.literal('goto'), x: z.number(), y: z.number(), z: z.number() }).strict(),
   z.object({ type: z.literal('home') }).strict(),
   z.object({ type: z.literal('set_home') }).strict(),
@@ -45,7 +47,7 @@ export const decisionJsonSchema = {
   type: 'object',
   properties: {
     type: { enum: Object.keys(actionFields) },
-    reason: { type: 'string' },
+    reason: { type: 'string', maxLength: MAX_REASON },
     x: { type: 'number' },
     y: { type: 'number' },
     z: { type: 'number' },
@@ -573,9 +575,10 @@ export async function runAgent(
         try {
           decision = parseDecision(content);
         } catch (error) {
+          // The reason says what was wrong (a missing field, unreadable JSON), so a failed run shows what to fix.
           if (invalid++ >= retryInvalid)
             throw new Error(
-              'The model returned an invalid action, so it was not executed; earlier actions in this task still took effect.',
+              `The model returned an invalid action, so it was not executed; earlier actions in this task still took effect. ${invalidReason(error)}.`,
             );
           // The rejected output consumed a decision; the model sees why and may try again.
           const reason = invalidReason(error);

@@ -251,3 +251,18 @@ test('review-bot rejects packaged-jar Fabric pre-checks, and any Fabric result r
   const gate = report.gates.find(({ gate }) => gate === 'bot-withdraw-craft');
   assert.equal(gate.offline.find(({ id }) => id === 'withdraw').status, 'missing');
 });
+
+test('review-bot rejects Boat real-model pre-checks, including their offline scenarios', async (t) => {
+  const modelPass = { id: 'withdraw-craft-model', status: 'pass', observations: { model: 'qwen3:1.7b' } };
+  const modelPrecheck = { host: 'boat', note: 'Real-model pre-check: a small model on the CPU of a Boat sandbox.' };
+  const { reports, parse } = await review(t, [
+    { ...run(1, [modelPass, { id: 'withdraw', status: 'pass' }], { model: 'qwen3:1.7b' }), modelPrecheck },
+  ]);
+  await assert.rejects(parse, /1 bot result file\(s\) rejected/);
+  const [report] = reports;
+  assert.equal(report.runs.length, 0);
+  assert.match(report.rejected[0].reason, /Real-model pre-check results \(a small model on a Boat CPU\)/);
+  const gate = report.gates.find(({ gate }) => gate === 'bot-withdraw-craft');
+  assert.equal(gate.realModel[0].status, 'missing');
+  assert.equal(gate.offline.find(({ id }) => id === 'withdraw').status, 'missing');
+});

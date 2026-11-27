@@ -120,8 +120,19 @@ share a sandbox at once.
 snapshot, without check directories. The sandbox remains available for this
 worktree's later checks. Re-run it after changes to dependencies or the
 toolchain. The interactive Minecraft client, packaged Fabric acceptance,
-authenticated handoff and Ollama runs stay on the Mac, and the script refuses
-`dev:mod`, `runClient` and model options.
+authenticated handoff and Ollama evidence runs stay on the Mac. The script
+refuses `dev:mod`, `runClient` and `--ollama`, and allows `--model` only on
+the acceptance runner, as a [real-model pre-check](LIVE-ACCEPTANCE.md#real-model-pre-checks-on-boat).
+
+For a live acceptance run with `--model NAME` (not a dry run), the remote
+script installs a pinned Ollama (0.40.17, checked against its SHA-256, without
+the GPU libraries) into `~/ollama`, starts `ollama serve` on
+`127.0.0.1:11434`, the runner's default, and pulls the model. The install and
+the models stay in the sandbox between checks; `--save` leaves them out of the
+warm snapshot. Every check exports `MCA_BOAT_CHECK=1`, so the runner marks a
+`--model` run as `modelPrecheck`, and `acceptance review-bot` rejects it.
+The Ollama server log is `.runtime/live-acceptance/ollama.log`, so `--fetch
+.runtime/live-acceptance` brings it back with the results.
 
 The one client run allowed in a sandbox is the headless
 [Fabric development client mode](LIVE-ACCEPTANCE.md#fabric-development-client-mode)
@@ -177,6 +188,30 @@ passed on their first attempt on the development client, with `f8-deposit`,
 mode (3 of 3 with `deposit-double-chest-omitted`, 2 min 12 s). These are
 pre-checks, not release evidence: checklist items 10 and 12 still need a
 person, with the same JVM argument in the launcher profile.
+
+**Real-model pre-checks on a Boat CPU (27 November 2026).** On `3747764`
+plus this branch's changes, Ollama 0.40.17 ran small models on the default
+4 vCPU sandbox (AMD EPYC, no GPU) for `stale-removal-model` and
+`withdraw-craft-model`. With `qwen3.5:4b` and `--no-thinking` both passed in
+two runs out of two, the second on the clean commit: `stale-removal-model` in
+6 min 25 s and 6 min 49 s, `withdraw-craft-model` in 1 min 12 s and 1 min 2 s,
+about 8 minutes a run, with decisions of 13 to 70 s each. The model withdrew four cobblestone and crafted the pickaxe in
+three decisions. In `stale-removal-model` it collected, deposited 8 and,
+after the chest was emptied during its next decision, got `criteria_unmet`
+from the refreshed storage. `qwen3:1.7b` and `qwen3:4b` failed both as weak
+planners: they answered `done` with the goal or their plan as the reason, or
+collected past the quota. With thinking on, `qwen3:1.7b` was still thinking
+after 2,100 tokens when the 120-second decision limit ran out. The runs found
+and fixed three bugs, each with a regression test. The bot observed only the
+24 nearest blocks of all kinds, which in a superflat world were all dirt, so
+the planner never saw the oak logs or the crafting table. It now reports the
+nearest three of each kind, as Fabric reports three, and `--fast` still passed all 27
+scenarios. The output schema didn't bound `done`'s reason, so a model
+writing its plan there ran into the decision timeout; it is now capped at the
+1,000 characters the validator allows. An invalid model action now says
+what was wrong. The runner also gained `--model-timeout`, which its own
+timeout message already suggested. These are pre-checks, not evidence: the
+real-model scenarios still need the owner's model on the Mac.
 
 **Release candidate pre-checks (26 November 2026).** In Boat, clean commit
 `3fca55b` built and verified (`sourceModified: false`, archive SHA-256

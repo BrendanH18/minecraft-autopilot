@@ -8,11 +8,17 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 - The offline planners, planning studies and the 44 report and tool groups moved into the `@minecraft-autopilot/planners` npm workspace package in `packages/planners/`, with their tests and reference docs. `npm install` in the repository root still installs them, and the commands are unchanged. The core CLI runs without the package: core commands never load it, and other commands then report that the package isn't installed.
 
+- The server bot now reports up to three nearby blocks of each kind in its observations, nearest first, as Fabric does. It used to report the 24 nearest of all kinds, which near the ground were usually all dirt, so the planner couldn't see logs or crafting tables.
+
+- The planner's output schema caps `done`'s reason at 1,000 characters, the limit the validator already enforced, so a model can't write its plan there until the decision times out. An invalid model action now says what was wrong with it.
+
 - Core commands such as `stop`, `observe` and `mcp` no longer load the 44 offline tool groups (supplies, survey, ledger and the rest). Those load only for their own commands, root help and unknown-command suggestions. Help output is unchanged.
 
 ### Added
 
 - An opt-in JVM argument, `-Dminecraftagent.storageStepDelayTicks=<0-40>` (default 0), holds the agent's chest or barrel screen open for that many ticks before each deposit or withdrawal stack moves, so a person can close it. Unpaced, the screen closes within a frame. The `menu-storage-close` and `menu-storage-close-withdraw` takeover scenarios set it to 20 and must now pass; the runner's expected-failure status is gone.
+
+- Agents can pre-check the real-model bot scenarios in Boat: `scripts/boat-check.sh` installs a pinned Ollama in the sandbox and serves a small model on the CPU for `npm run acceptance:bot -- --model NAME`. Those results are marked `modelPrecheck`, and `acceptance review-bot` rejects them. The runner also takes `--model-timeout`.
 
 - `npm run acceptance:fabric -- --packaged` runs the Fabric scenarios on the three jars from the release archive, with Fabric Loader in production mode, after checking the jars against the archive. It also checks the client log for the loaded mods and for mixin or refmap errors. The new `Fabric acceptance` workflow runs `--fast` on mod pull requests, plus `--takeover` and `--packaged` weekly. `disconnect-collect` now rejoins after the kick through the disconnect screen. All of these are pre-checks, not release evidence.
 

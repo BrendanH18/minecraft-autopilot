@@ -37,7 +37,9 @@ Use `--dry-run --json` to read the selected fixtures, actions, and checks as str
 
 Other options include `--port N`, `--out FILE` (default `results.json` in the run
 directory), `--account NAME` (offline username, default `LiveBot`), `--java PATH`,
-`--model NAME` and `--ollama URL` for model scenarios, `--keep-server`, and for
+`--model NAME`, `--ollama URL`, `--no-thinking` and `--model-timeout SECONDS`
+(each decision's limit, default 120 as for `mc-agent agent`) for model scenarios,
+`--keep-server`, and for
 the Fabric backend `--packaged [--archive ZIP]` ([Packaged jars](#packaged-jars)). Use
 distinct ports and, if supplying `--out`, distinct output files for concurrent
 runs.
@@ -150,6 +152,34 @@ interruption half of the gate (F8 and stop while eating or retreating) is in the
 
 The `agent` command always needs an Ollama model; there is no deterministic CLI routine that applies `--verify-collect`/`--verify-deposit`/`--verify-home`. The storage scenarios therefore call the same exported `runAgent` the CLI uses, in process, against the bot's bridge, with a **scripted planner** supplied as its model transport. No model or network is involved; the decisions are fixed (for example collect 8 → deposit 8 → home → done), while the criteria checks, each deposit's reported container baseline, the task-scoped final `inspect_storage`, the `done` rejections, and the bridge actions are the production code paths. The "during inference" changes happen while the agent is awaiting that scripted decision, which is the same window a model's inference occupies. The real-model variant is `stale-removal-model`; it is never simulated.
 
+### Real-model pre-checks on Boat
+
+`stale-removal-model` and `withdraw-craft-model` need a real model, and the
+evidence for their gates comes from the owner's model on the Mac. Agents
+pre-check them in Boat with a small model on the sandbox's CPU (owner decision,
+26 November 2026), to find prompt, parsing and tool-call bugs before that
+session:
+
+```sh
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula \
+  --scenario stale-removal-model --scenario withdraw-craft-model --model qwen3.5:4b --no-thinking
+```
+
+The [Boat check script](DEVELOPMENT.md#boat-checks) installs a pinned Ollama,
+pulls the model and serves it at the default URL. It takes about 8 minutes on
+the default 4 vCPU sandbox, plus the model download the first time. Each
+decision takes 13 to 70 s, so leave `--no-thinking` on: with thinking, the
+first decision overran the 120-second `--model-timeout`. Because the check
+exports `MCA_BOAT_CHECK=1`, the results carry `modelPrecheck`, every
+real-model `release` entry starts with `pre-check only (small model on a Boat
+CPU)`, and `acceptance review-bot` rejects the file. Run offline scenarios in
+a separate run if you want them reviewed.
+
+`qwen3.5:4b` is the smallest model that passed both. `qwen3:1.7b` and
+`qwen3:4b` follow the action format but don't plan the task: they answer
+`done` with the goal as the reason, or repeat `collect` past the quota. A
+failure with one of them says little about the code.
+
 ## Results file
 
 ```text
@@ -158,13 +188,14 @@ review: { reviewed: false, note }          # a person sets this when they accept
 scope                                      # bot only; not Fabric or authenticated handoff
 environment: { commit, dirty, node, java, platform, javaPreflight, sourceAtFinish: { commit, dirty } }
 minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, serverLogSha256, seed, levelType }
-options: { port, account, keepServer, model, noThinking, scenarios }
+options: { port, account, keepServer, model, noThinking, modelTimeout, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
 timings: { serverStartMs, worldSetupMs, scenariosMs, serverStopMs, totalMs }
 summary: { pass, fail, skipped, error }, error
 backend, client: { log, logSha256, gameDirectory }   # Fabric runs only
 packaged: { archive, archiveSha256, build, modsDirectory, jars[], warnings[], smoke }   # --packaged only
+modelPrecheck: { host: 'boat', note }      # --model inside a Boat check only; never evidence
 ```
 
 `steps` record every console command, bridge/CLI action, and read with timing and outcome. Each cleanup step the scenario runner runs also has a `durationMs`, and `timings` gives the wall time of each run phase (`null` for a phase the run never reached; a phase that failed records how long it ran), so a slow run shows where its time went. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
@@ -187,7 +218,8 @@ log when available. For a copied `results.json`, the reviewer uses the
 adjacent `server/server.out` if its SHA-256 matches the recorded log. The most
 recently finished run that attempted a scenario takes precedence. A skip is
 shown if no run attempted that scenario.
-Unreadable, malformed, dirty, and different-commit files are listed under
+Unreadable, malformed, dirty, and different-commit files, Fabric pre-checks
+and [Boat real-model pre-checks](#real-model-pre-checks-on-boat) are listed under
 `rejected`, and the command exits unsuccessfully if any file was rejected.
 Passing scenarios must contain passing checks and identify the Minecraft
 server version and jar SHA-256, and their server log must match its recorded

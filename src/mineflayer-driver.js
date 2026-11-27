@@ -23,6 +23,8 @@ const COLLECT_BLOCKS = new Set([
   'cobblestone',
   'sand',
 ]);
+// Nearby blocks reported per kind in observations, as the Fabric mod reports them.
+const BLOCKS_PER_KIND = 3;
 const EATING_BACKOFF_MS = 10_000;
 const FAILED_EATING = 'Could not eat.';
 const SAFE_FOOD = new Set([
@@ -295,10 +297,14 @@ export class MineflayerDriver {
     if (!this.connected || !bot.entity)
       return { backend: 'mineflayer', connected: false, paused: false, error: this.lastError, player: null };
     // Crafting tables are reported too, so a planner can see where table recipes will be crafted.
-    const blockIds = [...COLLECT_BLOCKS, 'crafting_table']
+    // Up to three of each kind, as Fabric reports them, nearest first: the nearest of all kinds together are
+    // nearly always the dirt underfoot, which hid every log and table from the planner.
+    const here = bot.entity.position;
+    const positions = [...COLLECT_BLOCKS, 'crafting_table']
       .map((name) => bot.registry.blocksByName[name]?.id)
-      .filter((id) => id !== undefined);
-    const positions = bot.findBlocks({ matching: blockIds, maxDistance: 16, count: 24 });
+      .filter((id) => id !== undefined)
+      .flatMap((id) => bot.findBlocks({ matching: id, maxDistance: 16, count: BLOCKS_PER_KIND }))
+      .sort((a, b) => a.distanceTo(here) - b.distanceTo(here));
     return {
       backend: 'mineflayer',
       connected: true,

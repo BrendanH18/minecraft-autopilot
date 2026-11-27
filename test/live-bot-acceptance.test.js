@@ -369,6 +369,10 @@ test('options require an explicit selection and validate ids, ports, and names',
   assert.throws(() => parseOptions(['--all', '--account', 'a b']), /--account/);
   assert.throws(() => parseOptions(['--all', '--model', '  ']), /--model must name an installed/);
   assert.equal(parseOptions(['--all', '--model', ' local-model ']).model, 'local-model');
+  assert.equal(parseOptions(['--all']).modelTimeout, 120);
+  assert.equal(parseOptions(['--all', '--model-timeout', '600']).modelTimeout, 600);
+  for (const bad of ['0', '3601', '1.5', 'soon'])
+    assert.throws(() => parseOptions(['--all', '--model-timeout', bad]), /--model-timeout must be a whole number/);
   assert.equal(parseOptions(['--all', '--java', './jdk/bin/java']).java, resolve('jdk/bin/java'));
   const options = parseOptions(['--scenario', 'blocked-lid', '--scenario', 'recovery-stop', '--port', '25599']);
   assert.deepEqual(
@@ -994,6 +998,7 @@ test('withdraw-craft-model requires both criteria, matching server reads, and ma
       runAgent: async (_adapter, goal, options) => {
         assert.match(goal, /Withdraw exactly four cobblestone.*Craft one stone pickaxe/);
         assert.equal(options.model, model);
+        assert.equal(options.modelTimeout, 120);
         assert.equal(options.fetchImpl, undefined);
         assert.deepEqual(options.criteria, {
           withdraw: { item: 'cobblestone', count: 1 },
@@ -1013,6 +1018,29 @@ test('withdraw-craft-model requires both criteria, matching server reads, and ma
     assert.equal(record.status, failure ? 'fail' : 'pass', record.reason);
     if (failure) assert.match(record.reason, failure);
   }
+});
+
+test('a --model run inside a Boat check is recorded as a pre-check, never as real-model evidence', async () => {
+  const argv = ['--scenario', 'withdraw-craft-model', '--accept-eula', '--model', 'qwen3:1.7b'];
+  assert.equal(parseOptions(argv, {}).modelPrecheck, false);
+  assert.equal(parseOptions(argv, { MCA_BOAT_CHECK: '0' }).modelPrecheck, false);
+  assert.equal(parseOptions(argv.slice(0, 3), { MCA_BOAT_CHECK: '1' }).modelPrecheck, false);
+  const options = parseOptions(argv, { MCA_BOAT_CHECK: '1' });
+  assert.equal(options.modelPrecheck, true);
+  const [planned] = buildPlan(options).scenarios;
+  assert.ok(planned.release.every((text) => text.startsWith('pre-check only (small model on a Boat CPU): ')));
+  const deps = fakeDeps(fakeWorld(), { runAgent: async () => ({ status: 'criteria_unmet' }) });
+  const printed = [];
+  assert.equal(parseOptions([...argv, '--model-timeout', '600'], {}).modelTimeout, 600);
+  deps.print = (text) => printed.push(text);
+  const results = await runAcceptance(options, deps);
+  assert.equal(results.modelPrecheck.host, 'boat');
+  assert.match(results.modelPrecheck.note, /never evidence for a RELEASE\.md box or a real-model gate/);
+  assert.ok(results.scenarios[0].release.every((text) => text.startsWith('pre-check only (small model')));
+  assert.match(printed.join('\n'), /Real-model pre-check: a small model on the CPU of a Boat sandbox/);
+  const mac = await runAcceptance(parseOptions(argv, {}), fakeDeps(fakeWorld(), { runAgent: deps.runAgent }));
+  assert.equal(mac.modelPrecheck, undefined);
+  assert.deepEqual(mac.scenarios[0].release, byId('withdraw-craft-model').release);
 });
 
 const SURVIVAL = ['eat-timeout', 'low-health-retreat', 'eat-retreat-timeout', 'collect-full-inventory'];

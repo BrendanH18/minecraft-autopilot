@@ -72,7 +72,7 @@ Before packaged Fabric session 1, run `npm run acceptance:fabric -- --accept-eul
 | --- | --- | --- |
 | Build a clean candidate in Boat and run `acceptance:bot --all`. | Every offline scenario passes on the candidate commit. | Agent, Boat. **Done (26 November)** on `3fca55b`. |
 | Review the bot results for `bot-mining-timeout`, `bot-withdraw-craft`, `collect-and-store-verification`, and the bot half of `collection-pit-recovery`. | A person records the review in [DEVELOPMENT.md](DEVELOPMENT.md#validation) and ticks the boxes the evidence supports. | Person. |
-| Run `stale-removal-model` and `withdraw-craft-model` with a real local model. | Both pass and are recorded. | Person, Mac with Ollama. |
+| Run `stale-removal-model` and `withdraw-craft-model` with a real local model. | Both pass and are recorded. | Person, Mac with Ollama. Both passed a Boat pre-check with `qwen3.5:4b` on the CPU on 27 November, after three planner and observation fixes ([DEVELOPMENT.md](DEVELOPMENT.md#validation)). |
 | Packaged Fabric session 1: `fabric-packaged-install`, `fabric-f8-takeover`, `cobblestone-hostiles-dimension`, and the Fabric half of `collection-pit-recovery`. | Each gate has a finished `mc-agent acceptance` session with independent server reads, and each failure has an issue. | Person at the keyboard, Mac. |
 
 ### Week 3 (7–13 December): Fabric fixes and the second Fabric session

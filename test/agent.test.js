@@ -1047,3 +1047,16 @@ test('a scoped demo bridge rejects unknown and unopened storage and reports its 
     return true;
   });
 });
+
+test('the output schema bounds the done reason as the validator does, so a rambling model cannot run past it', async () => {
+  // Seen on a CPU qwen3:4b run with --no-thinking: an unbounded reason grew until the 120-second model timeout.
+  assert.equal(decisionJsonSchema.properties.reason.maxLength, 1000);
+  const finish = (reason) =>
+    runAgent(fakeAdapter(), 'Stop', {
+      model: 'test',
+      log() {},
+      fetchImpl: async () => reply({ type: 'done', reason }),
+    });
+  assert.equal((await finish('x'.repeat(1000))).status, 'model_finished');
+  await assert.rejects(finish('x'.repeat(1001)), /invalid action/);
+});

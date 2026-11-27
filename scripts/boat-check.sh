@@ -6,6 +6,10 @@
 #   scripts/boat-check.sh --fetch PATH -- CMD...
 #                                          then copy PATH (relative to the checkout, repeatable)
 #                                          back into .runtime/boat-check/<check>/ here
+#   scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula \
+#       --scenario withdraw-craft-model --model qwen3.5:4b --no-thinking
+#                                          a real-model pre-check: the sandbox installs a pinned Ollama,
+#                                          pulls the model and serves it on the CPU (never evidence)
 #   scripts/boat-check.sh --save [-- CMD]  after a passing run, save the sandbox (caches and
 #                                          toolchain, no checkouts) as the warm snapshot
 #   scripts/boat-check.sh --status         show this worktree's sandbox
@@ -69,9 +73,12 @@ busy_ttl=1800 keepalive_every=600
 if [ -z "$cmd" ]; then
     # The hand-off checks, as CONTRIBUTING.md lists them.
     cmd="npm run lint && npm run lint:mod && npm run check && npm test && npm run test:planners && npm start -- demo --smoke && npm run build:mod && npm run verify:mod"
-elif [[ $cmd =~ (dev:mod|runClient|--model|--ollama) ]]; then
+elif [[ $cmd =~ (dev:mod|runClient|--ollama) ]]; then
     # The headless Fabric acceptance runner (npm run acceptance:fabric) is the one client run allowed here.
-    die 2 "interactive Minecraft clients and Ollama runs stay on the Mac (AGENTS.md); use npm run acceptance:fabric for a headless client check"
+    die 2 "interactive Minecraft clients and Ollama evidence runs stay on the Mac (AGENTS.md); use npm run acceptance:fabric for a headless client check"
+elif [[ $cmd =~ --model && ! $cmd =~ (acceptance:(bot|fabric)|live-bot-acceptance\.js) ]]; then
+    # A small model on the sandbox CPU is allowed only as an acceptance runner pre-check (owner, 2026-11-26).
+    die 2 "--model runs here only as an acceptance runner pre-check (npm run acceptance:bot -- ... --model NAME); other Ollama runs stay on the Mac (AGENTS.md)"
 fi
 
 root=$(git rev-parse --show-toplevel)
@@ -172,8 +179,9 @@ echo "boat-check: $( [ "$status" = 0 ] && echo passed || echo "failed ($status)"
 [ "$status" = 0 ] || exit "$status"
 [ "$save" = 1 ] || exit 0
 
-# The snapshot keeps the toolchain and the caches in /home/user/mca-cache, not checkouts.
-boat exec "$id" --timeout 600 "rm -rf /home/user/checks" >/dev/null
+# The snapshot keeps the toolchain and the caches in /home/user/mca-cache, not checkouts
+# or the Ollama install and models a real-model pre-check left in /home/user/ollama.
+boat exec "$id" --timeout 600 "rm -rf /home/user/checks /home/user/ollama" >/dev/null
 remote_dir=""
 # Reusing a name keeps its createdAt, so wait for a new snapshotId under the name.
 prev=$(boat snapshots --json 2>/dev/null | jq -r --arg n "$snapshot" \
