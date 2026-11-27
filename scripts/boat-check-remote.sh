@@ -143,9 +143,9 @@ fi
 export MCA_BOAT_CHECK=1
 model_flag='--model[= ]+([A-Za-z0-9._:/-]+)'
 model=""
-# A failed =~ clears BASH_REMATCH, so the model name is taken before the dry-run test.
+# Set up even when the command also has a dry run: a chained live run still needs the model.
 [[ $cmd =~ $model_flag ]] && model=${BASH_REMATCH[1]}
-if [ -n "$model" ] && [[ ! $cmd =~ --dry-run ]]; then
+if [ -n "$model" ]; then
     ollama_version=0.40.17
     case "$(uname -m)" in
         x86_64) ollama_arch=amd64 ollama_sha256=1df9d6228bac5a22e420b242708c0d10e5b886db97bab99d446a41760f4e79af ;;

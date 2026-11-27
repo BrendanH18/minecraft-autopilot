@@ -124,7 +124,7 @@ authenticated handoff and Ollama evidence runs stay on the Mac. The script
 refuses `dev:mod`, `runClient` and `--ollama`, and allows `--model` only on
 the acceptance runner, as a [real-model pre-check](LIVE-ACCEPTANCE.md#real-model-pre-checks-on-boat).
 
-For a live acceptance run with `--model NAME` (not a dry run), the remote
+For an acceptance run with `--model NAME` (a chained dry run too), the remote
 script installs a pinned Ollama (0.40.17, checked against its SHA-256, without
 the GPU libraries) into `~/ollama`, starts `ollama serve` on
 `127.0.0.1:11434`, the runner's default, and pulls the model. The install and
