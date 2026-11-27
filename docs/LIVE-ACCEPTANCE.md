@@ -331,11 +331,23 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   and after the rejoin; and that the old lease is still refused. If the client
   doesn't rejoin within 60 s, the scenario fails with `not observed: ...` and
   starts no new session.
+- **Storage pacing.** Unpaced, the agent's container screen opens when the
+  server's reply is handled at the start of a frame and closes in that frame's
+  tick, so no key press can reach it (holding the replies in the proxy doesn't
+  help: the screen and its contents arrive together). `menu-storage-close` and
+  `menu-storage-close-withdraw` therefore start their client with the mod's
+  opt-in `-Dminecraftagent.storageStepDelayTicks=20` (Gradle
+  `-PstorageStepDelayTicks=20`), which holds each deposit or withdrawal screen
+  open for 20 ticks (1 s) once its contents arrive, before its stack moves.
+  Control checks still run every tick of the hold. The property defaults to 0
+  (no hold), is clamped to 0 to 40 ticks, ignores malformed values and works
+  in the packaged jars, so a person can add it to the launcher's JVM arguments
+  for the keyboard session. Every other scenario runs unpaced.
 - **Retries.** Eating lasts 1.6 s, so an eat scenario repeats (up to three
-  times) when the food is eaten before the key lands. Escape reaches a storage
-  screen only while the agent has it open, which is about one tick per stack, so
-  `menu-storage-close` and `menu-storage-close-withdraw` repeat up to four times
-  when Escape opens the pause menu instead.
+  times) when the food is eaten before the key lands. Escape can still land in
+  the few ticks between two storage screens, so `menu-storage-close` and
+  `menu-storage-close-withdraw` repeat up to four times when Escape opens the
+  pause menu instead.
 - **Not in `--fast`.** Each scenario starts its own client, so `--takeover`
   takes about 18 minutes in Boat (34 scenarios). On Fabric, `--all` includes them.
 - **Needs Xvfb and xdotool.** The scenarios refuse to run without `$DISPLAY` or
@@ -345,16 +357,16 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   launcher with the packaged jars. `fabric-f8-takeover` and the RELEASE.md
   boxes still need the keyboard sessions; `acceptance review-bot` rejects these
   results like any Fabric result.
-- **Not scripted.** The proxy doesn't help `menu-storage-close`: the server sends the container screen
-  and its contents together, so holding or delaying them still opens and closes
-  the screen within one frame.
 - **Results (26 November 2026).** On the development client in Boat, 32 of the
-  34 scenarios pass (17 min 38 s in all) and `menu-storage-close` and `menu-storage-close-withdraw`
-  are expected failures (`XFAIL`): the agent's container screen opens and
-  closes within one frame, so no key press reaches it. Escape lands between
-  stacks instead, and that path is checked. An expected failure is reported
-  and counted apart from failures, and doesn't fail the run, but only when the
-  key-press and job-message checks are the only ones that failed. The first runs
+  34 scenarios pass (17 min 38 s in all). `menu-storage-close` and
+  `menu-storage-close-withdraw` were then expected failures, because the
+  unpaced storage screen closed within a frame. With the
+  storage pacing above (27 November) both pass on their first
+  attempt (33 s each): Escape closed the agent's chest screen, the job ended
+  "Storage screen was closed or replaced", and the chest didn't change
+  afterwards. `f8-deposit`, `f8-withdraw` and the unpaced `withdraw` and
+  `deposit-double-chest-omitted` passed in the same run (3 min 20 s for all
+  six), and the runner no longer has an expected-failure status. The first runs
   found two Fabric bugs, now fixed: a takeover key press (F8) or the pause
   menu between storage stacks was lost, so the transfer went on, and a new
   session at the death screen was refused as "paused" instead of asking the
@@ -432,7 +444,11 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && 
   `dev_babbaj_nether-pathfinder` 1.6 nested in Baritone, and the client log had
   no mixin or refmap warning. `f8-collect`, `menu-collect`, `stop-goto` and
   `takeover-while-stopping-deposit` also passed (2 min 6 s), so xdotool reaches
-  the production client too. No packaging bug turned up.
+  the production client too. No packaging bug turned up. On 27 November
+  `menu-storage-close` and `menu-storage-close-withdraw` passed on the
+  packaged jars as well (first attempt each), with the client log showing
+  the storage pacing property reached the production client, and the unpaced
+  `deposit-double-chest-omitted` passed beside them (2 min 12 s for all three).
 
 ## Fabric fixtures
 

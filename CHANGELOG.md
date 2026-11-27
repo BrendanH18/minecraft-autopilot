@@ -12,6 +12,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- An opt-in JVM argument, `-Dminecraftagent.storageStepDelayTicks=<0-40>` (default 0), holds the agent's chest or barrel screen open for that many ticks before each deposit or withdrawal stack moves, so a person can close it. Unpaced, the screen closes within a frame. The `menu-storage-close` and `menu-storage-close-withdraw` takeover scenarios set it to 20 and must now pass; the runner's expected-failure status is gone.
+
 - `npm run acceptance:fabric -- --packaged` runs the Fabric scenarios on the three jars from the release archive, with Fabric Loader in production mode, after checking the jars against the archive. It also checks the client log for the loaded mods and for mixin or refmap errors. The new `Fabric acceptance` workflow runs `--fast` on mod pull requests, plus `--takeover` and `--packaged` weekly. `disconnect-collect` now rejoins after the kick through the disconnect screen. All of these are pre-checks, not release evidence.
 
 - `npm run acceptance:fabric -- --takeover` scripts the Fabric checklist items that need no person: F8, the pause menu and inventory screen, closing the agent's storage or crafting screen, emergency stop, cancel, lease expiry, death, disconnect, dimension change and a full inventory. It presses real keys with xdotool on the headless client and checks each outcome with independent server reads. These are pre-checks for the keyboard session, not release evidence.

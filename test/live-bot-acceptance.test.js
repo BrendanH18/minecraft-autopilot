@@ -2158,31 +2158,35 @@ test('a Fabric wrapper that exits before its bridge is ready still has its proce
   assert.deepEqual(signals, ['SIGKILL']);
 });
 
-test('an expected failure counts only when the checks it names are all that failed', async () => {
-  const run = async (checks) => {
+test("a scenario's storage pacing reaches its Fabric client, and a failed check always fails the scenario", async () => {
+  const run = async (extra, pass) => {
     const base = byId('withdraw');
     const lane = laneOrigin(base.lane);
     const world = fakeWorld({ start: { x: lane.x + 0.5, y: -60, z: 0.5 } });
+    const deps = fakeDeps(world);
+    const starts = [];
+    deps.startFabricClient = async (options) => {
+      starts.push(options);
+      return { stop: async () => world.console.push(`${LOG_PREFIX}${BOT} left the game\n`) };
+    };
     const scenario = {
       ...base,
-      expectedFailure: 'Not observable here.',
-      expectedChecks: ['the key press reached the game'],
-      run: async (ctx) => {
-        for (const [name, pass] of checks) ctx.check(name, pass);
-      },
+      ...extra,
+      run: async (ctx) => ctx.check('the key press reached the game (the bridge shows the transition)', pass),
     };
-    return runScenario(scenario, env(world, fakeDeps(world)));
+    const record = await runScenario(scenario, {
+      ...env(world, deps, { backend: 'fabric', java: 'java' }),
+      where: { bridge: '/fake/bridge.json', home: '/fake/home', client: '/fake/client', clientLog: '/fake/client.out' },
+    });
+    return { record, start: starts[0] };
   };
-  const explained = await run([
-    ['the key press reached the game (the bridge shows the transition)', false],
-    ['mode becomes manual and stays manual', true],
-  ]);
-  assert.equal(explained.status, 'xfail', explained.reason);
-  const unexplained = await run([
-    ['the key press reached the game (the bridge shows the transition)', false],
-    ['mode becomes manual and stays manual', false],
-  ]);
-  assert.equal(unexplained.status, 'fail');
+  const paced = await run({ storageStepDelayTicks: 20 }, true);
+  assert.equal(paced.record.status, 'pass', paced.record.reason);
+  assert.equal(paced.start.storageStepDelayTicks, 20);
+  const plain = await run({}, false);
+  assert.equal(plain.start.storageStepDelayTicks, undefined);
+  assert.equal(plain.record.status, 'fail');
+  assert.equal(plain.record.expectedFailure, undefined);
 });
 
 test('--packaged needs the Fabric backend, defaults to the dist archive and refuses a misnamed --archive', () => {

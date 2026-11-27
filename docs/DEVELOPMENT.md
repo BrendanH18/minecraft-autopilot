@@ -157,10 +157,26 @@ Single-player automation needs the game running, unpaused, and the computer awak
 
 **Automated tests:**
 - Node tests cover bridge authentication, simulated actions, cancellation and lease races, MCP, the planner with mocked model replies, independent inventory/home criteria, Mineflayer driver races, partial collection recovery and failed returns, and a Minecraft protocol fixture. Run `npm test` for the current test count.
-- Java tests: leases, bridge ownership, runtime paths, isolated action/retreat deadlines and failed-eating backoff, storage transfer/slot selection, pending-opening cancellation/acknowledgements, and when a walk home or back to an inspection start has arrived. The controller enforces deadlines before food handling; these helper tests do not replace game integration checks.
+- Java tests: leases, bridge ownership, runtime paths, isolated action/retreat deadlines and failed-eating backoff, storage transfer/slot selection, the opt-in storage pacing hold (`-Dminecraftagent.storageStepDelayTicks`: parsing, clamping and per-opening ticks), pending-opening cancellation/acknowledgements, and when a walk home or back to an inspection start has arrived. The controller enforces deadlines before food handling; these helper tests do not replace game integration checks.
 - `npm run build:mod` compiles against the pinned Minecraft, Fabric, and Baritone APIs.
 
 **November reliability changes** have automated regression scenarios for bot mining-timeout recovery and takeover during recovery, combined gather-and-store verification without duplicate quotas, refreshed storage baselines/final contents, failure to inspect storage, and handoff during storage opening. The planner refreshes known storage before its baseline and final deposit check; ordinary observations remain cached and carry read timestamps. Full Fabric controller/game behavior and these new failure scenarios still require the current packaged candidate's live acceptance in [RELEASE.md](RELEASE.md).
+
+**Storage-screen close, scripted (27 November 2026).** The mod has an opt-in
+JVM argument, `-Dminecraftagent.storageStepDelayTicks=<n>` (default 0, clamped
+to 0 to 40, malformed values ignored). It holds each deposit or withdrawal
+screen open for `n` client ticks once its contents arrive, before the stack
+moves. The hold doesn't count toward the 5 s opening timeout, and F8, menu,
+stop and expiry checks still run every tick. Unpaced, the screen closed within
+a frame, so `menu-storage-close` and `menu-storage-close-withdraw` were
+expected failures. They now run with 20 ticks and must pass, and the runner's
+expected-failure status is gone. In Boat, on `3747764` plus this change, both
+passed on their first attempt on the development client, with `f8-deposit`,
+`f8-withdraw` and the unpaced `withdraw` and `deposit-double-chest-omitted`
+(6 of 6 in 3 min 20 s). Both also passed on the packaged jars in production
+mode (3 of 3 with `deposit-double-chest-omitted`, 2 min 12 s). These are
+pre-checks, not release evidence: checklist items 10 and 12 still need a
+person, with the same JVM argument in the launcher profile.
 
 **Release candidate pre-checks (26 November 2026).** In Boat, clean commit
 `3fca55b` built and verified (`sourceModified: false`, archive SHA-256

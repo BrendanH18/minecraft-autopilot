@@ -81,6 +81,7 @@ final class FabricStorage {
     private ScreenHandler owned;
 
     private final StorageOpening opening = new StorageOpening();
+    private final StoragePacing pacing = StoragePacing.fromSystemProperty();
     private boolean agentOpening;
     private ClientWorld openingWorld;
     private Item item;
@@ -105,6 +106,11 @@ final class FabricStorage {
     FabricStorage(MinecraftClient client) {
         this.client = client;
         StoragePackets.attach(this);
+        if (pacing.delayTicks() > 0)
+            AgentClient.LOGGER.info(
+                    "Storage pacing: each deposit or withdrawal screen stays open {} ticks before its stack moves ({}).",
+                    pacing.delayTicks(),
+                    StoragePacing.PROPERTY);
     }
 
     boolean active() {
@@ -351,13 +357,16 @@ final class FabricStorage {
                                     : "Could not reach the container.");
                 return null;
             }
-            if (now - phaseStarted > 5_000_000_000L)
-                throw new IllegalStateException(
-                        mode == Mode.CRAFT
-                                ? "The crafting table did not open."
-                                : "The container did not open with fresh server contents; its lid may be blocked.");
-            if (owned == null || !StoragePackets.ready(owned.syncId, openingGeneration, owned.slots.size()))
+            if (owned == null || !StoragePackets.ready(owned.syncId, openingGeneration, owned.slots.size())) {
+                // Only the wait for the server counts; an opt-in pacing hold starts once the contents are fresh.
+                if (now - phaseStarted > 5_000_000_000L)
+                    throw new IllegalStateException(
+                            mode == Mode.CRAFT
+                                    ? "The crafting table did not open."
+                                    : "The container did not open with fresh server contents; its lid may be blocked.");
                 return null;
+            }
+            if ((mode == Mode.DEPOSIT || mode == Mode.WITHDRAW) && !pacing.ready()) return null;
             if (mode == Mode.CRAFT) {
                 phase = Phase.CRAFTING;
                 crafting.use(owned, 3, now);
@@ -495,6 +504,7 @@ final class FabricStorage {
     private void open(BlockHitResult hit) {
         owned = null;
         openingGeneration = StoragePackets.generation();
+        pacing.restart();
         phase = Phase.OPENING;
         phaseStarted = System.nanoTime();
         interact(hit, "The container interaction was not sent to the server.");

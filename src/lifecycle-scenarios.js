@@ -75,6 +75,9 @@ const M = {
   craftingScreen: '(?:Storage|Crafting(?: table)?) screen was closed or replaced',
   inventoryFull: 'Inventory full; collected \\d+ of \\d+ \\w+\\.',
 };
+// The opt-in pacing that keeps the agent's storage screen open long enough for a person to close it.
+const STORAGE_PACING =
+  "With `-Dminecraftagent.storageStepDelayTicks=20` added to the launcher profile's JVM arguments (it holds each chest screen open 1 s before its stack moves; without it the screen closes within a frame), run ";
 const NEW_SESSION = { lease: 'new' };
 const released = (message, halts, extra = {}) => ({
   mode: 'manual',
@@ -228,7 +231,7 @@ const SCENARIOS = [
     ...FABRIC_ONLY(NO_INPUT),
     expect: released(M.storageScreen, ['deposit']),
     fabric: {
-      setup: 'Run `mc-agent deposit oak_log` with three stacks held and a chest nearby.',
+      setup: `${STORAGE_PACING}\`mc-agent deposit oak_log\` with three stacks held and a chest nearby.`,
       action: 'Press Escape while the agent has the chest screen open.',
       observe: 'Chest `Items` reads 5 s apart.',
     },
@@ -255,7 +258,7 @@ const SCENARIOS = [
     ...FABRIC_ONLY(NO_INPUT),
     expect: released(M.storageScreen, ['withdraw']),
     fabric: {
-      setup: 'Run `mc-agent withdraw oak_log` beside a chest holding three stacks of logs.',
+      setup: `${STORAGE_PACING}\`mc-agent withdraw oak_log\` beside a chest holding three stacks of logs.`,
       action: 'Press Escape while the agent has the chest screen open.',
       observe: 'Chest `Items` reads 5 s apart.',
     },
