@@ -381,9 +381,11 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   server's reply is handled at the start of a frame and closes in that frame's
   tick, so no key press can reach it (holding the replies in the proxy doesn't
   help: the screen and its contents arrive together). `menu-storage-close` and
-  `menu-storage-close-withdraw` therefore start their client with the mod's
-  opt-in `-Dminecraftagent.storageStepDelayTicks=20` (Gradle
-  `-PstorageStepDelayTicks=20`), which holds each deposit or withdrawal screen
+  `menu-storage-close-withdraw` therefore start their client with storage
+  pacing. `stop-deposit` and `stop-withdraw` also use pacing so the stop CLI
+  can start and interrupt a transfer after its first stack. The mod's opt-in
+  JVM property `-Dminecraftagent.storageStepDelayTicks=20` (Gradle
+  `-PstorageStepDelayTicks=20`) holds each deposit or withdrawal screen
   open for 20 ticks (1 s) once its contents arrive, before its stack moves.
   Control checks still run every tick of the hold. The property defaults to 0
   (no hold), is clamped to 0 to 40 ticks, ignores malformed values and works
@@ -440,6 +442,13 @@ npm run acceptance:fabric -- --dry-run --packaged --fast
 scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --accept-eula --packaged --fast'
 scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --accept-eula --packaged --scenario f8-collect'
 ```
+
+For a release candidate on GitHub, manually run the **Fabric acceptance**
+workflow on the candidate ref and select `packaged-takeover`. It builds the
+release ZIP and runs the full takeover suite against its jars. Download the
+`fabric-acceptance-packaged-takeover` artifact for `results.json` and the
+server and client logs, retained for seven days. This is a headless pre-check
+for the normal-launcher keyboard session.
 
 - **The archive.** By default the runner uses `dist/minecraft-agent-0.1.0.zip`
   and refuses if it's missing: run `npm run build:mod` first. `--archive PATH`

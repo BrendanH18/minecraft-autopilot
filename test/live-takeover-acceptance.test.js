@@ -336,11 +336,11 @@ test('a scripted F8 takeover passes on matching bridge and server evidence and f
   );
 });
 
-test('only the storage-close scenarios hold the storage screen open, and the client gets the property', () => {
+test('storage screen-close and emergency-stop scenarios hold the screen open via a client property', () => {
   const paced = takeoverScenarios.filter((scenario) => scenario.storageStepDelayTicks);
   assert.deepEqual(
     paced.map(({ id }) => id),
-    ['menu-storage-close', 'menu-storage-close-withdraw'],
+    ['menu-storage-close', 'menu-storage-close-withdraw', 'stop-deposit', 'stop-withdraw'],
   );
   for (const scenario of paced) {
     assert.equal(scenario.storageStepDelayTicks, STORAGE_STEP_DELAY_TICKS);
