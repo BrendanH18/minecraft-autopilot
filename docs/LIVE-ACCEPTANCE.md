@@ -381,9 +381,11 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   server's reply is handled at the start of a frame and closes in that frame's
   tick, so no key press can reach it (holding the replies in the proxy doesn't
   help: the screen and its contents arrive together). `menu-storage-close` and
-  `menu-storage-close-withdraw` therefore start their client with the mod's
-  opt-in `-Dminecraftagent.storageStepDelayTicks=20` (Gradle
-  `-PstorageStepDelayTicks=20`), which holds each deposit or withdrawal screen
+  `menu-storage-close-withdraw` therefore start their client with storage
+  pacing. `stop-deposit` and `stop-withdraw` also use pacing so the stop CLI
+  can start and interrupt a transfer after its first stack. The mod's opt-in
+  JVM property `-Dminecraftagent.storageStepDelayTicks=20` (Gradle
+  `-PstorageStepDelayTicks=20`) holds each deposit or withdrawal screen
   open for 20 ticks (1 s) once its contents arrive, before its stack moves.
   Control checks still run every tick of the hold. The property defaults to 0
   (no hold), is clamped to 0 to 40 ticks, ignores malformed values and works

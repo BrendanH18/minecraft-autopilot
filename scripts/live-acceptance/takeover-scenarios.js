@@ -230,9 +230,8 @@ const TRIGGERS = {
   fill: { text: (plan) => `server: ${plan.hooks.fillLastSlot}`, during: (plan) => [plan.hooks.fillLastSlot] },
 };
 
-// Client ticks the mod holds each deposit or withdrawal screen open before its stack moves (the opt-in
-// -Dminecraftagent.storageStepDelayTicks). Unpaced, the screen opens and closes within one frame, so no key press can
-// reach it; 20 ticks (1 s at the client's 10 frames per second) leaves Escape about ten frames per stack.
+// Hold each deposit or withdrawal screen open for 20 client ticks so Escape can reach it and the stop CLI
+// can interrupt a transfer after its first stack. The mod opts into this timing via a JVM property.
 export const STORAGE_STEP_DELAY_TICKS = 20;
 
 // One row per checklist item that runs without a person. `id` is the checklist id.
@@ -296,8 +295,22 @@ const TABLE = [
     trigger: 'stop',
     release: 'takeover',
   },
-  { id: 'stop-deposit', fixture: 'deposit', activity: 'deposit', trigger: 'stop', release: 'deposits' },
-  { id: 'stop-withdraw', fixture: 'withdraw', activity: 'withdraw', trigger: 'stop', release: 'withdrawCraft' },
+  {
+    id: 'stop-deposit',
+    fixture: 'deposit',
+    activity: 'deposit',
+    trigger: 'stop',
+    release: 'deposits',
+    storageStepDelayTicks: STORAGE_STEP_DELAY_TICKS,
+  },
+  {
+    id: 'stop-withdraw',
+    fixture: 'withdraw',
+    activity: 'withdraw',
+    trigger: 'stop',
+    release: 'withdrawCraft',
+    storageStepDelayTicks: STORAGE_STEP_DELAY_TICKS,
+  },
   { id: 'stop-craft', fixture: 'grid', activity: 'craft-grid', trigger: 'stop', release: 'withdrawCraft' },
   { id: 'cancel-craft', fixture: 'grid', activity: 'craft-grid', trigger: 'cancel', release: 'withdrawCraft' },
   { id: 'cancel-wait', fixture: 'ground', activity: 'wait', trigger: 'cancel', release: 'takeover' },
