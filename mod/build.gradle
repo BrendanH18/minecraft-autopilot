@@ -25,6 +25,34 @@ loom {
     }
 }
 
+// Packaged-jar pre-check (`npm run acceptance:fabric -- --packaged`): Fabric Loader in production mode
+// (the official client jar, deobfuscated to intermediary at launch), loading only the jars the runner
+// copied from the release archive into `<clientRunDir>/mods`, as a launcher's mods folder would. Nothing
+// from this build is added: `mods` is cleared, so the task neither builds nor passes `remapJar`.
+// Same properties as the development client. Loom's own xvfb-run wrapper (on by default when CI is set)
+// stays off: the runner already runs under Xvfb, and the takeover key presses need that display.
+tasks.register('runProductionClient', net.fabricmc.loom.task.prod.ClientProductionRunTask) {
+    group = 'fabric'
+    description = 'Starts the client in Fabric production mode with the mods in <clientRunDir>/mods.'
+    mods.setFrom()
+    useXVFB = false
+    if (project.hasProperty('quickPlay')) programArgs.addAll('--quickPlayMultiplayer', project.property('quickPlay').toString())
+    if (project.hasProperty('devUsername')) programArgs.addAll('--username', project.property('devUsername').toString())
+    if (project.hasProperty('clientRunDir')) runDir = file(project.property('clientRunDir').toString())
+}
+// Resolves what runProductionClient puts on its classpath (Fabric Loader and intermediary for this Minecraft
+// version, as detached configurations) so a later offline run has them: `node scripts/gradle.js
+// prepareProductionClient --allow-downloads`.
+tasks.register('prepareProductionClient') {
+    group = 'fabric'
+    description = 'Downloads the libraries runProductionClient needs.'
+    def production = tasks.named('runProductionClient')
+    doLast {
+        def files = production.get().classpath.files
+        logger.lifecycle("runProductionClient classpath: ${files.size()} files")
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"

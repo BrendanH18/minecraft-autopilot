@@ -2184,3 +2184,220 @@ test('an expected failure counts only when the checks it names are all that fail
   ]);
   assert.equal(unexplained.status, 'fail');
 });
+
+test('--packaged needs the Fabric backend, defaults to the dist archive and refuses a misnamed --archive', () => {
+  assert.throws(() => parseOptions(['--fast', '--packaged']), /--packaged runs only with --backend fabric/);
+  assert.throws(
+    () => parseOptions(['--fast', '--backend', 'fabric', '--archive', 'dist/minecraft-agent-0.1.0.zip']),
+    /--archive requires --packaged/,
+  );
+  assert.throws(
+    () => parseOptions(['--fast', '--backend', 'fabric', '--packaged', '--archive', '/tmp/candidate.zip']),
+    /--archive must point to minecraft-agent-0\.1\.0\.zip/,
+  );
+  const dev = parseOptions(['--fast', '--backend', 'fabric']);
+  assert.equal(dev.packaged, false);
+  assert.equal(dev.archive, null);
+  const packaged = parseOptions(['--fast', '--backend', 'fabric', '--packaged']);
+  assert.equal(packaged.packaged, true);
+  assert.equal(packaged.archive, resolve('dist/minecraft-agent-0.1.0.zip'));
+  assert.deepEqual(
+    packaged.scenarios.map(({ id }) => id),
+    dev.scenarios.map(({ id }) => id),
+    '--packaged runs the same --fast selection',
+  );
+  const takeover = parseOptions([
+    '--scenario',
+    'f8-collect',
+    '--backend',
+    'fabric',
+    '--packaged',
+    '--archive',
+    'candidate/minecraft-agent-0.1.0.zip',
+  ]);
+  assert.equal(takeover.archive, resolve('candidate/minecraft-agent-0.1.0.zip'));
+  assert.deepEqual(
+    takeover.scenarios.map(({ id }) => id),
+    ['f8-collect'],
+  );
+});
+
+test('the packaged dry run names the production client, the archive and the smoke check without needing either', async () => {
+  const options = parseOptions(['--scenario', 'withdraw', '--backend', 'fabric', '--packaged', '--port', '25570']);
+  const plan = buildPlan(options);
+  assert.match(plan.clientCommand, / \S+scripts\/gradle\.js runProductionClient -PquickPlay=127\.0\.0\.1:25570 /);
+  assert.doesNotMatch(plan.clientCommand, / runClient /);
+  assert.equal(plan.packaged.archive, resolve('dist/minecraft-agent-0.1.0.zip'));
+  assert.match(plan.packaged.modsDirectory, /run-XXXXXX\/client\/mods$/);
+  assert.deepEqual(plan.packaged.jars, [
+    'minecraft-agent-0.1.0.jar',
+    'baritone-api-fabric-1.11.3.jar',
+    'fabric-api-0.116.18+1.21.1.jar',
+  ]);
+  for (const text of plan.scenarios[0].release)
+    assert.match(text, /^pre-check only \(Fabric packaged jars, development launcher\): RELEASE\.md/);
+  const text = formatPlan(plan);
+  assert.match(text, /^Live Fabric acceptance \(packaged jars, development launcher\) plan/);
+  assert.match(text, /Packaged smoke check: .*remappedJars.*minecraft_agent, fabric-api, baritone/);
+  assert.match(text, /never evidence for a RELEASE\.md box/);
+  assert.doesNotMatch(formatPlan(buildPlan(parseOptions(['--fast', '--backend', 'fabric']))), /Packaged/);
+  // No archive, server jar or EULA is needed to list the plan.
+  const printed = [];
+  const code = await main(
+    ['--dry-run', '--backend', 'fabric', '--packaged', '--archive', '/nowhere/minecraft-agent-0.1.0.zip', '--fast'],
+    { print: (line) => printed.push(line), warn: () => {} },
+  );
+  assert.equal(code, 0);
+  assert.match(printed.join('\n'), /Packaged archive: \/nowhere\/minecraft-agent-0\.1\.0\.zip/);
+});
+
+test('preflight refuses a packaged run whose archive is missing and says to build it', () => {
+  const spawnSyncImpl = () => ({ stderr: 'openjdk version "21.0.4" 2024-07-16' });
+  const exists = (path) => !path.endsWith('.zip');
+  assert.throws(
+    () =>
+      preflight(
+        { acceptEula: true, jar: '/jar', archive: '/dist/minecraft-agent-0.1.0.zip' },
+        { exists, spawnSyncImpl },
+      ),
+    /packaged mod archive is missing: \/dist\/minecraft-agent-0\.1\.0\.zip\. Run npm run build:mod first/,
+  );
+  assert.equal(preflight({ acceptEula: true, jar: '/jar' }, { exists, spawnSyncImpl }).major, 21);
+  assert.deepEqual(fabricClientArguments({ port: 1, account: 'A', gameDir: '/g', packaged: true }).slice(1, 2), [
+    'runProductionClient',
+  ]);
+});
+
+function packagedDeps(world, { smoke } = {}) {
+  const deps = fakeDeps(world);
+  const calls = { preflight: [], prepare: [], starts: [], checks: [] };
+  deps.preflight = (options) => {
+    calls.preflight.push(options);
+    return { banner: 'openjdk version "21.0.4"', major: 21 };
+  };
+  deps.prepareFabricGameDirectory = async () => {};
+  deps.preparePackagedMods = async (options) => {
+    calls.prepare.push(options);
+    return {
+      archive: options.archive,
+      archiveSha256: 'c'.repeat(64),
+      build: { sourceCommit: 'abc123', sourceModified: false, version: '0.1.0', commitMatches: true, clean: true },
+      modsDirectory: options.modsDir,
+      jars: [{ name: 'minecraft-agent-0.1.0.jar', sha256: 'd'.repeat(64) }],
+      warnings: ['BUILD.json was built from 0123, not the current commit.'],
+    };
+  };
+  deps.startFabricClient = async (options) => {
+    calls.starts.push(options);
+    return {
+      stop: async () => {
+        deps.calls.botStops++;
+        world.console.push(`${LOG_PREFIX}${BOT} left the game\n`);
+      },
+    };
+  };
+  deps.checkPackagedClient = async (options) => {
+    calls.checks.push(options);
+    return (
+      smoke ?? {
+        pass: true,
+        production: true,
+        remappedJars: ['minecraft-1.21.1-0.20.1'],
+        loaderVersion: '0.20.1',
+        mods: { minecraft_agent: '0.1.0', 'fabric-api': '0.116.18+1.21.1', baritone: '1.11.3' },
+        problems: [],
+      }
+    );
+  };
+  return { deps, calls };
+}
+
+test('a packaged run verifies the archive jars first, launches the production client and labels every result', async () => {
+  const world = fakeWorld();
+  const { deps, calls } = packagedDeps(world);
+  const warnings = [];
+  deps.warn = (line) => warnings.push(line);
+  const options = parseOptions([
+    '--scenario',
+    'craft-rounds-up',
+    '--accept-eula',
+    '--backend',
+    'fabric',
+    '--packaged',
+    '--account',
+    BOT,
+  ]);
+  const results = await runAcceptance(options, deps);
+  assert.equal(calls.preflight[0].archive, resolve('dist/minecraft-agent-0.1.0.zip'));
+  assert.deepEqual(calls.prepare, [
+    { archive: resolve('dist/minecraft-agent-0.1.0.zip'), modsDir: '/fake/run/client/mods' },
+  ]);
+  assert.equal(calls.starts.length, 1);
+  assert.equal(calls.starts[0].packaged, true);
+  assert.equal(calls.starts[0].gameDir, '/fake/run/client');
+  assert.deepEqual(calls.checks, [{ gameDir: '/fake/run/client' }]);
+  assert.equal(results.schema, 'minecraft-agent/live-fabric-packaged-acceptance/1');
+  assert.equal(results.backend, 'fabric');
+  assert.match(results.scope, /release archive's three jars in Fabric Loader production mode/);
+  assert.match(results.scope, /not a normal launcher/);
+  assert.match(results.review.note, /packaged-jar pre-check/);
+  assert.match(results.review.note, /never evidence for a RELEASE\.md box/);
+  assert.equal(results.packaged.archiveSha256, 'c'.repeat(64));
+  assert.equal(results.packaged.modsDirectory, '/fake/run/client/mods');
+  assert.equal(results.packaged.smoke.loaderVersion, '0.20.1');
+  assert.ok(warnings.some((line) => /Packaged archive: BUILD\.json was built from 0123/.test(line)));
+  const [scenario] = results.scenarios;
+  assert.ok(
+    scenario.steps.some(
+      ({ name, status }) => /packaged jars via Gradle runProductionClient/.test(name) && status === 'ok',
+    ),
+  );
+  assert.ok(scenario.steps.some(({ name, status }) => /^packaged-smoke/.test(name) && status === 'ok'));
+  assert.ok(scenario.checks.some(({ name, pass }) => name === 'packaged-smoke' && pass));
+  assert.equal(scenario.observations.packagedSmoke.loaderVersion, '0.20.1');
+  for (const text of scenario.release) assert.match(text, /^pre-check only \(Fabric packaged jars/);
+  const summary = formatSummary(results, '/fake/results.json');
+  assert.match(summary, /^Live Fabric acceptance \(packaged jars, development launcher\): /);
+  assert.match(summary, /Packaged archive: \S+minecraft-agent-0\.1\.0\.zip \(sha256 c{64}\)/);
+  assert.match(
+    summary,
+    /Packaged smoke: Fabric Loader 0\.20\.1, minecraft_agent 0\.1\.0, fabric-api 0\.116\.18\+1\.21\.1/,
+  );
+});
+
+test('a packaged scenario that checks nothing fails even though the smoke check passed', async () => {
+  const { deps } = packagedDeps(fakeWorld());
+  const options = parseOptions(['--scenario', 'craft-rounds-up', '--accept-eula', '--backend', 'fabric', '--packaged']);
+  const scenarios = options.scenarios.map((scenario) => ({ ...scenario, run: async () => {} }));
+  const results = await runAcceptance({ ...options, scenarios, account: BOT }, deps);
+  assert.ok(results.scenarios[0].checks.some(({ name, pass }) => name === 'packaged-smoke' && pass));
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.equal(results.scenarios[0].reason, 'No checks ran.');
+});
+
+test('a failed packaged smoke check fails the scenario, and a bad archive stops the run before the server starts', async () => {
+  const world = fakeWorld();
+  const { deps } = packagedDeps(world, {
+    smoke: { pass: false, problems: ['latest.log does not list the mods baritone'], mods: {} },
+  });
+  const options = parseOptions(['--scenario', 'craft-rounds-up', '--accept-eula', '--backend', 'fabric', '--packaged']);
+  const results = await runAcceptance({ ...options, account: BOT }, deps);
+  assert.equal(results.scenarios[0].status, 'fail');
+  assert.match(results.scenarios[0].reason, /Packaged smoke check failed: latest\.log does not list the mods baritone/);
+  assert.equal(deps.calls.botStops, 1, 'the client is still stopped');
+
+  const broken = packagedDeps(fakeWorld());
+  let serverStarted = false;
+  broken.deps.startServer = () => {
+    serverStarted = true;
+    throw new Error('the server must not start');
+  };
+  broken.deps.preparePackagedMods = async () => {
+    throw new Error('The packaged archive did not verify: ARCHIVE_SHA256SUMS has no checksum.');
+  };
+  const refused = await runAcceptance({ ...options, account: BOT }, broken.deps);
+  assert.equal(serverStarted, false);
+  assert.match(refused.error, /did not verify/);
+  assert.equal(refused.scenarios[0].status, 'skipped');
+  assert.equal(refused.packaged.archiveSha256, null);
+});

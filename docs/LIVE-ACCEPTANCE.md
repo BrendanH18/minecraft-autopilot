@@ -2,7 +2,7 @@
 
 `scripts/live-bot-acceptance.js` automates [roadmap](ROADMAP.md) step 4, "Recheck bot recovery and verification live", against a local vanilla 1.21.1 server. It starts the server, builds each fixture with console commands, drives the Mineflayer bot through the repository CLI and bridge client, checks every outcome with independent server `data get` reads, and writes a JSON results file.
 
-**Scope.** This covers the standalone **server bot** only. It does not cover the Fabric mod, a normal launcher, F8, or authenticated client → bot → client handoff; those [release](RELEASE.md) boxes stay open regardless of these results. The same scenarios can also run against the Fabric development client as a pre-check; see [Fabric development client mode](#fabric-development-client-mode).
+**Scope.** This covers the standalone **server bot** only. It does not cover the Fabric mod, a normal launcher, F8, or authenticated client → bot → client handoff; those [release](RELEASE.md) boxes stay open regardless of these results. The same scenarios can also run against the Fabric development client, or against the packaged jars in Fabric's production mode, as pre-checks; see [Fabric development client mode](#fabric-development-client-mode) and [Packaged jars](#packaged-jars).
 
 **Results are not acceptance evidence by themselves.** A run produces machine-checked observations. They count toward a RELEASE.md box only after a person reviews the results file and `server.out`, confirms the fixtures behaved as intended, and records the commit, configuration, and outcome in [DEVELOPMENT.md](DEVELOPMENT.md#validation).
 
@@ -37,7 +37,8 @@ Use `--dry-run --json` to read the selected fixtures, actions, and checks as str
 
 Other options include `--port N`, `--out FILE` (default `results.json` in the run
 directory), `--account NAME` (offline username, default `LiveBot`), `--java PATH`,
-`--model NAME` and `--ollama URL` for model scenarios, and `--keep-server`. Use
+`--model NAME` and `--ollama URL` for model scenarios, `--keep-server`, and for
+the Fabric backend `--packaged [--archive ZIP]` ([Packaged jars](#packaged-jars)). Use
 distinct ports and, if supplying `--out`, distinct output files for concurrent
 runs.
 
@@ -162,6 +163,8 @@ scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, r
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
 timings: { serverStartMs, worldSetupMs, scenariosMs, serverStopMs, totalMs }
 summary: { pass, fail, skipped, error }, error
+backend, client: { log, logSha256, gameDirectory }   # Fabric runs only
+packaged: { archive, archiveSha256, build, modsDirectory, jars[], warnings[], smoke }   # --packaged only
 ```
 
 `steps` record every console command, bridge/CLI action, and read with timing and outcome. Each cleanup step the scenario runner runs also has a `durationMs`, and `timings` gives the wall time of each run phase (`null` for a phase the run never reached; a phase that failed records how long it ran), so a slow run shows where its time went. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
@@ -262,8 +265,8 @@ opened containers, saved home or last job.
   passed on the development client: two failed automatic eating attempts
   10.0 s apart, four failed attempts during a retreat that gave up 60.0 s after
   it started, and an inventory-full failure after exactly six logs.
-- **Not covered.** The packaged mods folder, the normal launcher and handoff
-  can't be scripted here. F8, menus, stop, expiry, death and dimension changes
+- **Not covered.** The normal launcher and handoff can't be scripted here; the
+  packaged jars run as a pre-check with [`--packaged`](#packaged-jars). F8, menus, stop, expiry, death and dimension changes
   are covered as pre-checks by the [takeover scenarios](#takeover-scenarios).
 
 ### Takeover scenarios
@@ -284,7 +287,12 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
 - **How the transitions happen.** Keys are real X key presses: `xdotool`
   focuses the client window on the Xvfb display and presses F8, Escape or E
   (Tab and Enter press Respawn on the death screen). A key counts only when the
-  bridge then shows the transition. "Waiting for model inference" is the
+  bridge then shows the transition. After the kick, `disconnect-collect`
+  rejoins through the client's own screens: Tab and Enter press "Back to
+  server list" on the disconnect screen, a click presses Direct Connection
+  (quick play adds its server hidden, so the list has no entry to join; the
+  point comes from the window size and Minecraft's automatic GUI scale), and
+  the address is typed over the field's text before Enter. "Waiting for model inference" is the
   in-process agent with a scripted planner whose first request is held open.
   For `expiry-idle` the real `mc-agent agent` runs as a second process against a
   loopback stand-in for Ollama, and is suspended with SIGSTOP. `mc-agent stop`
@@ -315,7 +323,14 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   (position, inventory, `foodLevel`, `Dimension`, both halves of the chest);
   that the old lease can neither heartbeat nor act; and that a new session is
   refused while the player is dead or disconnected, runs only when explicitly
-  started (`wait 1`), or, after a cancel, that the same lease goes on.
+  started (`wait 1`), or, after a cancel, that the same lease goes on. After
+  the rejoin, `disconnect-collect` also checks that the bridge shows the player
+  again; that mode, job and independent reads (position, inventory and the
+  target logs) at the rejoin, 1 s later and 5 s after that show nothing
+  resumed; that `mc-agent job` shows manual control at the disconnect screen
+  and after the rejoin; and that the old lease is still refused. If the client
+  doesn't rejoin within 60 s, the scenario fails with `not observed: ...` and
+  starts no new session.
 - **Retries.** Eating lasts 1.6 s, so an eat scenario repeats (up to three
   times) when the food is eaten before the key lands. Escape reaches a storage
   screen only while the agent has it open, which is about one tick per stack, so
@@ -330,8 +345,7 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   launcher with the packaged jars. `fabric-f8-takeover` and the RELEASE.md
   boxes still need the keyboard sessions; `acceptance review-bot` rejects these
   results like any Fabric result.
-- **Not scripted.** `disconnect-collect` doesn't rejoin after the kick. The
-  proxy doesn't help `menu-storage-close`: the server sends the container screen
+- **Not scripted.** The proxy doesn't help `menu-storage-close`: the server sends the container screen
   and its contents together, so holding or delaying them still opens and closes
   the screen within one frame.
 - **Results (26 November 2026).** On the development client in Boat, 32 of the
@@ -348,7 +362,77 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   26 November, pass at about 28 s each: the replies were held for 3.3 to 3.7 s,
   `stopping` was `true` throughout, `mc-agent goto` started no job until the
   release and then completed, and the chest or inventory didn't change after
-  the stop. They found no bugs.
+  the stop. They found no bugs. The rejoin in `disconnect-collect`, scripted on
+  26 November, passed four runs out of four in Boat (the last with the final cancelled-job check; 55 to 62 s each, all 18
+  checks): the client was back in the world about 5 s after the first key
+  press, through a second proxy connection, and the collect job stayed
+  `cancelled`, with the same position, one held log and 17 target logs at the
+  rejoin, 1 s later and 5 s later. It found no bugs.
+
+### Packaged jars
+
+`--packaged` (Fabric only) runs the same scenarios on the release archive's
+three jars instead of the development client. The development client runs
+Loom's named classes, so it can't catch what only the release jars can break:
+intermediary remapping, the mixin refmap, nested jars (nether-pathfinder inside
+Baritone) and the bundled dependency set.
+
+```sh
+npm run acceptance:fabric -- --dry-run --packaged --fast
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --accept-eula --packaged --fast'
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && npm run acceptance:fabric -- --accept-eula --packaged --scenario f8-collect'
+```
+
+- **The archive.** By default the runner uses `dist/minecraft-agent-0.1.0.zip`
+  and refuses if it's missing: run `npm run build:mod` first. `--archive PATH`
+  names another copy; it must keep that name and have its
+  `ARCHIVE_SHA256SUMS` and `BUILD.json` beside it, as `npm run build:mod`
+  and the CI bundle leave them. Before the server starts, the runner copies the
+  three jars out of the archive into the run's `client/mods` (nothing else goes
+  there, as in a launcher profile) and checks the archive and the copies with
+  the same provenance code as `acceptance start --mods-dir`: the archive
+  checksum, `BUILD.json` inside and beside the ZIP, the bundle's own
+  `SHA256SUMS` and the pinned dependency hashes, and each copied jar against
+  its archive entry. A failure stops the run. A different commit or an
+  unclean build is only a warning, printed and recorded, because a pre-check
+  may run any candidate.
+- **The launch.** Each scenario starts a fresh client with
+  `node scripts/gradle.js runProductionClient` and the same `-PquickPlay`,
+  `-PdevUsername` and `-PclientRunDir` properties as the development client.
+  That task is Loom's production run task (`mod/build.gradle`): Fabric Loader
+  in production mode on the official client jar, deobfuscated to intermediary
+  at launch, with only the jars in the game directory's `mods` folder; nothing
+  from the current build is added.
+- **Packaged smoke check.** Once each client's bridge is ready, the scenario
+  checks (`packaged-smoke`) that Fabric Loader deobfuscated the game jar into
+  `client/.fabric/remappedJars` (production mode; a development client writes
+  none), that `client/logs/latest.log` lists the mods `minecraft_agent`,
+  `fabric-api` and `baritone`, with nether-pathfinder loaded from inside the
+  Baritone jar (`dev_babbaj_nether-pathfinder`), and that it has no mixin, refmap or linkage
+  error (`NoSuchMethodError` and the like). If any of that fails, the scenario
+  fails before its fixture is prepared.
+- **Needs one more library.** The production classpath also needs the
+  intermediary mappings jar, which the development setup doesn't cache. Run
+  `node scripts/gradle.js prepareProductionClient --allow-downloads` once (on
+  the Mac, ask first). The Boat check and the Fabric acceptance workflow run it
+  for `--packaged`. Without it the offline Gradle run fails and no download is
+  made.
+- **Not release evidence.** The results use the schema
+  `minecraft-agent/live-fabric-packaged-acceptance/1`, record the archive path
+  and SHA-256, its `BUILD.json` summary, each jar's SHA-256 and the first
+  session's smoke report under `packaged`, and each `release` entry starts with
+  `pre-check only (Fabric packaged jars, development launcher)`. It is still
+  Loom's launcher on Xvfb with an offline account, not a normal launcher, so
+  `acceptance review-bot` rejects these files like any Fabric result, and the
+  `fabric-packaged-install` gate and the RELEASE.md boxes still need the
+  keyboard sessions.
+- **Results (26 November 2026).** In Boat, all 27 `--fast` scenarios passed
+  on the packaged jars in 10 min 34 s, about as long as the development
+  client. Fabric Loader 0.20.1 ran in production mode and loaded 57 mods, with
+  `dev_babbaj_nether-pathfinder` 1.6 nested in Baritone, and the client log had
+  no mixin or refmap warning. `f8-collect`, `menu-collect`, `stop-goto` and
+  `takeover-while-stopping-deposit` also passed (2 min 6 s), so xdotool reaches
+  the production client too. No packaging bug turned up.
 
 ## Fabric fixtures
 

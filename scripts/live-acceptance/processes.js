@@ -48,8 +48,11 @@ export function javaVersion(java = 'java', { spawnSyncImpl = spawnSync } = {}) {
   return { banner: text.trim().split('\n')[0], major };
 }
 
-/** Refuses before touching anything when the EULA flag, jar, or Java 21 is missing. */
-export function preflight({ acceptEula, jar, java = 'java' }, { exists = existsSync, spawnSyncImpl = spawnSync } = {}) {
+/** Refuses before touching anything when the EULA flag, jar, packaged archive (with --packaged), or Java 21 is missing. */
+export function preflight(
+  { acceptEula, jar, java = 'java', archive = null },
+  { exists = existsSync, spawnSyncImpl = spawnSync } = {},
+) {
   if (!acceptEula)
     throw new Error(
       `Running the vanilla server writes eula=true. Read https://aka.ms/MinecraftEULA and pass --accept-eula to accept it for this local test server. ${HELP}`,
@@ -57,6 +60,10 @@ export function preflight({ acceptEula, jar, java = 'java' }, { exists = existsS
   if (!exists(jar))
     throw new Error(
       `The cached Minecraft ${MINECRAFT_VERSION} server jar is missing: ${jar}. Build the mod once so Loom caches it, or pass --server-jar. ${HELP}`,
+    );
+  if (archive && !exists(archive))
+    throw new Error(
+      `The packaged mod archive is missing: ${archive}. Run npm run build:mod first, or pass --archive. ${HELP}`,
     );
   const version = javaVersion(java, { spawnSyncImpl });
   if (version.major < 21)
@@ -324,12 +331,13 @@ export const FABRIC_CLIENT_OPTIONS = [
 
 /**
  * `node scripts/gradle.js runClient` arguments that join the runner's server as `account` from `gameDir`. Loom
- * resolves the run directory against the mod project, so it is passed relative to `mod/`.
+ * resolves the run directory against the mod project, so it is passed relative to `mod/`. With `packaged`, the
+ * client is `runProductionClient` instead: Fabric Loader in production mode with only the jars in `gameDir/mods`.
  */
-export function fabricClientArguments({ port, account, gameDir }) {
+export function fabricClientArguments({ port, account, gameDir, packaged = false }) {
   return [
     GRADLE,
-    'runClient',
+    packaged ? 'runProductionClient' : 'runClient',
     `-PquickPlay=127.0.0.1:${port}`,
     `-PdevUsername=${account}`,
     `-PclientRunDir=${relative(join(projectRoot, 'mod'), gameDir)}`,
@@ -343,7 +351,8 @@ export async function prepareFabricGameDirectory({ directory }) {
 }
 
 /**
- * Starts the Fabric development client through Gradle (offline; the cached assets are checked first) and waits
+ * Starts the Fabric development client (or, with `packaged`, the production client with the packaged jars) through
+ * Gradle (offline; the cached assets are checked first) and waits
  * until the mod's bridge, written to `home`/bridge.json, reports a connected player. Each call is a fresh client,
  * so session memory such as opened containers never leaks between scenarios. Output is appended to `log`.
  */
@@ -359,6 +368,7 @@ export async function startFabricClient({
   timeoutMs = 600_000,
   signal,
   java = 'java',
+  packaged = false,
 }) {
   for (const stale of [bridge, `${bridge}.lock`, join(home, 'homes.json')]) await rm(stale, { force: true });
   // Gradle runs on JAVA_HOME or PATH, so a --java JDK has to reach it that way.
@@ -368,7 +378,7 @@ export async function startFabricClient({
       : { JAVA_HOME: dirname(dirname(java)), PATH: `${dirname(java)}${delimiter}${process.env.PATH ?? ''}` };
   if (log) await mkdir(dirname(log), { recursive: true, mode: 0o700 });
   const child = track(
-    spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir }), {
+    spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir, packaged }), {
       cwd: projectRoot,
       // OpenAL's null driver: the client needs no sound device, and headless hosts have none.
       env: { ALSOFT_DRIVERS: 'null', ...process.env, ...jdk, MC_AGENT_HOME: home },

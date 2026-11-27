@@ -7,6 +7,11 @@
  * `--backend fabric` runs the same scenarios against the Fabric development client instead (a fresh `runClient`
  * per scenario, joined with quick play). That is a pre-check for the keyboard sessions; it uses the development
  * client, not the packaged jars, so its results are never evidence for a RELEASE.md box.
+ *
+ * `--backend fabric --packaged` runs them with the release archive's three jars instead: Fabric Loader in production
+ * mode (Loom's `runProductionClient`) with only those jars in the client's mods folder. That catches remapping,
+ * refmap, nested-jar and dependency-set problems the development client cannot, but it is still Loom's launcher on
+ * Xvfb, not a normal launcher, so these results are pre-checks too.
  */
 import { parseArgs } from 'node:util';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -19,8 +24,17 @@ import { runAgent } from '../src/agent.js';
 import { bridgeItemTotals, distance, itemTotals, sameTotals, toPosition } from './live-acceptance/nbt-parse.js';
 import { scenarios as sharedScenarios, scenarioPlan } from './live-acceptance/scenarios.js';
 import { takeoverIds, takeoverScenarios } from './live-acceptance/takeover-scenarios.js';
-import { pressKey, startCli, startFakeModel } from './live-acceptance/takeover-tools.js';
+import { clickTarget, pressKey, startCli, startFakeModel, typeText } from './live-acceptance/takeover-tools.js';
 import { startProxy } from './live-acceptance/proxy.js';
+import {
+  DEFAULT_ARCHIVE,
+  PACKAGED_JARS,
+  PACKAGED_MOD_IDS,
+  PACKAGED_NESTED_IDS,
+  archiveNameProblem,
+  checkPackagedClient,
+  preparePackagedMods,
+} from './live-acceptance/packaged.js';
 import {
   DEFAULT_JAR,
   RUNTIME,
@@ -77,14 +91,34 @@ export const BACKENDS = {
     startStep: 'start a fresh Fabric development client via Gradle runClient',
     stopStep: 'stop Fabric client',
     reviewNote: FABRIC_REVIEW_NOTE,
+    releasePrefix: 'pre-check only (Fabric development client)',
   },
 };
+const PACKAGED_REVIEW_NOTE =
+  "Fabric packaged-jar pre-check: the release archive's jars in Fabric Loader production mode, started by Loom's runProductionClient (the development toolchain's launcher) on Xvfb. These results find packaging bugs before the keyboard sessions; they are never evidence for a RELEASE.md box, which needs the packaged jars in a normal launcher.";
+/** `--backend fabric --packaged`: the same Fabric scenarios on the release archive's jars, labelled as such. */
+export const PACKAGED_FABRIC = {
+  ...BACKENDS.fabric,
+  title: 'Live Fabric acceptance (packaged jars, development launcher)',
+  schema: 'minecraft-agent/live-fabric-packaged-acceptance/1',
+  scope:
+    "The release archive's three jars in Fabric Loader production mode, started by Loom's runProductionClient with quick play; not a normal launcher, the bot, or authenticated handoff.",
+  startStep: 'start a fresh Fabric client with the packaged jars via Gradle runProductionClient',
+  reviewNote: PACKAGED_REVIEW_NOTE,
+  releasePrefix: 'pre-check only (Fabric packaged jars, development launcher)',
+};
 const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast | --takeover) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
-  [--backend bot|fabric] [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>] [--model NAME [--ollama URL] [--no-thinking]]
+  [--backend bot|fabric [--packaged [--archive <zip>]]] [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>]
+  [--model NAME [--ollama URL] [--no-thinking]]
 --fast runs offline scenarios without the long-running ones (pit recovery, eat-timeout, eat-retreat-timeout)
   or the takeover scenarios.
 --backend fabric starts a fresh Fabric development client per scenario instead of the bot (npm run acceptance:fabric);
   it needs a display (xvfb-run on a headless host) and the cached Minecraft assets, and is a pre-check, not release evidence.
+--packaged (Fabric only) runs the client in Fabric Loader production mode with only the release archive's three jars
+  in its mods folder, verified against the archive (default dist/${basename(DEFAULT_ARCHIVE)}; run npm run build:mod first,
+  or pass --archive with ARCHIVE_SHA256SUMS and BUILD.json beside it). Each session checks latest.log for production
+  mode, the mods ${PACKAGED_MOD_IDS.join(', ')} (and nested ${PACKAGED_NESTED_IDS.join(', ')}) and no mixin or linkage
+  errors. Still a pre-check, not release evidence. Needs node scripts/gradle.js prepareProductionClient --allow-downloads once.
 --takeover (Fabric only) runs the scripted Fabric checklist items: F8, menus, stop, cancel, expiry, death, dimension
   change and full inventory. They press keys with xdotool on the X display, so run them under Xvfb (Boat).
 Scenarios: ${sharedScenarios.map(({ id }) => id).join(', ')}
@@ -100,6 +134,8 @@ export function parseOptions(argv) {
       fast: { type: 'boolean' },
       takeover: { type: 'boolean' },
       backend: { type: 'string' },
+      packaged: { type: 'boolean' },
+      archive: { type: 'string' },
       'server-jar': { type: 'string' },
       'dry-run': { type: 'boolean' },
       json: { type: 'boolean' },
@@ -131,6 +167,12 @@ export function parseOptions(argv) {
     throw new Error('Choose only one of --scenario, --all, --fast, and --takeover.');
   if (values.takeover && backend !== 'fabric')
     throw new Error('--takeover runs only with --backend fabric (npm run acceptance:fabric).');
+  if (values.packaged && backend !== 'fabric')
+    throw new Error('--packaged runs only with --backend fabric (npm run acceptance:fabric).');
+  if (values.archive !== undefined && !values.packaged) throw new Error('--archive requires --packaged.');
+  const archive = values.packaged ? resolve(values.archive ?? DEFAULT_ARCHIVE) : null;
+  const archiveProblem = archive && archiveNameProblem(archive);
+  if (archiveProblem) throw new Error(archiveProblem);
   for (const id of values.scenario ?? []) {
     if (!scenarioIds.includes(id))
       throw new Error(`Unknown scenario ${JSON.stringify(id)}. Choose from: ${scenarioIds.join(', ')}.`);
@@ -152,6 +194,8 @@ export function parseOptions(argv) {
     keepServer: !!values['keep-server'],
     acceptEula: !!values['accept-eula'],
     backend,
+    packaged: !!values.packaged,
+    archive,
     port,
     account,
     jar: resolve(values['server-jar'] ?? DEFAULT_JAR),
@@ -172,9 +216,12 @@ const paths = (options, directory) => ({
   home: join(directory, 'agent-home'),
   client: join(directory, 'client'),
   clientLog: join(directory, 'client', 'client.out'),
+  // With --packaged, the archive's jars go in the client's own mods folder, where a launcher puts them.
+  mods: join(directory, 'client', 'mods'),
   out: options.out ?? join(directory, 'results.json'),
 });
-const backendOf = (options) => BACKENDS[options.backend ?? 'bot'];
+const isPackaged = (options) => options.backend === 'fabric' && !!options.packaged;
+const backendOf = (options) => (isPackaged(options) ? PACKAGED_FABRIC : BACKENDS[options.backend ?? 'bot']);
 
 /** Everything the run would do, without starting anything. */
 export function buildPlan(options) {
@@ -190,11 +237,20 @@ export function buildPlan(options) {
     serverCommand: `${options.java} -Xmx2G -jar server.jar nogui   (cwd ${where.server}; console on stdin, readiness on "Done (")`,
     worldSetup: WORLD_SETUP,
     backend: options.backend ?? 'bot',
+    ...(isPackaged(options) && {
+      packaged: {
+        archive: options.archive,
+        modsDirectory: where.mods,
+        jars: PACKAGED_JARS,
+        verify: `Copy the three jars out of the archive into the mods folder (nothing else goes there) and check the archive and the copies against ARCHIVE_SHA256SUMS, BUILD.json and the bundle's SHA256SUMS before the server starts.`,
+        smoke: `After each client joins: ${join(where.client, '.fabric', 'remappedJars')} exists (Fabric Loader production mode), latest.log lists ${PACKAGED_MOD_IDS.join(', ')} and the nested ${PACKAGED_NESTED_IDS.join(', ')}, and has no mixin, refmap or linkage error.`,
+      },
+    }),
     ...(options.backend === 'fabric'
       ? {
-          clientCommand: `${basename(options.java) === options.java ? '' : `JAVA_HOME=${dirname(dirname(options.java))} `}MC_AGENT_HOME=${where.home} ${process.execPath} ${fabricClientArguments({ port: options.port, account: options.account, gameDir: where.client }).join(' ')}`,
+          clientCommand: `${basename(options.java) === options.java ? '' : `JAVA_HOME=${dirname(dirname(options.java))} `}MC_AGENT_HOME=${where.home} ${process.execPath} ${fabricClientArguments({ port: options.port, account: options.account, gameDir: where.client, packaged: isPackaged(options) }).join(' ')}`,
           clientLog: where.clientLog,
-          reviewNote: FABRIC_REVIEW_NOTE,
+          reviewNote: backendOf(options).reviewNote,
           ...(options.scenarios.some((scenario) => scenario.proxy) && {
             proxy: `Scenarios marked [proxy] join through a pausable loopback TCP proxy (an ephemeral port forwarding to 127.0.0.1:${options.port}), so a scenario can hold the server's replies.`,
           }),
@@ -214,16 +270,17 @@ export function buildPlan(options) {
   };
 }
 
-/** Fabric development-client runs only pre-check a release box; the text says so wherever it appears. */
+/** Fabric runs (development client or packaged jars) only pre-check a release box; the text says so wherever it appears. */
 function releaseFor(options, scenario) {
   if (options.backend !== 'fabric') return scenario.release;
-  return scenario.release.map((text) => `pre-check only (Fabric development client): ${text}`);
+  return scenario.release.map((text) => `${backendOf(options).releasePrefix}: ${text}`);
 }
 
 export function formatPlan(plan) {
   const fabric = plan.backend === 'fabric';
+  const backend = plan.packaged ? PACKAGED_FABRIC : BACKENDS[fabric ? 'fabric' : 'bot'];
   const lines = [
-    `${fabric ? BACKENDS.fabric.title : BACKENDS.bot.title} plan (dry run; nothing is started)`,
+    `${backend.title} plan (dry run; nothing is started)`,
     `Server: ${plan.serverCommand}`,
     `Jar: ${plan.serverJar}`,
     `Server log: ${plan.serverLog}`,
@@ -231,6 +288,14 @@ export function formatPlan(plan) {
     `server.properties: ${plan.serverProperties.join(', ')}`,
     'World setup:',
     ...plan.worldSetup.map((command) => `  > ${command}`),
+    ...(plan.packaged
+      ? [
+          `Packaged archive: ${plan.packaged.archive}`,
+          `Mods folder: ${plan.packaged.modsDirectory} (${plan.packaged.jars.join(', ')})`,
+          `  ${plan.packaged.verify}`,
+          `Packaged smoke check: ${plan.packaged.smoke}`,
+        ]
+      : []),
     ...(fabric
       ? [
           `Fabric client (fresh per scenario): ${plan.clientCommand}`,
@@ -354,7 +419,11 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
       run: (args) => deps.runCli(args, { bridge }),
       start: (args) => deps.startCli(args, { bridge }),
     },
-    keys: { press: (key) => deps.pressKey(key) },
+    keys: {
+      press: (key) => deps.pressKey(key),
+      click: (target) => deps.clickTarget(target),
+      type: (text) => deps.typeText(text),
+    },
     // The pausable forwarder between the client and the server, for scenarios that join through it; else null.
     proxy,
     fakeModel: (decisions) => deps.startFakeModel(decisions),
@@ -470,22 +539,49 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
       home: where.home,
       signal,
     };
+    const packaged = isPackaged(options);
     bot = await ctx.step(backend.startStep, () =>
       options.backend === 'fabric'
-        ? deps.startFabricClient({ ...session, gameDir: where.client, log: where.clientLog, java: options.java })
+        ? deps.startFabricClient({
+            ...session,
+            gameDir: where.client,
+            log: where.clientLog,
+            java: options.java,
+            ...(packaged && { packaged: true }),
+          })
         : deps.startBot(session),
     );
+    if (packaged) {
+      // Every session proves it ran the packaged jars in production mode; a scenario on anything else means nothing.
+      const smoke = await ctx.step(
+        'packaged-smoke: production mode, the archive mods, no mixin or linkage errors',
+        async () => {
+          const report = await deps.checkPackagedClient({ gameDir: where.client });
+          ctx.note('packagedSmoke', report);
+          if (!report.pass) throw new Error(`Packaged smoke check failed: ${report.problems.join('; ')}`);
+          return report;
+        },
+      );
+      ctx.check('packaged-smoke', smoke.pass, {
+        loaderVersion: smoke.loaderVersion,
+        mods: smoke.mods,
+        remappedJars: smoke.remappedJars,
+      });
+    }
     for (const command of plan.prepare) await ctx.step(`prepare: ${command}`, () => ctx.server.command(command));
     await ctx.step('wait for bridge and server to agree on start position and inventory', () =>
       // Software-rendered Fabric clients load teleported chunks more slowly than the bot.
       settle(ctx, plan, options.backend === 'fabric' ? 60_000 : 15_000),
     );
+    // The packaged smoke check doesn't count: the scenario itself must check something.
+    const before = record.checks.length;
     await scenario.run(ctx, plan);
     const failed = record.checks.filter((check) => !check.pass);
-    record.status = failed.length || !record.checks.length ? 'fail' : 'pass';
+    const ran = record.checks.length > before;
+    record.status = failed.length || !ran ? 'fail' : 'pass';
     record.reason = failed.length
       ? `Failed checks: ${failed.map((check) => check.name).join('; ')}`
-      : record.checks.length
+      : ran
         ? null
         : 'No checks ran.';
   } catch (error) {
@@ -580,7 +676,7 @@ export function summarize(results) {
 }
 
 export function formatSummary(results, out) {
-  const backend = BACKENDS[results.backend ?? 'bot'];
+  const backend = results.packaged ? PACKAGED_FABRIC : BACKENDS[results.backend ?? 'bot'];
   const lines = [
     `${backend.title}: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.expectedFail ? `${results.summary.expectedFail} expected failures, ` : ''}${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
   ];
@@ -590,6 +686,15 @@ export function formatSummary(results, out) {
     );
   lines.push(`Results: ${out}`, `Server log: ${results.minecraft.serverLog}`);
   if (results.client) lines.push(`Client log: ${results.client.log}`);
+  if (results.packaged) {
+    const { archive, archiveSha256, smoke, warnings } = results.packaged;
+    lines.push(`Packaged archive: ${archive}${archiveSha256 ? ` (sha256 ${archiveSha256})` : ' (not verified)'}`);
+    if (smoke)
+      lines.push(
+        `Packaged smoke: Fabric Loader ${smoke.loaderVersion ?? 'unknown'}, ${PACKAGED_MOD_IDS.map((id) => `${id} ${smoke.mods?.[id] ?? 'missing'}`).join(', ')}`,
+      );
+    for (const warning of warnings ?? []) lines.push(`Packaged warning: ${warning}`);
+  }
   lines.push(backend.reviewNote);
   return lines.join('\n');
 }
@@ -626,9 +731,13 @@ export const defaultDeps = {
   startBot,
   startFabricClient,
   prepareFabricGameDirectory,
+  preparePackagedMods: (options) => preparePackagedMods(options),
+  checkPackagedClient: (options) => checkPackagedClient(options),
   runCli: (args, options) => runCli(args, options),
   startCli,
   pressKey,
+  clickTarget,
+  typeText,
   startFakeModel,
   startProxy,
   environment,
@@ -640,7 +749,13 @@ export const defaultDeps = {
 
 /** Runs the selected scenarios; always stops the bot and server and writes results unless preflight refuses. */
 export async function runAcceptance(options, deps = defaultDeps, signal = new AbortController().signal) {
-  const javaInfo = deps.preflight({ acceptEula: options.acceptEula, jar: options.jar, java: options.java });
+  const packaged = isPackaged(options);
+  const javaInfo = deps.preflight({
+    acceptEula: options.acceptEula,
+    jar: options.jar,
+    java: options.java,
+    ...(packaged && { archive: options.archive }),
+  });
   if (!(await deps.portIsFree(options.port)))
     throw new Error(`Port ${options.port} on 127.0.0.1 is in use. Stop the other server or pass --port.`);
   const where = paths(options, await deps.createRunDirectory());
@@ -649,6 +764,18 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
   const results = {
     schema: backend.schema,
     ...(fabric && { backend: 'fabric' }),
+    // What the packaged run loaded: filled in once the jars are copied and checked, before the server starts.
+    ...(packaged && {
+      packaged: {
+        archive: options.archive,
+        archiveSha256: null,
+        build: null,
+        modsDirectory: where.mods,
+        jars: [],
+        warnings: [],
+        smoke: null,
+      },
+    }),
     startedAt: new Date(deps.now()).toISOString(),
     finishedAt: null,
     review: { reviewed: false, note: backend.reviewNote },
@@ -703,6 +830,13 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     });
     results.minecraft.jarSha256 = await deps.sha256File(join(where.server, 'server.jar'));
     if (fabric) await deps.prepareFabricGameDirectory({ directory: where.client });
+    if (packaged) {
+      Object.assign(
+        results.packaged,
+        await deps.preparePackagedMods({ archive: options.archive, modsDir: where.mods }),
+      );
+      for (const warning of results.packaged.warnings) deps.warn(`Packaged archive: ${warning}`);
+    }
     server = deps.startServer({ directory: where.server, java: options.java });
     await server.console.ready({ signal });
     results.minecraft.serverVersion = server.console.version;
@@ -731,6 +865,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
         proxy,
       });
       results.scenarios.push(record);
+      if (packaged) results.packaged.smoke ??= record.observations.packagedSmoke ?? null;
       deps.warn(`[${scenario.id}] ${record.status}${record.reason ? `: ${record.reason}` : ''}`);
       signal.throwIfAborted();
       if (record.cleanup.some(({ command, ok }) => command === backend.stopStep && !ok))

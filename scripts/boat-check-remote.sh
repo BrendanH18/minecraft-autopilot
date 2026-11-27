@@ -127,6 +127,11 @@ if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) && ! $cmd =~ --dr
     # Loom checks every object and fetches only what is missing, so an interrupted download heals here.
     say "checking the Minecraft client asset cache"
     node scripts/gradle.js downloadAssets --allow-downloads >/dev/null
+    # --packaged runs Fabric Loader in production mode, which also needs the intermediary mappings jar.
+    if [[ $cmd =~ --packaged ]]; then
+        say "checking the libraries the production client needs"
+        node scripts/gradle.js prepareProductionClient --allow-downloads >/dev/null
+    fi
     run=(xvfb-run -a -s "-screen 0 854x480x24 -nolisten tcp" "${run[@]}")
 fi
 
