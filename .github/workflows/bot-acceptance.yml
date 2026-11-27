@@ -35,7 +35,8 @@ permissions:
 jobs:
   bot-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ inputs.suite == 'full' && 50 || 35 }}
+    # Full runs budget 15 minutes for Loom, 40 for gameplay, and 3 for shutdown, plus setup and upload.
+    timeout-minutes: ${{ inputs.suite == 'full' && 70 || 35 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,6 +51,7 @@ jobs:
           java-version: 21
       - run: npm ci
       - name: Prepare the vanilla server jar through Loom
+        timeout-minutes: ${{ inputs.suite == 'full' && 15 || 35 }}
         run: |
           node scripts/setup-mod.js --allow-downloads
           node scripts/gradle.js help --allow-downloads
@@ -60,7 +62,8 @@ jobs:
         run: |
           case "$SUITE" in
             fast) npm run acceptance:bot -- --accept-eula --fast ;;
-            full) npm run acceptance:bot -- --accept-eula --all ;;
+            # Signal the runner directly so it can write partial results before the job deadline.
+            full) timeout --foreground --signal=INT --kill-after=3m 40m node scripts/live-bot-acceptance.js --accept-eula --all ;;
             *) exit 2 ;;
           esac
       - name: Group candidate results by release gate
