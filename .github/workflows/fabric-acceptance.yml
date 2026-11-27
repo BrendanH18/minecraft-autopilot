@@ -1,0 +1,110 @@
+name: Fabric acceptance
+
+# Headless Fabric client pre-checks: Xvfb with Mesa's software OpenGL, against the
+# runner's offline vanilla server. Results are pre-checks, never release evidence
+# (acceptance review-bot rejects them). Not a required check.
+on:
+  schedule:
+    - cron: '13 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Scenario set to run
+        type: choice
+        default: fast
+        options:
+          - fast
+          - takeover
+          - packaged
+  # Pull requests that change the mod, the Fabric side of the CLI, the scenario
+  # runner, the server jar setup or this workflow run the --fast scenarios.
+  pull_request:
+    paths:
+      - '.github/workflows/fabric-acceptance.yml'
+      - 'mod/**'
+      - 'src/fabric-*.js'
+      - 'src/bridge*.js'
+      - 'scripts/live-bot-acceptance.js'
+      - 'scripts/live-acceptance/**'
+      - 'scripts/setup-mod.js'
+      - 'scripts/package-mod.js'
+      - 'scripts/gradle.js'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fabric-acceptance-${{ github.event_name }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  fabric-acceptance:
+    name: fabric-acceptance (${{ matrix.suite }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pull requests run fast; a manual run runs the chosen set; the weekly run runs all three.
+        suite: ${{ fromJSON(github.event_name == 'pull_request' && '["fast"]' || github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.suite) || '["fast","takeover","packaged"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 21
+      # Same cache as the CI mod job, plus the client assets Loom keeps in Gradle's user home.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .gradle-user/caches
+            .gradle-user/wrapper
+            .deps
+          key: fabric-acceptance-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mod/*.gradle', 'mod/gradle.properties', 'mod/gradle/wrapper/gradle-wrapper.properties', 'scripts/setup-mod.js', 'scripts/package-mod.js') }}
+          restore-keys: |
+            fabric-acceptance-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install Xvfb, Mesa and xdotool
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            xvfb xauth libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 xdotool
+      - run: npm ci
+      - name: Prepare the mod, the server jar and the client assets
+        run: |
+          node scripts/setup-mod.js --allow-downloads
+          node scripts/gradle.js build --allow-downloads
+          node scripts/package-mod.js --allow-downloads
+          node scripts/gradle.js downloadAssets --allow-downloads
+      - name: Run the ${{ matrix.suite }} scenarios
+        id: acceptance
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          case "$SUITE" in
+            fast) args=(--fast) ;;
+            takeover) args=(--takeover) ;;
+            packaged) args=(--packaged --fast) ;;
+            *) echo "unknown suite: $SUITE" >&2; exit 2 ;;
+          esac
+          xvfb-run -a -s "-screen 0 854x480x24 -nolisten tcp" \
+            npm run acceptance:fabric -- --accept-eula "${args[@]}"
+      - name: Upload acceptance evidence
+        if: ${{ !cancelled() && steps.acceptance.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fabric-acceptance-${{ matrix.suite }}
+          path: |
+            .runtime/live-acceptance/run-*/results.json
+            .runtime/live-acceptance/run-*/server/server.out
+            .runtime/live-acceptance/run-*/client*/logs/latest.log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
