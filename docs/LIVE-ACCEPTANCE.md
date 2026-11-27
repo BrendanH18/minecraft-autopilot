@@ -363,7 +363,7 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   `stopping` was `true` throughout, `mc-agent goto` started no job until the
   release and then completed, and the chest or inventory didn't change after
   the stop. They found no bugs. The rejoin in `disconnect-collect`, scripted on
-  26 November, passed three runs out of three in Boat (55 to 62 s each, all 18
+  26 November, passed four runs out of four in Boat (the last with the final cancelled-job check; 55 to 62 s each, all 18
   checks): the client was back in the world about 5 s after the first key
   press, through a second proxy connection, and the collect job stayed
   `cancelled`, with the same position, one held log and 17 target logs at the

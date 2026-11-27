@@ -190,7 +190,7 @@ takeover scenarios (`f8-collect`, `stop-goto`, `menu-collect`,
 Loader loaded 57 mods, the nested nether-pathfinder 1.6 among them, and the
 client log had no mixin, refmap or linkage errors. No packaging bugs were found.
 `disconnect-collect` now rejoins after the kick through the disconnect screen
-and Direct Connection. It passed three runs out of three (55 to 62 s each,
+and Direct Connection. It passed four runs out of four, the last with the final cancelled-job check (55 to 62 s each,
 about 5 s of that the rejoin), and nothing resumed after the rejoin. The
 `--takeover` count is unchanged: 32 of 34 pass and the two
 `menu-storage-close*` items are expected failures. These runs used an
