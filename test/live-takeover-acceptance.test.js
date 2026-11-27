@@ -11,6 +11,7 @@ import {
   nothingResumed,
   probeAcquire,
   serverAddress,
+  STORAGE_STEP_DELAY_TICKS,
   takeoverIds,
   takeoverScenarios,
 } from '../scripts/live-acceptance/takeover-scenarios.js';
@@ -27,7 +28,8 @@ import {
   typeCommand,
   typeText,
 } from '../scripts/live-acceptance/takeover-tools.js';
-import { buildPlan, formatPlan, formatSummary, main, parseOptions, summarize } from '../scripts/live-bot-acceptance.js';
+import { fabricClientArguments } from '../scripts/live-acceptance/processes.js';
+import { buildPlan, formatPlan, main, parseOptions, summarize } from '../scripts/live-bot-acceptance.js';
 
 const FABRIC = ['--backend', 'fabric'];
 
@@ -334,27 +336,26 @@ test('a scripted F8 takeover passes on matching bridge and server evidence and f
   );
 });
 
-test('an expected failure is reported with its reason and counted apart from failures', () => {
-  const marked = takeoverScenarios.filter((scenario) => scenario.expectedFailure).map(({ id }) => id);
-  assert.deepEqual(marked, ['menu-storage-close', 'menu-storage-close-withdraw']);
-  const results = {
-    backend: 'fabric',
-    minecraft: { serverLog: '/run/server/server.out' },
-    client: { log: '/run/client/client.out' },
-    scenarios: [
-      { id: 'f8-idle', status: 'pass', reason: null },
-      { id: 'menu-storage-close', status: 'xfail', reason: 'Failed checks: x', expectedFailure: 'Not observable.' },
-    ],
-  };
-  results.summary = summarize(results);
-  assert.deepEqual(results.summary, { pass: 1, fail: 0, skipped: 0, expectedFail: 1, error: null });
-  const text = formatSummary(results, '/run/results.json');
-  assert.match(text, /1 pass, 0 fail, 1 expected failures, 0 skipped/);
-  assert.match(text, /XFAIL {3}menu-storage-close — Failed checks: x \(expected: Not observable\.\)/);
+test('only the storage-close scenarios hold the storage screen open, and the client gets the property', () => {
+  const paced = takeoverScenarios.filter((scenario) => scenario.storageStepDelayTicks);
+  assert.deepEqual(
+    paced.map(({ id }) => id),
+    ['menu-storage-close', 'menu-storage-close-withdraw'],
+  );
+  for (const scenario of paced) {
+    assert.equal(scenario.storageStepDelayTicks, STORAGE_STEP_DELAY_TICKS);
+    assert.equal(scenario.expectedFailure, undefined);
+    const steps = scenario.actions(scenario.plan({ bot: 'B', lane: scenario.lane }));
+    assert.match(steps[0], /^client JVM: -Dminecraftagent\.storageStepDelayTicks=20 /);
+  }
+  assert.ok(takeoverScenarios.every((scenario) => !scenario.expectedFailure && !scenario.expectedChecks));
+  const args = fabricClientArguments({ port: 1, account: 'A', gameDir: '/g', storageStepDelayTicks: 20 });
+  assert.deepEqual(args.slice(-1), ['-PstorageStepDelayTicks=20']);
+  assert.ok(!fabricClientArguments({ port: 1, account: 'A', gameDir: '/g' }).some((arg) => /storageStep/.test(arg)));
   assert.deepEqual(summarize({ scenarios: [{ status: 'pass' }] }), { pass: 1, fail: 0, skipped: 0, error: null });
 });
 
-test('the storage-close expected failure needs Escape to have cancelled the same job', () => {
+test('a storage-close attempt counts only when Escape cancelled the same job', () => {
   const storage = /Storage screen was closed or replaced/i;
   const job = (message, extra = {}) => ({ id: 'job-1', status: 'cancelled', message, ...extra });
   const menu = (screen) => job(`A game menu was opened (${screen}). Control returned to the player.`);

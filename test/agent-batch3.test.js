@@ -278,7 +278,7 @@ test('invalid model output can be refused and retried a bounded number of consec
   const failing = fakeAdapter();
   await assert.rejects(
     runAgent(failing, 'Eat', { ...quiet, retryInvalid: 1, fetchImpl: scripted([raw('[]'), raw('nope')]) }),
-    /The model returned an invalid action/,
+    /The model returned an invalid action, .* Invalid action: .*JSON/,
   );
   assert.equal(failing.releases, 1);
   await assert.rejects(

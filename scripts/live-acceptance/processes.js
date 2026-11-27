@@ -333,14 +333,16 @@ export const FABRIC_CLIENT_OPTIONS = [
  * `node scripts/gradle.js runClient` arguments that join the runner's server as `account` from `gameDir`. Loom
  * resolves the run directory against the mod project, so it is passed relative to `mod/`. With `packaged`, the
  * client is `runProductionClient` instead: Fabric Loader in production mode with only the jars in `gameDir/mods`.
+ * `storageStepDelayTicks` sets the mod's opt-in storage pacing (`-Dminecraftagent.storageStepDelayTicks`).
  */
-export function fabricClientArguments({ port, account, gameDir, packaged = false }) {
+export function fabricClientArguments({ port, account, gameDir, packaged = false, storageStepDelayTicks = 0 }) {
   return [
     GRADLE,
     packaged ? 'runProductionClient' : 'runClient',
     `-PquickPlay=127.0.0.1:${port}`,
     `-PdevUsername=${account}`,
     `-PclientRunDir=${relative(join(projectRoot, 'mod'), gameDir)}`,
+    ...(storageStepDelayTicks ? [`-PstorageStepDelayTicks=${storageStepDelayTicks}`] : []),
   ];
 }
 
@@ -369,6 +371,7 @@ export async function startFabricClient({
   signal,
   java = 'java',
   packaged = false,
+  storageStepDelayTicks = 0,
 }) {
   for (const stale of [bridge, `${bridge}.lock`, join(home, 'homes.json')]) await rm(stale, { force: true });
   // Gradle runs on JAVA_HOME or PATH, so a --java JDK has to reach it that way.
@@ -378,7 +381,7 @@ export async function startFabricClient({
       : { JAVA_HOME: dirname(dirname(java)), PATH: `${dirname(java)}${delimiter}${process.env.PATH ?? ''}` };
   if (log) await mkdir(dirname(log), { recursive: true, mode: 0o700 });
   const child = track(
-    spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir, packaged }), {
+    spawnImpl(process.execPath, fabricClientArguments({ port, account, gameDir, packaged, storageStepDelayTicks }), {
       cwd: projectRoot,
       // OpenAL's null driver: the client needs no sound device, and headless hosts have none.
       env: { ALSOFT_DRIVERS: 'null', ...process.env, ...jdk, MC_AGENT_HOME: home },

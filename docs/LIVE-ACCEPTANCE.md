@@ -37,7 +37,9 @@ Use `--dry-run --json` to read the selected fixtures, actions, and checks as str
 
 Other options include `--port N`, `--out FILE` (default `results.json` in the run
 directory), `--account NAME` (offline username, default `LiveBot`), `--java PATH`,
-`--model NAME` and `--ollama URL` for model scenarios, `--keep-server`, and for
+`--model NAME`, `--ollama URL`, `--no-thinking` and `--model-timeout SECONDS`
+(each decision's limit, default 120 as for `mc-agent agent`) for model scenarios,
+`--keep-server`, and for
 the Fabric backend `--packaged [--archive ZIP]` ([Packaged jars](#packaged-jars)). Use
 distinct ports and, if supplying `--out`, distinct output files for concurrent
 runs.
@@ -150,6 +152,34 @@ interruption half of the gate (F8 and stop while eating or retreating) is in the
 
 The `agent` command always needs an Ollama model; there is no deterministic CLI routine that applies `--verify-collect`/`--verify-deposit`/`--verify-home`. The storage scenarios therefore call the same exported `runAgent` the CLI uses, in process, against the bot's bridge, with a **scripted planner** supplied as its model transport. No model or network is involved; the decisions are fixed (for example collect 8 → deposit 8 → home → done), while the criteria checks, each deposit's reported container baseline, the task-scoped final `inspect_storage`, the `done` rejections, and the bridge actions are the production code paths. The "during inference" changes happen while the agent is awaiting that scripted decision, which is the same window a model's inference occupies. The real-model variant is `stale-removal-model`; it is never simulated.
 
+### Real-model pre-checks on Boat
+
+`stale-removal-model` and `withdraw-craft-model` need a real model, and the
+evidence for their gates comes from the owner's model on the Mac. Agents
+pre-check them in Boat with a small model on the sandbox's CPU (owner decision,
+26 November 2026), to find prompt, parsing and tool-call bugs before that
+session:
+
+```sh
+scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula \
+  --scenario stale-removal-model --scenario withdraw-craft-model --model qwen3.5:4b --no-thinking
+```
+
+The [Boat check script](DEVELOPMENT.md#boat-checks) installs a pinned Ollama,
+pulls the model and serves it at the default URL. It takes about 8 minutes on
+the default 4 vCPU sandbox, plus the model download the first time. Each
+decision takes 13 to 70 s, so leave `--no-thinking` on: with thinking, the
+first decision overran the 120-second `--model-timeout`. Because the check
+exports `MCA_BOAT_CHECK=1`, the results carry `modelPrecheck`, every
+real-model `release` entry starts with `pre-check only (small model on a Boat
+CPU)`, and `acceptance review-bot` rejects the file. Run offline scenarios in
+a separate run if you want them reviewed.
+
+`qwen3.5:4b` is the smallest model that passed both. `qwen3:1.7b` and
+`qwen3:4b` follow the action format but don't plan the task: they answer
+`done` with the goal as the reason, or repeat `collect` past the quota. A
+failure with one of them says little about the code.
+
 ## Results file
 
 ```text
@@ -158,13 +188,14 @@ review: { reviewed: false, note }          # a person sets this when they accept
 scope                                      # bot only; not Fabric or authenticated handoff
 environment: { commit, dirty, node, java, platform, javaPreflight, sourceAtFinish: { commit, dirty } }
 minecraft: { expectedVersion, serverVersion, jar, jarSha256, serverLog, serverLogSha256, seed, levelType }
-options: { port, account, keepServer, model, noThinking, scenarios }
+options: { port, account, keepServer, model, noThinking, modelTimeout, scenarios }
 scenarios[]: { id, title, release[], requiresModel, status: pass|fail|skipped, reason,
                startedAt, durationMs, steps[], observations{}, checks[], cleanup[] }
 timings: { serverStartMs, worldSetupMs, scenariosMs, serverStopMs, totalMs }
 summary: { pass, fail, skipped, error }, error
 backend, client: { log, logSha256, gameDirectory }   # Fabric runs only
 packaged: { archive, archiveSha256, build, modsDirectory, jars[], warnings[], smoke }   # --packaged only
+modelPrecheck: { host: 'boat', note }      # --model inside a Boat check only; never evidence
 ```
 
 `steps` record every console command, bridge/CLI action, and read with timing and outcome. Each cleanup step the scenario runner runs also has a `durationMs`, and `timings` gives the wall time of each run phase (`null` for a phase the run never reached; a phase that failed records how long it ran), so a slow run shows where its time went. `observations` hold baselines, final server state, job progress, agent verification, and position samples. `checks` list each pass/fail criterion with expected and actual values. `jarSha256` hashes the copied jar used to start the server. Candidate evidence requires the same clean source commit at the start and finish.
@@ -187,7 +218,8 @@ log when available. For a copied `results.json`, the reviewer uses the
 adjacent `server/server.out` if its SHA-256 matches the recorded log. The most
 recently finished run that attempted a scenario takes precedence. A skip is
 shown if no run attempted that scenario.
-Unreadable, malformed, dirty, and different-commit files are listed under
+Unreadable, malformed, dirty, and different-commit files, Fabric pre-checks
+and [Boat real-model pre-checks](#real-model-pre-checks-on-boat) are listed under
 `rejected`, and the command exits unsuccessfully if any file was rejected.
 Passing scenarios must contain passing checks and identify the Minecraft
 server version and jar SHA-256, and their server log must match its recorded
@@ -331,11 +363,23 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   and after the rejoin; and that the old lease is still refused. If the client
   doesn't rejoin within 60 s, the scenario fails with `not observed: ...` and
   starts no new session.
+- **Storage pacing.** Unpaced, the agent's container screen opens when the
+  server's reply is handled at the start of a frame and closes in that frame's
+  tick, so no key press can reach it (holding the replies in the proxy doesn't
+  help: the screen and its contents arrive together). `menu-storage-close` and
+  `menu-storage-close-withdraw` therefore start their client with the mod's
+  opt-in `-Dminecraftagent.storageStepDelayTicks=20` (Gradle
+  `-PstorageStepDelayTicks=20`), which holds each deposit or withdrawal screen
+  open for 20 ticks (1 s) once its contents arrive, before its stack moves.
+  Control checks still run every tick of the hold. The property defaults to 0
+  (no hold), is clamped to 0 to 40 ticks, ignores malformed values and works
+  in the packaged jars, so a person can add it to the launcher's JVM arguments
+  for the keyboard session. Every other scenario runs unpaced.
 - **Retries.** Eating lasts 1.6 s, so an eat scenario repeats (up to three
-  times) when the food is eaten before the key lands. Escape reaches a storage
-  screen only while the agent has it open, which is about one tick per stack, so
-  `menu-storage-close` and `menu-storage-close-withdraw` repeat up to four times
-  when Escape opens the pause menu instead.
+  times) when the food is eaten before the key lands. Escape can still land in
+  the few ticks between two storage screens, so `menu-storage-close` and
+  `menu-storage-close-withdraw` repeat up to four times when Escape opens the
+  pause menu instead.
 - **Not in `--fast`.** Each scenario starts its own client, so `--takeover`
   takes about 18 minutes in Boat (34 scenarios). On Fabric, `--all` includes them.
 - **Needs Xvfb and xdotool.** The scenarios refuse to run without `$DISPLAY` or
@@ -345,16 +389,16 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:fab
   launcher with the packaged jars. `fabric-f8-takeover` and the RELEASE.md
   boxes still need the keyboard sessions; `acceptance review-bot` rejects these
   results like any Fabric result.
-- **Not scripted.** The proxy doesn't help `menu-storage-close`: the server sends the container screen
-  and its contents together, so holding or delaying them still opens and closes
-  the screen within one frame.
 - **Results (26 November 2026).** On the development client in Boat, 32 of the
-  34 scenarios pass (17 min 38 s in all) and `menu-storage-close` and `menu-storage-close-withdraw`
-  are expected failures (`XFAIL`): the agent's container screen opens and
-  closes within one frame, so no key press reaches it. Escape lands between
-  stacks instead, and that path is checked. An expected failure is reported
-  and counted apart from failures, and doesn't fail the run, but only when the
-  key-press and job-message checks are the only ones that failed. The first runs
+  34 scenarios pass (17 min 38 s in all). `menu-storage-close` and
+  `menu-storage-close-withdraw` were then expected failures, because the
+  unpaced storage screen closed within a frame. With the
+  storage pacing above (27 November) both pass on their first
+  attempt (33 s each): Escape closed the agent's chest screen, the job ended
+  "Storage screen was closed or replaced", and the chest didn't change
+  afterwards. `f8-deposit`, `f8-withdraw` and the unpaced `withdraw` and
+  `deposit-double-chest-omitted` passed in the same run (3 min 20 s for all
+  six), and the runner no longer has an expected-failure status. The first runs
   found two Fabric bugs, now fixed: a takeover key press (F8) or the pause
   menu between storage stacks was lost, so the transfer went on, and a new
   session at the death screen was refused as "paused" instead of asking the
@@ -432,7 +476,11 @@ scripts/boat-check.sh --fetch .runtime/live-acceptance -- 'npm run build:mod && 
   `dev_babbaj_nether-pathfinder` 1.6 nested in Baritone, and the client log had
   no mixin or refmap warning. `f8-collect`, `menu-collect`, `stop-goto` and
   `takeover-while-stopping-deposit` also passed (2 min 6 s), so xdotool reaches
-  the production client too. No packaging bug turned up.
+  the production client too. No packaging bug turned up. On 27 November
+  `menu-storage-close` and `menu-storage-close-withdraw` passed on the
+  packaged jars as well (first attempt each), with the client log showing
+  the storage pacing property reached the production client, and the unpaced
+  `deposit-double-chest-omitted` passed beside them (2 min 12 s for all three).
 
 ## Fabric fixtures
 

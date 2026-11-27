@@ -135,5 +135,69 @@ if [[ $cmd =~ (acceptance:fabric([^-]|$)|--backend[=\ ]fabric) && ! $cmd =~ --dr
     run=(xvfb-run -a -s "-screen 0 854x480x24 -nolisten tcp" "${run[@]}")
 fi
 
+# Real-model pre-checks (owner decision, 2026-11-26): for a live run with --model, a
+# pinned Ollama serves that model on the sandbox's CPU at the runner's default URL.
+# MCA_BOAT_CHECK marks the results as a pre-check, which acceptance review-bot rejects.
+# The CPU build and the pulled models stay in ~/ollama between checks; --save leaves
+# them out of the warm snapshot.
+export MCA_BOAT_CHECK=1
+model_flag='--model[= ]+([A-Za-z0-9._:/-]+)'
+model=""
+# The first chained command (split at &&, || and ;) that has --model and isn't a dry run picks the
+# model; a dry run alone starts nothing. A failed =~ clears BASH_REMATCH, so the name is kept first.
+segments=${cmd//&&/$'\n'}
+segments=${segments//||/$'\n'}
+segments=${segments//;/$'\n'}
+while IFS= read -r segment; do
+    [[ $segment =~ $model_flag ]] || continue
+    candidate=${BASH_REMATCH[1]}
+    [[ $segment =~ --dry-run ]] || { model=$candidate; break; }
+done <<<"$segments"
+if [ -n "$model" ]; then
+    ollama_version=0.40.17
+    case "$(uname -m)" in
+        x86_64) ollama_arch=amd64 ollama_sha256=1df9d6228bac5a22e420b242708c0d10e5b886db97bab99d446a41760f4e79af ;;
+        aarch64) ollama_arch=arm64 ollama_sha256=0ec632480057cef6300459d1fa7dbbb3fc188b9a7d56cd0b0a72d05927d90ecc ;;
+        *) say "no Ollama build for $(uname -m)"; exit 2 ;;
+    esac
+    ollama_home=$HOME/ollama
+    ollama=$ollama_home/$ollama_version/bin/ollama
+    if [ ! -x "$ollama" ]; then
+        say "installing Ollama $ollama_version (CPU libraries only) for the real-model pre-check"
+        command -v zstd >/dev/null || {
+            sudo apt-get update -qq --allow-releaseinfo-change >/dev/null || true
+            sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y -qq zstd >/dev/null
+        }
+        # One version at a time; the models stay. A half-finished install is never used.
+        mkdir -p "$ollama_home"
+        find "$ollama_home" -mindepth 1 -maxdepth 1 ! -name models -exec rm -rf {} +
+        mkdir "$ollama_home/incoming"
+        curl -fsSL --retry 3 -o "$ollama_home/incoming.tar.zst" \
+            "https://github.com/ollama/ollama/releases/download/v$ollama_version/ollama-linux-$ollama_arch.tar.zst"
+        echo "$ollama_sha256  $ollama_home/incoming.tar.zst" | sha256sum -c --quiet - \
+            || { say "the Ollama download doesn't match its pinned SHA-256"; exit 2; }
+        # The GPU libraries are most of the archive and useless here.
+        tar --zstd -xf "$ollama_home/incoming.tar.zst" -C "$ollama_home/incoming" \
+            --exclude='lib/ollama/cuda_*' --exclude='lib/ollama/rocm*' --exclude='lib/ollama/vulkan*'
+        rm -f "$ollama_home/incoming.tar.zst"
+        mv "$ollama_home/incoming" "$ollama_home/$ollama_version"
+    fi
+    mkdir -p .runtime/live-acceptance
+    # Loaded for the whole run, so a slow action between decisions never unloads it.
+    OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=$ollama_home/models OLLAMA_KEEP_ALIVE=-1 \
+        "$ollama" serve >.runtime/live-acceptance/ollama.log 2>&1 &
+    ollama_pid=$!
+    trap 'kill "$ollama_pid" 2>/dev/null || true' EXIT
+    for _ in $(seq 60); do
+        curl -fsS http://127.0.0.1:11434/api/version >/dev/null 2>&1 && break
+        kill -0 "$ollama_pid" 2>/dev/null || { say "ollama serve exited; see .runtime/live-acceptance/ollama.log"; exit 2; }
+        sleep 1
+    done
+    say "pulling $model (kept in ~/ollama/models)"
+    OLLAMA_HOST=127.0.0.1:11434 "$ollama" pull "$model" >.runtime/live-acceptance/ollama-pull.log 2>&1 \
+        || { tail -n 5 .runtime/live-acceptance/ollama-pull.log >&2; say "couldn't pull $model"; exit 2; }
+    say "Ollama $ollama_version serving $model on the CPU; the results are a pre-check, never evidence"
+fi
+
 say "$(git rev-parse --short HEAD 2>/dev/null || echo "no commit")$( [ -z "$(git status --porcelain 2>/dev/null)" ] || echo " (modified)"), Node $(node --version), $(javac -version 2>&1), $(nproc) vCPUs"
 "${run[@]}"

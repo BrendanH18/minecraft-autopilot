@@ -230,11 +230,10 @@ const TRIGGERS = {
   fill: { text: (plan) => `server: ${plan.hooks.fillLastSlot}`, during: (plan) => [plan.hooks.fillLastSlot] },
 };
 
-const STORAGE_SCREEN_UNREACHABLE =
-  "Not observable on a local server: the agent's container screen opens when the server reply is handled at the start of a frame and closes in that frame's tick, so it never reaches the end-of-frame input poll and Escape always lands between stacks instead. Each attempt still checks that Escape between stacks returns control and stops the transfer.";
-
-// The only checks STORAGE_SCREEN_UNREACHABLE explains; any other failed check is a real failure.
-const STORAGE_SCREEN_CHECKS = ['the key press reached the game', 'the job ends cancelled with a message matching'];
+// Client ticks the mod holds each deposit or withdrawal screen open before its stack moves (the opt-in
+// -Dminecraftagent.storageStepDelayTicks). Unpaced, the screen opens and closes within one frame, so no key press can
+// reach it; 20 ticks (1 s at the client's 10 frames per second) leaves Escape about ten frames per stack.
+export const STORAGE_STEP_DELAY_TICKS = 20;
 
 // One row per checklist item that runs without a person. `id` is the checklist id.
 const TABLE = [
@@ -268,7 +267,7 @@ const TABLE = [
     activity: 'deposit',
     trigger: 'escape-screen',
     release: 'deposits',
-    expectedFailure: STORAGE_SCREEN_UNREACHABLE,
+    storageStepDelayTicks: STORAGE_STEP_DELAY_TICKS,
   },
   { id: 'f8-withdraw', fixture: 'withdraw', activity: 'withdraw', trigger: 'f8', release: 'withdrawCraft' },
   {
@@ -277,7 +276,7 @@ const TABLE = [
     activity: 'withdraw',
     trigger: 'escape-screen',
     release: 'withdrawCraft',
-    expectedFailure: STORAGE_SCREEN_UNREACHABLE,
+    storageStepDelayTicks: STORAGE_STEP_DELAY_TICKS,
   },
   { id: 'f8-craft', fixture: 'table', activity: 'craft-table', trigger: 'f8', release: 'withdrawCraft' },
   {
@@ -389,6 +388,10 @@ function steps(spec, plan) {
   const activity = ACTIVITIES[spec.activity].text(plan, spec);
   const trigger = TRIGGERS[spec.trigger].text({ ...plan, bot: plan.bot });
   const lines = [activity, `${READY_TEXT[spec.activity]}: ${trigger}`];
+  if (spec.storageStepDelayTicks)
+    lines.unshift(
+      `client JVM: -Dminecraftagent.storageStepDelayTicks=${spec.storageStepDelayTicks} (each storage screen stays open ${spec.storageStepDelayTicks} ticks before its stack moves)`,
+    );
   if (spec.close)
     lines.push(
       spec.activity === 'idle'
@@ -421,7 +424,7 @@ export const takeoverScenarios = TABLE.map((spec, index) => {
     proxy: true,
     lifecycle: spec.id,
     spec,
-    ...(spec.expectedFailure && { expectedFailure: spec.expectedFailure, expectedChecks: STORAGE_SCREEN_CHECKS }),
+    ...(spec.storageStepDelayTicks && { storageStepDelayTicks: spec.storageStepDelayTicks }),
     release: [RELEASE_TAKEOVER[spec.release]],
     plan: (input) => ({ ...takeoverPlan(input, spec.fixture), bot: input.bot }),
     during: (plan) => TRIGGERS[spec.trigger].during?.(plan) ?? [],
@@ -767,8 +770,8 @@ const MENU = /game menu was opened/i;
 const PAUSE_MENU = /game menu was opened \((?:pause menu|pause)\)/i;
 
 /**
- * Escape cancelled this storage job: through the storage screen, or through the pause menu between stacks. The
- * expected failure of the storage-close scenarios (STORAGE_SCREEN_UNREACHABLE) holds only with this evidence.
+ * Escape cancelled this storage job: through the storage screen, or through the pause menu between stacks (a missed
+ * attempt, which is retried).
  */
 export function escapeCancelledStorage(jobId, job, storageMessage) {
   return (
@@ -1081,12 +1084,6 @@ export async function runTakeover(ctx, plan, spec, lifecycle) {
       ctx.check('no job is started or resumed', !state.job || (jobId && state.job.id === jobId), {
         job: state.job,
       });
-    if (spec.expectedFailure)
-      ctx.check(
-        'Escape cancelled this job (through the storage screen or the pause menu between stacks)',
-        escapeCancelledStorage(jobId, state.job, new RegExp(expect.job.message, 'i')),
-        { jobId, job: state.job },
-      );
     if (spec.trigger === 'fill') {
       ctx.check('no log was held when the last slot filled', held(stateAtReady, LOG) === 0, {
         logsAtReady: held(stateAtReady, LOG),

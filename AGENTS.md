@@ -86,7 +86,14 @@ don't run the full `scripts/boat-check.sh` before handing work back.
   dimension items). The script installs Xvfb, Mesa and xdotool, caches the client
   assets and runs the client on software OpenGL. Its results are pre-checks, never
   release evidence.
-- Exceptions (run on this Mac): the interactive Minecraft client (`npm run dev:mod`, a hand-run `runClient`, the normal launcher), packaged Fabric acceptance, Microsoft-authenticated handoff and Ollama local-model runs. Boat has no GPU, and Microsoft account credentials never go into a sandbox. For packaged acceptance, build the bundle in a sandbox and copy it back: `scripts/boat-check.sh --fetch dist -- npm run build:mod` puts it in `.runtime/boat-check/<check>/dist`.
+- The two real-model scenarios run on Boat as pre-checks with a small CPU model
+  (owner decision, 2026-11-26), to find prompt, parsing and tool-call bugs
+  before the owner's Mac session. Run them when a change touches the planner
+  (`src/agent.js`, `src/objective.js`) or these scenarios:
+  `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --scenario stale-removal-model --scenario withdraw-craft-model --model qwen3.5:4b --no-thinking`.
+  The script installs a pinned Ollama and pulls the model. The results are
+  marked `modelPrecheck`, and `acceptance review-bot` rejects them.
+- Exceptions (run on this Mac): the interactive Minecraft client (`npm run dev:mod`, a hand-run `runClient`, the normal launcher), packaged Fabric acceptance, Microsoft-authenticated handoff and Ollama runs that are evidence (the owner's model, for the real-model gates). Boat has no GPU, and Microsoft account credentials never go into a sandbox. For packaged acceptance, build the bundle in a sandbox and copy it back: `scripts/boat-check.sh --fetch dist -- npm run build:mod` puts it in `.runtime/boat-check/<check>/dist`.
 - The ask-first rule below covers this Mac only. In a sandbox, `npm ci`, `--allow-downloads` and other installs need no approval.
 
 Generic Boat commands, for genuine one-offs outside the checks. Every sandbox

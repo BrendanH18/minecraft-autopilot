@@ -14,9 +14,12 @@ repositories { mavenCentral() }
 // `-PquickPlayWorld=NAME` opens an existing single-player world from mod/run/saves.
 // The live acceptance runner also sets `-PdevUsername=NAME` (the offline player name) and
 // `-PclientRunDir=PATH` (relative to mod/; a game directory per run, so mod/run/options.txt is never touched).
+// `-PstorageStepDelayTicks=N` passes the mod's opt-in `-Dminecraftagent.storageStepDelayTicks=N` JVM property,
+// which holds each deposit or withdrawal screen open N ticks (the storage-close takeover scenarios set it).
 loom {
     runs {
         client {
+            if (project.hasProperty('storageStepDelayTicks')) vmArg "-Dminecraftagent.storageStepDelayTicks=${project.property('storageStepDelayTicks')}"
             if (project.hasProperty('quickPlay')) programArgs '--quickPlayMultiplayer', project.property('quickPlay')
             if (project.hasProperty('quickPlayWorld')) programArgs '--quickPlaySingleplayer', project.property('quickPlayWorld')
             if (project.hasProperty('devUsername')) programArgs '--username', project.property('devUsername')
@@ -39,6 +42,7 @@ tasks.register('runProductionClient', net.fabricmc.loom.task.prod.ClientProducti
     if (project.hasProperty('quickPlay')) programArgs.addAll('--quickPlayMultiplayer', project.property('quickPlay').toString())
     if (project.hasProperty('devUsername')) programArgs.addAll('--username', project.property('devUsername').toString())
     if (project.hasProperty('clientRunDir')) runDir = file(project.property('clientRunDir').toString())
+    if (project.hasProperty('storageStepDelayTicks')) jvmArgs.add("-Dminecraftagent.storageStepDelayTicks=${project.property('storageStepDelayTicks')}".toString())
 }
 // Resolves what runProductionClient puts on its classpath (Fabric Loader and intermediary for this Minecraft
 // version, as detached configurations) so a later offline run has them: `node scripts/gradle.js

@@ -1370,3 +1370,49 @@ test('real bot observation includes threat coordinates', async (t) => {
     { type: 'minecraft:skeleton', distance: 10, x: 6, y: 64, z: 8 },
   ]);
 });
+
+test('observations report the nearest blocks of each kind, not only the dirt underfoot', () => {
+  // Seen on a CPU-model pre-check: the 24 nearest matching blocks of a superflat world were all dirt, so the planner
+  // never saw the oak logs it was asked to collect or the crafting table beside it.
+  const registry = minecraftData('1.21.1');
+  const world = new Map();
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) world.set(`${x},63,${z}`, 'dirt');
+  world.set('5,64,0', 'oak_log');
+  world.set('5,65,0', 'oak_log');
+  world.set('0,64,3', 'crafting_table');
+  const bot = new EventEmitter();
+  Object.assign(bot, {
+    registry,
+    entity: { position: new Vec3(0.5, 64, 0.5) },
+    entities: {},
+    username: 'Test',
+    player: { uuid: randomUUID() },
+    game: { dimension: 'overworld' },
+    health: 20,
+    food: 20,
+    inventory: { items: () => [] },
+    pathfinder: { setMovements() {}, setGoal() {} },
+    // Like mineflayer: the nearest `count` blocks matching any of the given ids, within maxDistance.
+    findBlocks: ({ matching, maxDistance, count }) =>
+      [...world]
+        .filter(([, name]) => [matching].flat().includes(registry.blocksByName[name].id))
+        .map(([key]) => new Vec3(...key.split(',').map(Number)))
+        .filter((position) => position.distanceTo(bot.entity.position) <= maxDistance)
+        .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
+        .slice(0, count),
+    blockAt: (position) => ({ name: world.get(`${position.x},${position.y},${position.z}`) ?? 'air', position }),
+    quit: () => bot.emit('end', 'Closed'),
+  });
+  const driver = new MineflayerDriver(bot, { host: 'fixture', port: 25565 }, {}, 'unused');
+  const { blocks } = driver.observe();
+  const named = (name) => blocks.filter((block) => block.name === `minecraft:${name}`);
+  assert.equal(named('oak_log').length, 2);
+  assert.deepEqual(named('crafting_table'), [{ name: 'minecraft:crafting_table', x: 0, y: 64, z: 3 }]);
+  assert.equal(named('dirt').length, 3);
+  assert.equal(blocks.length, 6);
+  const distances = blocks.map((block) => new Vec3(block.x, block.y, block.z).distanceTo(bot.entity.position));
+  assert.deepEqual(
+    distances,
+    [...distances].sort((a, b) => a - b),
+  );
+});

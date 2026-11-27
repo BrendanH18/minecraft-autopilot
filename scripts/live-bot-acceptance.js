@@ -12,6 +12,10 @@
  * mode (Loom's `runProductionClient`) with only those jars in the client's mods folder. That catches remapping,
  * refmap, nested-jar and dependency-set problems the development client cannot, but it is still Loom's launcher on
  * Xvfb, not a normal launcher, so these results are pre-checks too.
+ *
+ * A `--model` run inside a Boat check (scripts/boat-check.sh exports MCA_BOAT_CHECK=1) uses a small model on the
+ * sandbox's CPU. It finds prompt, parsing and tool-call bugs before the owner's session; its results are marked
+ * `modelPrecheck`, and `acceptance review-bot` rejects them as real-model evidence.
  */
 import { parseArgs } from 'node:util';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -66,6 +70,8 @@ const scenarioIds = scenarios.map((scenario) => scenario.id);
 const runsOn = (scenario, backend) => !scenario.backends || scenario.backends.includes(backend);
 const REVIEW_NOTE =
   'Machine-checked observations only. These results become acceptance evidence for RELEASE.md only after a person reviews them, including server.out.';
+const MODEL_PRECHECK_NOTE =
+  'Real-model pre-check: a small model on the CPU of a Boat sandbox. It finds prompt, parsing and tool-call bugs before the owner runs the real-model scenarios on the Mac; it is never evidence for a RELEASE.md box or a real-model gate.';
 const FABRIC_REVIEW_NOTE =
   'Fabric development-client pre-check. These results find bugs before the keyboard sessions; they are never evidence for a RELEASE.md box, which needs the packaged jars in a normal launcher.';
 
@@ -109,7 +115,8 @@ export const PACKAGED_FABRIC = {
 };
 const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... | --all | --fast | --takeover) [--accept-eula] [--server-jar <path>] [--dry-run [--json]]
   [--backend bot|fabric [--packaged [--archive <zip>]]] [--keep-server] [--port N] [--out <file>] [--account NAME] [--java <path>]
-  [--model NAME [--ollama URL] [--no-thinking]]
+  [--model NAME [--ollama URL] [--no-thinking] [--model-timeout SECONDS]]
+--model-timeout (default 120, as for mc-agent agent) bounds each model decision; a CPU-only model may need more.
 --fast runs offline scenarios without the long-running ones (pit recovery, eat-timeout, eat-retreat-timeout)
   or the takeover scenarios.
 --backend fabric starts a fresh Fabric development client per scenario instead of the bot (npm run acceptance:fabric);
@@ -124,7 +131,7 @@ const USAGE = `Usage: node scripts/live-bot-acceptance.js (--scenario <id> ... |
 Scenarios: ${sharedScenarios.map(({ id }) => id).join(', ')}
 Fabric takeover scenarios: ${takeoverIds.join(', ')}`;
 
-export function parseOptions(argv) {
+export function parseOptions(argv, env = process.env) {
   const { values } = parseArgs({
     args: argv,
     allowPositionals: false,
@@ -148,6 +155,7 @@ export function parseOptions(argv) {
       model: { type: 'string' },
       ollama: { type: 'string' },
       'no-thinking': { type: 'boolean' },
+      'model-timeout': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -162,6 +170,9 @@ export function parseOptions(argv) {
   const java = values.java ?? 'java';
   const model = values.model?.trim();
   if (values.model !== undefined && !model) throw new Error('--model must name an installed Ollama model.');
+  const modelTimeout = values['model-timeout'] === undefined ? 120 : Number(values['model-timeout']);
+  if (!Number.isInteger(modelTimeout) || modelTimeout < 1 || modelTimeout > 3600)
+    throw new Error('--model-timeout must be a whole number of seconds from 1 to 3600.');
   if (values.json && !values['dry-run']) throw new Error('--json requires --dry-run.');
   if ([values.scenario, values.all, values.fast, values.takeover].filter(Boolean).length > 1)
     throw new Error('Choose only one of --scenario, --all, --fast, and --takeover.');
@@ -203,6 +214,9 @@ export function parseOptions(argv) {
     model: model ?? null,
     ollama: values.ollama ?? 'http://127.0.0.1:11434',
     noThinking: !!values['no-thinking'],
+    modelTimeout,
+    // A model run inside a Boat check is a CPU pre-check, whatever model it names.
+    modelPrecheck: !!model && env.MCA_BOAT_CHECK === '1',
     out: values.out ? resolve(values.out) : null,
     scenarios: selected,
   };
@@ -270,10 +284,13 @@ export function buildPlan(options) {
   };
 }
 
-/** Fabric runs (development client or packaged jars) only pre-check a release box; the text says so wherever it appears. */
+/** Fabric runs and Boat model runs only pre-check a release box; the text says so wherever it appears. */
 function releaseFor(options, scenario) {
-  if (options.backend !== 'fabric') return scenario.release;
-  return scenario.release.map((text) => `${backendOf(options).releasePrefix}: ${text}`);
+  let release = scenario.release;
+  if (options.modelPrecheck && scenario.requiresModel)
+    release = release.map((text) => `pre-check only (small model on a Boat CPU): ${text}`);
+  if (options.backend !== 'fabric') return release;
+  return release.map((text) => `${backendOf(options).releasePrefix}: ${text}`);
 }
 
 export function formatPlan(plan) {
@@ -438,6 +455,7 @@ export function createContext({ record, options, serverConsole, bridge, deps, si
           criteria,
           maxSteps,
           minutes: 10,
+          modelTimeout: options.modelTimeout ?? 120,
           think: options.noThinking ? false : undefined,
           signal,
           log: (line) => {
@@ -529,7 +547,6 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
   const proxied = scenario.proxy && options.backend === 'fabric' ? proxy : null;
   const ctx = createContext({ record, options, serverConsole, bridge: where.bridge, deps, signal, proxy: proxied });
   let bot = null;
-  let threw = false;
   try {
     for (const command of plan.fixture) await ctx.step(`fixture: ${command}`, () => ctx.server.command(command));
     const session = {
@@ -548,6 +565,7 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
             log: where.clientLog,
             java: options.java,
             ...(packaged && { packaged: true }),
+            ...(scenario.storageStepDelayTicks && { storageStepDelayTicks: scenario.storageStepDelayTicks }),
           })
         : deps.startBot(session),
     );
@@ -585,7 +603,6 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         ? null
         : 'No checks ran.';
   } catch (error) {
-    threw = true;
     record.status = 'fail';
     record.reason = signal.aborted ? `Interrupted: ${signal.reason?.message ?? 'aborted'}` : error.message;
     if (error.botOutput) ctx.note('botOutput', error.botOutput);
@@ -648,16 +665,6 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
         .join(' | ');
     }
     if (record.status === 'fail' && bot?.output?.length) ctx.note('botOutput', bot.output.join('').trim().slice(-3000));
-    // A failure the scenario table explains is reported as such, but only when the checks it names are all that failed.
-    const failedChecks = record.checks.filter((check) => !check.pass);
-    const explained =
-      !threw &&
-      failedChecks.length > 0 &&
-      failedChecks.every(({ name }) => scenario.expectedChecks?.some((prefix) => name.startsWith(prefix)));
-    if (record.status === 'fail' && scenario.expectedFailure && explained && !failures.length && !signal.aborted) {
-      record.status = 'xfail';
-      record.expectedFailure = scenario.expectedFailure;
-    }
     record.durationMs = deps.now() - started;
   }
   return record;
@@ -665,24 +672,17 @@ export async function runScenario(scenario, { options, deps, serverConsole, sign
 
 export function summarize(results) {
   const count = (status) => results.scenarios.filter((scenario) => scenario.status === status).length;
-  const expected = count('xfail');
-  return {
-    pass: count('pass'),
-    fail: count('fail'),
-    skipped: count('skipped'),
-    ...(expected && { expectedFail: expected }),
-    error: results.error ?? null,
-  };
+  return { pass: count('pass'), fail: count('fail'), skipped: count('skipped'), error: results.error ?? null };
 }
 
 export function formatSummary(results, out) {
   const backend = results.packaged ? PACKAGED_FABRIC : BACKENDS[results.backend ?? 'bot'];
   const lines = [
-    `${backend.title}: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.expectedFail ? `${results.summary.expectedFail} expected failures, ` : ''}${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
+    `${backend.title}: ${results.summary.pass} pass, ${results.summary.fail} fail, ${results.summary.skipped} skipped${results.error ? ` (run error: ${results.error})` : ''}`,
   ];
   for (const scenario of results.scenarios)
     lines.push(
-      `  ${scenario.status.toUpperCase().padEnd(7)} ${scenario.id}${scenario.reason ? ` — ${scenario.reason}` : ''}${scenario.expectedFailure ? ` (expected: ${scenario.expectedFailure})` : ''}`,
+      `  ${scenario.status.toUpperCase().padEnd(7)} ${scenario.id}${scenario.reason ? ` — ${scenario.reason}` : ''}`,
     );
   lines.push(`Results: ${out}`, `Server log: ${results.minecraft.serverLog}`);
   if (results.client) lines.push(`Client log: ${results.client.log}`);
@@ -696,6 +696,7 @@ export function formatSummary(results, out) {
     for (const warning of warnings ?? []) lines.push(`Packaged warning: ${warning}`);
   }
   lines.push(backend.reviewNote);
+  if (results.modelPrecheck) lines.push(results.modelPrecheck.note);
   return lines.join('\n');
 }
 
@@ -778,7 +779,9 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
     }),
     startedAt: new Date(deps.now()).toISOString(),
     finishedAt: null,
-    review: { reviewed: false, note: backend.reviewNote },
+    review: { reviewed: false, note: options.modelPrecheck ? MODEL_PRECHECK_NOTE : backend.reviewNote },
+    // Never real-model evidence: acceptance review-bot rejects any file that carries it.
+    ...(options.modelPrecheck && { modelPrecheck: { host: 'boat', note: MODEL_PRECHECK_NOTE } }),
     scope: backend.scope,
     environment: { ...deps.environment({ java: options.java }), javaPreflight: javaInfo?.banner ?? null },
     minecraft: {
@@ -797,6 +800,7 @@ export async function runAcceptance(options, deps = defaultDeps, signal = new Ab
       keepServer: options.keepServer,
       model: options.model,
       noThinking: !!options.noThinking,
+      modelTimeout: options.modelTimeout ?? 120,
       scenarios: options.scenarios.map((scenario) => scenario.id),
     },
     ...(fabric && { client: { log: where.clientLog, logSha256: null, gameDirectory: where.client } }),
@@ -943,7 +947,7 @@ export async function main(argv = process.argv.slice(2), deps = defaultDeps) {
   process.on('SIGTERM', onSignal);
   try {
     const results = await runAcceptance(options, deps, controller.signal);
-    return results.summary.fail || results.error || !(results.summary.pass || results.summary.expectedFail) ? 1 : 0;
+    return results.summary.fail || results.error || !results.summary.pass ? 1 : 0;
   } catch (error) {
     deps.warn(`Error: ${error.message}`);
     if (!/See docs\/DEVELOPMENT\.md/.test(error.message)) deps.warn(HELP);

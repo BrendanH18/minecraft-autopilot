@@ -31,6 +31,9 @@ import {
 } from './live-acceptance/scenarios.js';
 
 const runtime = resolve(import.meta.dirname, '../.runtime/live-fabric-fixtures');
+// Unpaced, the agent's storage screen closes within a frame, so closing it needs the mod's opt-in pacing.
+const STORAGE_INTERRUPTIONS =
+  'While stacks are moving, press F8, close the storage screen (start Minecraft with -Dminecraftagent.storageStepDelayTicks=20 in its JVM arguments, or it closes too fast to catch), or run mc-agent stop from a second terminal. Use a fresh run for each.';
 
 function preparePlayer(player) {
   return [`clear ${player}`, `effect clear ${player}`, `tp ${player} 96.5 ${STAND} 0.5`];
@@ -215,7 +218,7 @@ function withdrawTransferPlan(player, expiry = false) {
       ? expiryActions('mc-agent withdraw oak_log', 'Repeat both chest half reads and the player inventory read.')
       : [
           'mc-agent withdraw oak_log',
-          'While stacks are moving, press F8, close the storage screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+          STORAGE_INTERRUPTIONS,
           'Repeat both chest half reads and the player inventory read five seconds apart.',
         ],
   };
@@ -408,7 +411,7 @@ const fixtures = {
     storage: 'double',
     actions: [
       'mc-agent deposit oak_log',
-      'While stacks are moving, press F8, close the storage screen, or run mc-agent stop from a second terminal. Use a fresh run for each.',
+      STORAGE_INTERRUPTIONS,
       'Read both chest halves and the player inventory after the transfer or a takeover. Repeat after five seconds.',
     ],
   },
