@@ -552,13 +552,14 @@ export function createObjective(
             storedTotal += held(container.items, total.item);
           }
         }
-        // Held items alone prove the total; storage counts toward it only after the final reopening.
+        // Held items alone prove the total; storage counts toward it only after the final reopening, so until then
+        // the reported total is the held count and stored shows the last-observed contents.
         const sum = heldTotal === null || storedTotal === null ? null : heldTotal + storedTotal;
         checks.total = {
           item: total.item,
           held: heldTotal,
           stored: storedTotal,
-          total: sum,
+          total: totalRefreshed ? sum : heldTotal,
           required: total.count,
           evidence: totalRefreshed ? 'refreshed' : 'last_observed',
           met: heldTotal !== null && (heldTotal >= total.count || (totalRefreshed && sum >= total.count)),

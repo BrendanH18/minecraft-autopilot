@@ -64,11 +64,12 @@ test('a total counts held items alone, and opened storage only once it has been 
     item: 'minecraft:cobblestone',
     held: 10,
     stored: 20,
-    total: 30,
+    total: 10,
     required: 25,
     evidence: 'last_observed',
     met: false,
   });
+  assert.equal(objective.check(state(), { storageRefreshed: true }).checks.total.total, 30);
   assert.equal(objective.check(state(), { storageRefreshed: true }).met, true);
   // Held items alone prove the total without any storage read.
   const rich = state();
@@ -233,6 +234,8 @@ test('the agent reopens every opened container before a total counts storage', a
   assert.equal(failed.status, 'criteria_unmet');
   assert.equal(failed.verification.checks.total.met, false);
   assert.equal(failed.verification.checks.total.evidence, 'last_observed');
+  // The cached chest is not counted in the reported total when it could not be reopened.
+  assert.equal(failed.verification.checks.total.total, 10);
   assert.match(failed.verification.checks.total.error, /did not open/);
 
   // Held items that already prove the total need no storage trip.

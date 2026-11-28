@@ -266,7 +266,8 @@ npm start -- agent "Collect eight oak logs and come back to base within five min
 `--verify-total` is an absolute amount, not a gain. Held items alone can meet it, and then no
 storage is reopened. Otherwise stored items count only after the planner has reopened every
 container opened this session, which it does before checking a `done`, as for `--verify-deposit`. If a container can't be reopened, the check
-reports the error and counts held items only, so cached contents never produce success. Containers
+reports the error and counts held items only (its `total` is the held count, and `stored` shows the
+last-observed contents), so cached contents never produce success. Containers
 never opened count nothing, and a double chest counts once. It needs a backend that reports
 container contents (the Fabric mod, the server bot and the demo).
 

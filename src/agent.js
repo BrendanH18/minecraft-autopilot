@@ -715,8 +715,8 @@ export async function runAgent(
           }
           // Without a fresh read only held items count, which check() already applied; the error says why.
           if (totalError) verification.checks.total.error = totalError;
-          // A budget spent during the final inspection ends the task with the verification that ran.
-          if (objective?.budgetExpired())
+          // A budget spent during the final inspection ends the task with the verification that ran (one clock reading).
+          if (verification?.checks.timeBudget?.met === false)
             return {
               status: 'time_budget',
               reason: `The ${objective.description.timeBudget.seconds}-second time budget ran out during final verification; stopped for you to take over.`,
