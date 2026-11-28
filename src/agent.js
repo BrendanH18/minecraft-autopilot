@@ -658,7 +658,7 @@ export async function runAgent(
           }
           if (criteria.deposit) {
             try {
-              // A budget the total's inspection spent starts no second inspection; the deposit stays unrefreshed.
+              // A spent budget starts no further inspection (the batch loop checks again); the deposit stays unrefreshed.
               if (objective.budgetExpired())
                 throw new Error('The time budget ran out before task storage was reopened.');
               // Reopen storage before claiming success; other players may have changed it during inference.
@@ -674,6 +674,8 @@ export async function runAgent(
                   );
                 const targets = objective.storageTargets(currentState);
                 for (let index = 0; index < targets.length; index += MAX_INSPECT_CONTAINERS) {
+                  if (objective.budgetExpired())
+                    throw new Error('The time budget ran out before task storage was reopened.');
                   await adapter.execute(
                     { type: 'inspect_storage', containers: targets.slice(index, index + MAX_INSPECT_CONTAINERS) },
                     { signal: bounded, onProgress: (job) => log(job.message) },
