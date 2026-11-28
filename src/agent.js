@@ -94,7 +94,7 @@ collect adds count items to the existing inventory. Supported blocks: oak_log, b
 deposit walks to the nearest chest or barrel within 16 blocks and stores the item there; omit count to store all of it. inspect_storage refreshes previously known storage contents without depositing; use it only when state.containers is an array. containers lists nearby storage and the contents last seen inside (items is null until opened).
 withdraw takes the item from the nearest chest or barrel within 16 blocks last seen holding it, else an unopened one; omit count to take all of it there.
 craft makes at least count of: ${CRAFTABLE_ITEMS.join(', ')}. chest, furnace, and tools need a crafting table within 16 blocks; a held one is placed automatically. Later crafts consume crafted planks and sticks.
-Use observations and the initial inventory to verify the requested quantity. Collect, withdraw, and craft criteria count the final held increase, so consumed items no longer count; with a deposit criterion for the same item, stored items count too. Storage is reopened automatically before final deposit verification; stay within 16 blocks of the storage you deposited into before answering done. Never repeat a full collection quota after partial progress.
+Use observations and the initial inventory to verify the requested quantity. Collect, withdraw, and craft criteria count the final held increase, so consumed items no longer count; with a deposit criterion for the same item, stored items count too. Storage is reopened automatically before final deposit or total verification; stay within 16 blocks of the storage you deposited into before answering done. Never repeat a full collection quota after partial progress.
 Save a home only if the user requested it or the goal needs it. set_home is refused when a home was saved before the task; only the player can move it.
 Nearby blocks and threats are partial observations of loaded chunks. Do not invent locations or capabilities.
 Prioritize eating and returning to saved shelter when health is low. A saved home is a waypoint, not a guarantee of safety.
@@ -378,7 +378,7 @@ export async function runAgent(
     // The server bot, Fabric, and demo verify only containers this task deposited into, each against its contents read just before
     // the task's first deposit there; an unrecognized backend refreshes and counts every previously opened container.
     const scopedStorage = !!criteria.deposit && SCOPED_STORAGE_BACKENDS.has(initialState.backend);
-    let objective = createObjective(criteria, initialState, { scopedStorage });
+    let objective = createObjective(criteria, initialState, { scopedStorage, startedAt: started });
     let start = null;
     if (fence !== undefined) {
       const position = initialState.player?.position;
@@ -442,6 +442,18 @@ export async function runAgent(
         reason: `Health ${health} is below the stop threshold of ${stopBelowHealth}; stopped for you to take over.`,
         steps,
         ...(objective && { verification: objective.check(state) }),
+      };
+    };
+    // A spent time budget ends the task between actions; like health, it never interrupts a running action.
+    const budgetStop = (state, steps) => {
+      if (!objective?.budgetExpired()) return null;
+      const { seconds } = objective.description.timeBudget;
+      log(`The ${seconds}-second time budget ran out; stopping.`);
+      return {
+        status: 'time_budget',
+        reason: `The ${seconds}-second time budget ran out before the criteria were met; stopped for you to take over.`,
+        steps,
+        verification: objective.check(state),
       };
     };
     // A completed deposit that names no container may have stored items verification cannot attribute.
@@ -509,7 +521,7 @@ export async function runAgent(
           }
         }
         initialState = { ...initialState, containers: (await observe()).containers };
-        objective = createObjective(criteria, initialState);
+        objective = createObjective(criteria, initialState, { startedAt: started });
       }
       for (let step = 0; step < maxSteps; step++) {
         bounded.throwIfAborted();
@@ -522,16 +534,19 @@ export async function runAgent(
           step--;
           continue;
         }
-        const lowHealth = healthStop(state, step);
+        const lowHealth = healthStop(state, step) || budgetStop(state, step);
         if (lowHealth) return lowHealth;
         const requestTimeout = AbortSignal.timeout(Math.ceil(modelTimeout * 1000));
+        // Inference is not an action, so a time budget cuts it off rather than leaving control with a waiting agent.
+        const remaining = objective?.budgetRemainingMs() ?? Number.POSITIVE_INFINITY;
+        const budgetTimeout = Number.isFinite(remaining) ? AbortSignal.timeout(Math.ceil(remaining) + 1) : null;
         let output;
         try {
           const response = await fetchImpl(endpoint, {
             method: 'POST',
             redirect: 'error',
             headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.any([bounded, requestTimeout]),
+            signal: AbortSignal.any([bounded, requestTimeout, ...(budgetTimeout ? [budgetTimeout] : [])]),
             body: JSON.stringify({
               model,
               stream: false,
@@ -550,6 +565,10 @@ export async function runAgent(
           usage.durationNs += counted(output?.total_duration);
         } catch (error) {
           bounded.throwIfAborted();
+          if (objective?.budgetExpired()) {
+            const spent = budgetStop(await observe(), step);
+            if (spent) return spent;
+          }
           if (requestTimeout.aborted)
             throw new Error(
               `Ollama did not answer within ${modelTimeout} seconds, so this decision was not executed; earlier actions in this task still took effect. Try --no-thinking, a smaller model, or a longer --model-timeout.`,
@@ -559,6 +578,11 @@ export async function runAgent(
               cause: error,
             });
           throw error;
+        }
+        // A reply that arrives after the budget ran out is not validated or run, so an invalid one cannot mask the expiry.
+        if (objective?.budgetExpired()) {
+          const spent = budgetStop(await observe(), step + 1);
+          if (spent) return spent;
         }
         const content = output?.message?.content;
         if (typeof content !== 'string' || !content.trim())
@@ -598,12 +622,45 @@ export async function runAgent(
         // Health can fall while the model thinks; the decision is not dispatched below the threshold.
         const hurt = healthStop(currentState, step + 1);
         if (hurt) return hurt;
+        // A decision that arrives after the budget ran out, including done, is not dispatched or verified.
+        const spent = budgetStop(currentState, step + 1);
+        if (spent) return spent;
         if (decision.type === 'done') {
           let verification;
           let inspectionError;
+          let totalError;
+          let totalInspected = false;
           let inspected = null;
+          // A total counts every opened container, so all of them are reopened, unless held items already prove it.
+          // An unscoped deposit check reopens them anyway.
+          if (
+            criteria.total &&
+            !(criteria.deposit && !scopedStorage) &&
+            !objective.check(currentState).checks.total.met
+          ) {
+            totalInspected = true;
+            try {
+              await adapter.execute(
+                { type: 'inspect_storage' },
+                { signal: bounded, onProgress: (job) => log(job.message) },
+              );
+            } catch (error) {
+              bounded.throwIfAborted();
+              if ((await observe()).mode !== 'agent' || adapter.leaseError) throw error;
+              totalError = error.message;
+            }
+            currentState = await observe();
+            bounded.throwIfAborted();
+            if (currentState.mode !== 'agent' || adapter.leaseError)
+              throw new Error('Control returned to the player during storage verification.');
+            const hurtTotal = healthStop(currentState, step + 1);
+            if (hurtTotal) return hurtTotal;
+          }
           if (criteria.deposit) {
             try {
+              // A spent budget starts no further inspection (the batch loop checks again); the deposit stays unrefreshed.
+              if (objective.budgetExpired())
+                throw new Error('The time budget ran out before task storage was reopened.');
               // Reopen storage before claiming success; other players may have changed it during inference.
               if (!scopedStorage)
                 await adapter.execute(
@@ -617,6 +674,8 @@ export async function runAgent(
                   );
                 const targets = objective.storageTargets(currentState);
                 for (let index = 0; index < targets.length; index += MAX_INSPECT_CONTAINERS) {
+                  if (objective.budgetExpired())
+                    throw new Error('The time budget ran out before task storage was reopened.');
                   await adapter.execute(
                     { type: 'inspect_storage', containers: targets.slice(index, index + MAX_INSPECT_CONTAINERS) },
                     { signal: bounded, onProgress: (job) => log(job.message) },
@@ -644,18 +703,36 @@ export async function runAgent(
               inspectionError = 'Task storage changed during verification, so not all of it was refreshed.';
             }
           }
-          verification = objective?.check(currentState, { storageRefreshed: !!criteria.deposit && !inspectionError });
-          if (inspectionError) {
+          if (criteria.total && criteria.deposit && !scopedStorage) {
+            totalInspected = true;
+            totalError = inspectionError;
+          }
+          verification = objective?.check(currentState, {
+            storageRefreshed: !!criteria.deposit && !inspectionError,
+            totalRefreshed: totalInspected && !totalError,
+          });
+          if (inspectionError && criteria.deposit) {
             verification.met = false;
             Object.assign(verification.checks.deposit, { met: false, error: inspectionError });
           }
+          // Without a fresh read only held items count, which check() already applied; the error says why.
+          if (totalError) verification.checks.total.error = totalError;
+          // A budget spent during the final inspection ends the task with the verification that ran (one clock reading).
+          if (verification?.checks.timeBudget?.met === false)
+            return {
+              status: 'time_budget',
+              reason: `The ${objective.description.timeBudget.seconds}-second time budget ran out during final verification; stopped for you to take over.`,
+              steps: step + 1,
+              verification,
+            };
+          const storageError = (criteria.deposit && inspectionError) || totalError;
           // Small models sometimes answer done with a plan. Show them the unmet criteria, but let them stop honestly on a third done.
           if (verification && !verification.met && rejectedDone++ < 2) {
             await reject(
               step + 1,
               decision,
-              inspectionError
-                ? `Storage verification failed: ${inspectionError}`
+              storageError && !verification.met
+                ? `Storage verification failed: ${storageError}`
                 : 'Explicit criteria are not met. Continue, or answer done again to stop unmet.',
               { verification },
             );
@@ -739,18 +816,24 @@ export async function runAgent(
           history.push({ action: decision, error: error.message });
           await note('error', { step: step + 1, action: decision, error: error.message });
           log(`Action failed: ${error.message}`);
-          if (++failures >= maxFailures) throw new Error(failureStop);
+          if (++failures >= maxFailures) {
+            const spent = objective?.budgetExpired() && budgetStop(await observe(), step + 1);
+            if (spent) return spent;
+            throw new Error(failureStop);
+          }
         }
-        if (stopBelowHealth !== undefined) {
+        if (stopBelowHealth !== undefined || objective?.budgetExpired()) {
           const after = await observe();
           if (after.mode !== 'agent' || adapter.leaseError)
             throw adapter.leaseError || new Error('Control returned to the player.');
-          const lowHealth = healthStop(after, step + 1);
-          if (lowHealth) return lowHealth;
+          const stopped = healthStop(after, step + 1) || budgetStop(after, step + 1);
+          if (stopped) return stopped;
         }
       }
       // Observe after the last action so final and verification describe the end state.
       const finalState = await observe();
+      const spent = budgetStop(finalState, maxSteps);
+      if (spent) return spent;
       return {
         status: 'step_limit',
         reason: `Stopped after ${maxSteps} decisions.`,

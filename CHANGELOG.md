@@ -16,6 +16,8 @@ Changes being prepared for the initial experimental release. Acceptance is track
 
 ### Added
 
+- Three more `mc-agent agent` criteria, brought forward from the roadmap's month 4: `--verify-total item:count` (held plus stored, with storage counted only after every opened container is reopened), `--verify-waypoint name[,radius]` (the final position near a saved waypoint) and `--verify-within seconds` (a time budget; once it is spent the task stops between actions with status `time_budget` and exit code 2). Four new runner scenarios check them against independent server reads on both backends.
+
 - An opt-in JVM argument, `-Dminecraftagent.storageStepDelayTicks=<0-40>` (default 0), holds the agent's chest or barrel screen open for that many ticks before each deposit or withdrawal stack moves, so a person can close it. Unpaced, the screen closes within a frame. The `menu-storage-close` and `menu-storage-close-withdraw` takeover scenarios set it to 20 and must now pass; the runner's expected-failure status is gone.
 
 - Agents can pre-check the real-model bot scenarios in Boat: `scripts/boat-check.sh` installs a pinned Ollama in the sandbox and serves a small model on the CPU for `npm run acceptance:bot -- --model NAME`. Those results are marked `modelPrecheck`, and `acceptance review-bot` rejects them. The runner also takes `--model-timeout`.

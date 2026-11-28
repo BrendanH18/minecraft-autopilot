@@ -17,6 +17,10 @@ import {
   parseInventoryCriterion,
   parseDestinationCriterion,
   parseMaxInventoryCriterion,
+  parseTimeBudgetCriterion,
+  parseTotalCriterion,
+  parseWaypointCriterion,
+  resolveWaypointCriterion,
 } from './objective.js';
 import { positionSchema, normalizeAction } from './protocol.js';
 import { CRAFTABLE_ITEMS, MAX_CRAFT_COUNT, RECIPES } from './recipes.js';
@@ -810,6 +814,21 @@ program
   )
   .option('--verify-max-health-loss <n>', 'final health at most 0 to 20 below the starting health', numberIn(0, 20))
   .option(
+    '--verify-total <item:count>',
+    'verify at least 1 to 100000 of an item across the inventory and opened storage, for example cobblestone:128',
+    parseTotalCriterion,
+  )
+  .option(
+    '--verify-waypoint <name[,radius]>',
+    'verify the final position within radius (0 to 64, default 2) of a saved waypoint',
+    parseWaypointCriterion,
+  )
+  .option(
+    '--verify-within <seconds>',
+    'verify the task finishes within 1 to 86400 seconds, and stop between actions once that time is spent',
+    parseTimeBudgetCriterion,
+  )
+  .option(
     '--goal-file <file>',
     'read the goal from a regular text file (at most 16000 characters) instead of the argument',
   )
@@ -832,6 +851,11 @@ program
     const { runAgent, parseAllowedActions, readGoalFile } = await import('./agent.js');
     if (options.goalFile !== undefined) goal = await readGoalFile(options.goalFile);
     const allowActions = options.allowActions === undefined ? undefined : parseAllowedActions(options.allowActions);
+    // Resolved once, before connecting, so the target cannot move during the task.
+    const waypoint =
+      options.verifyWaypoint === undefined
+        ? undefined
+        : resolveWaypointCriterion(options.verifyWaypoint, await readWaypoints());
     const adapter = await connect();
     try {
       const result = await runAgent(adapter, goal, {
@@ -857,6 +881,9 @@ program
           maxDistance: options.verifyMaxDistance,
           minFreeSlots: options.verifyMinFreeSlots,
           maxHealthLoss: options.verifyMaxHealthLoss,
+          total: options.verifyTotal,
+          waypoint,
+          timeBudget: options.verifyWithin,
         },
         signal: abortController.signal,
         log,
@@ -877,6 +904,7 @@ program
       if (
         result.status === 'criteria_unmet' ||
         result.status === 'health_stop' ||
+        result.status === 'time_budget' ||
         (result.status === 'step_limit' && result.verification)
       )
         process.exitCode = 2;

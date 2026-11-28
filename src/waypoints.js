@@ -8,8 +8,10 @@ import { positionSchema } from './protocol.js';
 export const waypointFile = join(dataDirectory, 'waypoints.json');
 export const MAX_WAYPOINTS = 100;
 const MAX_WAYPOINT_BYTES = 1024 * 1024;
-const NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-const DIMENSION = /^[a-z0-9_.-]+:[a-z0-9_./-]+$/;
+export const WAYPOINT_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+export const DIMENSION_ID = /^[a-z0-9_.-]+:[a-z0-9_./-]+$/;
+const NAME = WAYPOINT_NAME;
+const DIMENSION = DIMENSION_ID;
 
 export function waypointName(value) {
   if (!NAME.test(value))

@@ -1654,6 +1654,10 @@ test('--fast dry-run includes short offline scenarios and excludes pits and mode
       'cobblestone-hostiles-dimension',
       'low-health-retreat',
       'collect-full-inventory',
+      'criteria-total',
+      'criteria-total-stale',
+      'criteria-waypoint',
+      'criteria-time-budget',
     ],
   );
   assert.throws(() => parseOptions(['--fast', '--all']), /Choose only one/);

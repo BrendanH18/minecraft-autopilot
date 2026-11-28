@@ -91,10 +91,20 @@ test('review-bot groups coverage and prefers the latest attempt over older attem
   });
   for (const id of ['collection-pit-recovery', 'bot-mining-timeout'])
     assert.equal(gate(id).offline.find(({ id }) => id === 'recovery-timeout').status, 'pass');
-  // The bot runs of the Fabric eating and full-inventory checks belong to no bot gate; they are listed separately.
+  // The bot runs of the Fabric eating and full-inventory checks, and the richer-criteria scenarios, belong to no bot
+  // gate; they are listed separately.
   assert.deepEqual(
     report.supplemental.map(({ id }) => id),
-    ['eat-timeout', 'low-health-retreat', 'eat-retreat-timeout', 'collect-full-inventory'],
+    [
+      'eat-timeout',
+      'low-health-retreat',
+      'eat-retreat-timeout',
+      'collect-full-inventory',
+      'criteria-total',
+      'criteria-total-stale',
+      'criteria-waypoint',
+      'criteria-time-budget',
+    ],
   );
   assert.ok(report.gates.every(({ offline }) => offline.every(({ id }) => !id.startsWith('eat-'))));
 });

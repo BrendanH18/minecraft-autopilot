@@ -248,6 +248,42 @@ count; it does not certify safety outside loaded observations. Missing hunger/th
 satisfy the corresponding check. All configured criteria must pass. A decision limit with any
 criteria exits 2, including zero-valued hunger/threat criteria.
 
+### Totals, waypoints, and time budgets
+
+```sh
+npm start -- agent "Make sure we have 128 cobblestone" --model YOUR_LOCAL_MODEL --verify-total cobblestone:128
+npm start -- waypoint add base
+npm start -- agent "Collect eight oak logs and come back to base within five minutes" \
+  --model YOUR_LOCAL_MODEL --verify-collect oak_log:8 --verify-waypoint base,3 --verify-within 300
+```
+
+| Option | Range (default) | Checks at completion |
+| --- | --- | --- |
+| `--verify-total <item:count>` | 1–100000 | Held plus stored items, counting every container opened this session |
+| `--verify-waypoint <name[,radius]>` | radius 0–64 (2) | The final position within `radius` blocks of a saved waypoint |
+| `--verify-within <seconds>` | 1–86400 | The task finished within that many seconds of its start |
+
+`--verify-total` is an absolute amount, not a gain. Held items alone can meet it, and then no
+storage is reopened. Otherwise stored items count only after the planner has reopened every
+container opened this session, which it does before checking a `done`, as for `--verify-deposit`. If a container can't be reopened, the check
+reports the error and counts held items only (its `total` is the held count, and `stored` shows the
+last-observed contents), so cached contents never produce success. Containers
+never opened count nothing, and a double chest counts once. It needs a backend that reports
+container contents (the Fabric mod, the server bot and the demo).
+
+`--verify-waypoint` reads `waypoints.json` once, before taking control, so editing the file during
+the task doesn't move the target. An unknown name, or a waypoint in another dimension than the
+player's, is refused before the task starts. The result's `waypoint` check gives the name, target,
+distance and radius.
+
+`--verify-within` is measured from the start of the task to the final check, including the final
+storage inspection. The model sees the time left in `progress.checks.timeBudget`. Once the budget
+is spent the planner stops, releases control and returns `status: "time_budget"` with
+`verification`; the CLI exits 2. A model request still waiting is cut off, and a decision that
+arrives late, `done` included, is neither run nor verified. Like `--stop-below-health`, it never
+interrupts a running action, so a long collection can overrun the budget before the stop.
+`--minutes` remains the hard runtime limit.
+
 Planner calls validate their goal, model, limits, local URL, and action fields before dispatch.
 Empty model replies suggest recovery options; actions above 65,536 characters are rejected.
 Credential-bearing Ollama URLs are refused. The planner can choose `inspect_storage` when the
