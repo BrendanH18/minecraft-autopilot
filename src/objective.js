@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { normalizeAction, positionSchema } from './protocol.js';
+import { DIMENSION_ID, WAYPOINT_NAME, waypointName } from './waypoints.js';
 import { freeSlotsView, MAIN_SLOTS } from './cli-views.js';
 import { CRAFTABLE_ITEMS, MAX_CRAFT_COUNT, RECIPES } from './recipes.js';
 
@@ -70,6 +71,21 @@ const criteriaSchema = z
     maxDistance: z.number().finite().min(0).max(10_000).optional(),
     minFreeSlots: z.number().int().min(0).max(MAIN_SLOTS).optional(),
     maxHealthLoss: z.number().finite().min(0).max(20).optional(),
+    // Held plus last-read storage; the agent reopens every opened container before a final check counts storage.
+    total: z
+      .object({ item: z.string(), count: z.number().int().min(1).max(100_000) })
+      .strict()
+      .optional(),
+    // A saved waypoint, resolved before the task so a later edit of waypoints.json cannot move the target.
+    waypoint: positionSchema
+      .extend({
+        name: z.string().regex(WAYPOINT_NAME),
+        dimension: z.string().max(100).regex(DIMENSION_ID),
+        radius: z.number().finite().min(0).max(64).default(2),
+      })
+      .strict()
+      .optional(),
+    timeBudget: z.number().int().min(1).max(86_400).optional(),
   })
   .strict();
 
@@ -117,6 +133,41 @@ export function parseMaxInventoryCriterion(value) {
   return { item: normalizeAction({ type: 'deposit', item: match[1] }).item, count: Number(match[2]) };
 }
 
+/** An item total across the inventory and opened storage, for example cobblestone:128. */
+export function parseTotalCriterion(value) {
+  const match = /^(?:minecraft:)?([a-z0-9_]+):([0-9]+)$/.exec(value);
+  if (!match || Number(match[2]) < 1 || Number(match[2]) > 100_000)
+    throw new Error('Use an item and a total from 1 to 100000, for example cobblestone:128.');
+  return { item: normalizeAction({ type: 'deposit', item: match[1] }).item, count: Number(match[2]) };
+}
+
+/** NAME or NAME,radius; the CLI resolves the name against waypoints.json before the task starts. */
+export function parseWaypointCriterion(value) {
+  const parts = value.split(',');
+  if (parts.length > 2 || parts.some((part) => !part.trim()))
+    throw new Error('Use a waypoint name or name,radius, for example base or base,4.');
+  const name = waypointName(parts[0].trim());
+  const radius = parts.length === 2 ? Number(parts[1]) : 2;
+  if (!Number.isFinite(radius) || radius < 0 || radius > 64)
+    throw new Error('The waypoint radius must be a number from 0 to 64.');
+  return { name, radius };
+}
+
+/** Resolves a parsed waypoint criterion against saved waypoints. */
+export function resolveWaypointCriterion({ name, radius }, waypoints) {
+  const saved = waypoints.find((waypoint) => waypoint.name === name);
+  if (!saved) throw new Error(`No waypoint named ${name}. Save one with: waypoint add ${name}`);
+  return { name, x: saved.x, y: saved.y, z: saved.z, dimension: saved.dimension, radius };
+}
+
+/** Seconds the task may take, from 1 to 86400, measured from the start to the final check. */
+export function parseTimeBudgetCriterion(value) {
+  const seconds = Number(value);
+  if (!/^[0-9]+$/.test(String(value).trim()) || !Number.isInteger(seconds) || seconds < 1 || seconds > 86_400)
+    throw new Error('Use a whole number of seconds from 1 to 86400.');
+  return seconds;
+}
+
 export function parseDestinationCriterion(value) {
   const parts = value.split(',');
   if (parts.length < 3 || parts.length > 4 || parts.some((part) => !part.trim()))
@@ -134,7 +185,11 @@ export function parseDestinationCriterion(value) {
  * With scopedStorage, deposit criteria count only containers recorded with trackDeposit, each against its contents just
  * before the task's first deposit into it, so unrelated storage opened earlier in the session is neither counted nor reopened.
  */
-export function createObjective(criteria, initialState, { scopedStorage = false } = {}) {
+export function createObjective(
+  criteria,
+  initialState,
+  { scopedStorage = false, startedAt = Date.now(), clock = Date.now } = {},
+) {
   const parsed = criteriaSchema.parse(criteria);
   if (parsed.homeRadius !== undefined && !parsed.returnHome) throw new Error('homeRadius requires returnHome.');
   if (
@@ -151,7 +206,10 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
     !parsed.maxInventory &&
     parsed.maxDistance === undefined &&
     parsed.minFreeSlots === undefined &&
-    parsed.maxHealthLoss === undefined
+    parsed.maxHealthLoss === undefined &&
+    !parsed.total &&
+    !parsed.waypoint &&
+    parsed.timeBudget === undefined
   )
     return null;
   const requiredInventory = parsed.inventory
@@ -161,6 +219,16 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
     ? parseMaxInventoryCriterion(`${parsed.maxInventory.item}:${parsed.maxInventory.count}`)
     : null;
   const player = z.object({ uuid: z.string().min(1), dimension: z.string().min(1) }).parse(initialState.player);
+  if (parsed.waypoint && parsed.waypoint.dimension !== player.dimension)
+    throw new Error(
+      `Waypoint ${parsed.waypoint.name} is in ${parsed.waypoint.dimension}, but the player is in ${player.dimension}.`,
+    );
+  const total = parsed.total ? parseTotalCriterion(`${parsed.total.item}:${parsed.total.count}`) : null;
+  if (total && !Array.isArray(initialState.containers))
+    throw new Error(
+      'This backend does not report container contents; --verify-total needs a bridge that reports storage.',
+    );
+  if (!Number.isFinite(startedAt)) throw new Error('startedAt must be a finite time in milliseconds.');
   let start = null;
   if (parsed.maxDistance !== undefined) {
     const position = point.safeParse(initialState.player.position);
@@ -263,8 +331,11 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
       ...(parsed.maxHealthLoss !== undefined && {
         maxHealthLoss: { initial: initialHealth, maximum: parsed.maxHealthLoss },
       }),
+      ...(total && { total }),
+      ...(parsed.waypoint && { waypoint: parsed.waypoint }),
+      ...(parsed.timeBudget !== undefined && { timeBudget: { seconds: parsed.timeBudget } }),
     },
-    check(state, { storageRefreshed = false } = {}) {
+    check(state, { storageRefreshed = false, totalRefreshed = storageRefreshed } = {}) {
       const samePlayer =
         state.connected === true &&
         state.player?.uuid === player.uuid &&
@@ -466,7 +537,67 @@ export function createObjective(criteria, initialState, { scopedStorage = false 
           met: current !== null && current >= initialHealth - parsed.maxHealthLoss,
         };
       }
+      if (total) {
+        // Opened storage counts once per inventory (a double chest's halves share one record); unopened storage counts nothing.
+        const heldTotal =
+          samePlayer && Array.isArray(state.inventory) ? held(inventory.parse(state.inventory), total.item) : null;
+        let storedTotal = null;
+        if (samePlayer && Array.isArray(state.containers)) {
+          const seen = new Set();
+          storedTotal = 0;
+          for (const container of scopedContainers.parse(state.containers)) {
+            const at = positions(container);
+            if (!container.items || at.some((position) => seen.has(position))) continue;
+            for (const position of at) seen.add(position);
+            storedTotal += held(container.items, total.item);
+          }
+        }
+        // Held items alone prove the total; storage counts toward it only after the final reopening.
+        const sum = heldTotal === null || storedTotal === null ? null : heldTotal + storedTotal;
+        checks.total = {
+          item: total.item,
+          held: heldTotal,
+          stored: storedTotal,
+          total: sum,
+          required: total.count,
+          evidence: totalRefreshed ? 'refreshed' : 'last_observed',
+          met: heldTotal !== null && (heldTotal >= total.count || (totalRefreshed && sum >= total.count)),
+        };
+      }
+      if (parsed.waypoint) {
+        const position = samePlayer ? point.safeParse(state.player.position) : null;
+        const target = parsed.waypoint;
+        const distance = position?.success
+          ? Math.hypot(position.data.x - target.x, position.data.y - target.y, position.data.z - target.z)
+          : null;
+        checks.waypoint = {
+          name: target.name,
+          target: { x: target.x, y: target.y, z: target.z },
+          distance,
+          radius: target.radius,
+          met: distance !== null && distance <= target.radius,
+        };
+      }
+      if (parsed.timeBudget !== undefined) {
+        const elapsed = Math.max(0, (clock() - startedAt) / 1000);
+        checks.timeBudget = {
+          elapsedSeconds: Math.round(elapsed * 10) / 10,
+          budgetSeconds: parsed.timeBudget,
+          remainingSeconds: Math.max(0, Math.round((parsed.timeBudget - elapsed) * 10) / 10),
+          met: elapsed <= parsed.timeBudget,
+        };
+      }
       return { met: samePlayer && Object.values(checks).every((check) => check.met), samePlayer, checks };
+    },
+    /** True once the time budget has run out, so no later check can meet it. */
+    budgetExpired() {
+      return parsed.timeBudget !== undefined && (clock() - startedAt) / 1000 > parsed.timeBudget;
+    },
+    /** Milliseconds left in the time budget (0 once spent), or Infinity without one. */
+    budgetRemainingMs() {
+      return parsed.timeBudget === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, startedAt + parsed.timeBudget * 1000 - clock());
     },
     /** Records the container a deposit reported; only the first deposit into a container sets its baseline. */
     trackDeposit(reported, state) {

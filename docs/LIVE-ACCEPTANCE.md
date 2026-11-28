@@ -47,8 +47,9 @@ runs.
 Agents run it in Boat through the [Boat check script](DEVELOPMENT.md#boat-checks),
 which also copies the results back:
 `scripts/boat-check.sh --fetch .runtime/live-acceptance -- npm run acceptance:bot -- --accept-eula --fast`.
-A `--fast` run (27 scenarios) takes about 4.5 minutes in Boat (4 min 12 s on
-26 November 2026). A full offline `--all` run took about 13.5 minutes with 28
+A `--fast` run (31 scenarios) takes about 6 minutes in Boat: the 27 before the
+[richer-criteria scenarios](#totals-waypoints-and-time-budgets) took 4 min 12 s on
+26 November 2026, and those four add about 1 min 40 s. A full offline `--all` run took about 13.5 minutes with 28
 scenarios; the four survival scenarios add about a minute to it. The three pit scenarios each wait out the bot's 180-second
 mining deadline; `eat-timeout` and `eat-retreat-timeout` take about 30 and 20
 seconds on the bot and about 1 and 1.5 minutes on Fabric. See the
@@ -147,6 +148,21 @@ Neither result is evidence for the gate: Fabric runs use the development
 client, and `acceptance review-bot` lists the bot runs as supplemental. The
 interruption half of the gate (F8 and stop while eating or retreating) is in the
 [takeover scenarios](#takeover-scenarios).
+
+### Totals, waypoints and time budgets
+
+Four scenarios check the roadmap's month 4 [richer criteria](USAGE.md#totals-waypoints-and-time-budgets)
+(`--verify-total`, `--verify-waypoint` and `--verify-within`) with the scripted planner below and
+independent server reads. They run on both backends, aren't a v0.1 gate, and `acceptance review-bot`
+lists them as supplemental. On 27 November all four passed in Boat on both backends: in 1 min 40 s on the
+bot and 2 min 53 s on the Fabric development client.
+
+| Scenario | Setup and actions | Pass |
+| --- | --- | --- |
+| `criteria-total` | The collect-and-store chest (3 oak logs, 5 cobblestone), 4 held logs and the 18-log patch. Total `oak_log:15`: deposit 4 → collect 8 → done. | `criteria_met` with refreshed evidence; the agent's held and stored counts equal the server's `Inventory` and chest `Items`; the two add up to at least 15; cobblestone untouched. |
+| `criteria-total-stale` | The same, with `data remove block … Items` while the agent awaits `done`. | Not `criteria_met`; refreshed evidence; the agent's stored count equals the emptied server chest. |
+| `criteria-waypoint` | A waypoint four blocks out, radius 2, and a 300 s budget: goto it → done. | `criteria_met`; server `Pos` within 2 blocks, the agent's distance within 0.5 of it; the budget is met and the reported time is no longer than the runner's. |
+| `criteria-time-budget` | A 5 s budget: wait 10 → collect 8. | `time_budget` after one action; `collect` never dispatched; the server log count unchanged; reported time at least 5 s; mode `manual`. |
 
 ### Collect-and-store without a model
 

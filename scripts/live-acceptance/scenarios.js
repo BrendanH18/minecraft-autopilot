@@ -39,6 +39,9 @@ export const RELEASE = {
     'RELEASE.md: "With the packaged Fabric mod, force failed food consumption while hungry and low on health. Verify eating backoff, retreat, and action/retreat deadlines ..." (Fabric gate; the interruption cases are the takeover scenarios)',
   fullInventory:
     'docs/LIFECYCLE-SCENARIOS.md: inventory-full-collect (the job fails on its own and the session keeps control; Fabric checklist item)',
+  // Not a v0.1 gate: the month 4 roadmap item, checked against independent server reads.
+  criteria:
+    'docs/ROADMAP.md: month 4 richer criteria (item totals across inventory and storage, a waypoint radius, a time budget); supplemental, not a v0.1 release gate',
 };
 
 const at = (o, dx, y, dz) => `${o.x + dx} ${y} ${o.z + dz}`;
@@ -1266,6 +1269,158 @@ async function runInspectHome(ctx, plan, variant) {
   }
 }
 
+// Richer criteria (roadmap month 4): an item total across inventory and storage, a waypoint radius, and a time budget.
+const TOTAL = 15;
+
+/** Deposit 4 (so the chest is opened and known) → collect 8 → done, with a total of 15 oak logs across inventory and chest. */
+async function runTotal(ctx, plan, variant) {
+  const { chest } = plan.points;
+  const before = await ctx.step('independent baseline (chest Items, Inventory, Pos)', () => snapshot(ctx, chest));
+  ctx.note('baseline', before);
+  let beforeRemoval = null;
+  const removeStored = async () => {
+    beforeRemoval = await ctx.step('independent state before removal', () => snapshot(ctx, chest));
+    return ctx.step(`server (stored items removed externally): ${plan.hooks.removeStored}`, () =>
+      ctx.server.command(plan.hooks.removeStored),
+    );
+  };
+  const decisions = [
+    { type: 'deposit', item: 'oak_log', count: 4 },
+    { type: 'collect', block: 'oak_log', count: 8 },
+    { type: 'done', reason: 'Scripted acceptance run finished.' },
+  ];
+  const result = await ctx.step('agent with scripted planner (no model): deposit 4 → collect 8 → done', () =>
+    ctx.agent({
+      goal: `Have ${TOTAL} oak logs between your inventory and the chest.`,
+      criteria: { total: { item: 'oak_log', count: TOTAL } },
+      fetchImpl: scriptedPlanner(decisions, { before: variant === 'stale' ? { 2: removeStored } : {} }),
+    }),
+  );
+  ctx.note('agent', { status: result.status, steps: result.steps, verification: result.verification ?? null });
+  const after = await ctx.step('independent final state', () => snapshot(ctx, chest));
+  ctx.note('final', after);
+  const total = result.verification?.checks?.total;
+  const serverStored = after.chest[LOG] || 0;
+  ctx.check('agent held count matches the server inventory', total?.held === after.held, {
+    agent: total?.held ?? null,
+    server: after.held,
+  });
+  ctx.check('agent stored count matches the server chest (no cached count)', total?.stored === serverStored, {
+    agent: total?.stored ?? null,
+    server: serverStored,
+  });
+  ctx.check('storage evidence was refreshed', total?.evidence === 'refreshed', { evidence: total?.evidence });
+  if (variant === 'met') {
+    ctx.check('agent reports criteria_met', result.status === 'criteria_met', { status: result.status });
+    ctx.check(`server inventory plus chest hold at least ${TOTAL} oak logs`, after.held + serverStored >= TOTAL, {
+      held: after.held,
+      stored: serverStored,
+    });
+    ctx.check('other chest contents untouched', (after.chest[COBBLESTONE] || 0) === (before.chest[COBBLESTONE] || 0), {
+      before: before.chest,
+      after: after.chest,
+    });
+  } else {
+    ctx.check(
+      `before the removal the deposit had stored the logs and the server total was ≥ ${TOTAL}, so a stale total existed`,
+      (beforeRemoval?.chest[LOG] || 0) >= (before.chest[LOG] || 0) + 4 &&
+        beforeRemoval.held + beforeRemoval.chest[LOG] >= TOTAL,
+      { beforeRemoval, baseline: before },
+    );
+    ctx.check('no success after external removal', result.status !== 'criteria_met', { status: result.status });
+    ctx.check('the server total really is short of the requirement', after.held + serverStored < TOTAL, {
+      held: after.held,
+      stored: serverStored,
+    });
+    ctx.check('server chest holds no oak logs after the removal', !after.chest[LOG], { chest: after.chest });
+  }
+}
+
+/** goto a waypoint four blocks out → done, with the waypoint (radius 2) and a five-minute budget. */
+async function runWaypoint(ctx, plan) {
+  const { waypoint } = plan.points;
+  const started = ctx.now();
+  const result = await ctx.step('agent with scripted planner (no model): goto the waypoint → done', () =>
+    ctx.agent({
+      goal: 'Walk to the waypoint named lane-mark.',
+      criteria: {
+        waypoint: { name: 'lane-mark', ...waypoint, dimension: OVERWORLD, radius: 2 },
+        timeBudget: 300,
+      },
+      fetchImpl: scriptedPlanner([
+        { type: 'goto', ...waypoint },
+        { type: 'done', reason: 'Scripted acceptance run finished.' },
+      ]),
+    }),
+  );
+  const elapsedMs = ctx.now() - started;
+  ctx.note('agent', { status: result.status, steps: result.steps, verification: result.verification ?? null });
+  const position = await ctx.step('independent final Pos', () => ctx.server.position());
+  const checks = result.verification?.checks || {};
+  const serverDistance = distance(position, waypoint);
+  ctx.check('agent reports criteria_met', result.status === 'criteria_met', { status: result.status });
+  ctx.check('server Pos within 2 blocks of the waypoint', serverDistance <= 2, { distance: serverDistance });
+  ctx.check(
+    'agent waypoint distance agrees with server Pos (± 0.5)',
+    Number.isFinite(checks.waypoint?.distance) && Math.abs(checks.waypoint.distance - serverDistance) <= 0.5,
+    { agent: checks.waypoint?.distance ?? null, server: serverDistance },
+  );
+  ctx.check(
+    "agent elapsed time is within the budget and no longer than the runner's own measurement",
+    checks.timeBudget?.met === true && checks.timeBudget.elapsedSeconds <= elapsedMs / 1000 + 0.1,
+    { timeBudget: checks.timeBudget ?? null, runnerSeconds: elapsedMs / 1000 },
+  );
+}
+
+/** wait 10 with a 5-second budget: the task stops before the next decision runs, and collection never starts. */
+async function runTimeBudget(ctx) {
+  const before = await ctx.step('independent baseline (Inventory, Pos)', () => snapshot(ctx));
+  const started = ctx.now();
+  const label = 'agent with scripted planner (no model): wait 10 → collect 8 (never dispatched)';
+  const result = await ctx.step(label, () =>
+    ctx.agent({
+      goal: 'Collect eight oak logs within five seconds.',
+      criteria: { timeBudget: 5 },
+      fetchImpl: scriptedPlanner([
+        { type: 'wait', seconds: 10 },
+        { type: 'collect', block: 'oak_log', count: 8 },
+      ]),
+    }),
+  );
+  const elapsedMs = ctx.now() - started;
+  ctx.note('agent', {
+    status: result.status,
+    steps: result.steps,
+    reason: result.reason,
+    verification: result.verification ?? null,
+    actionCounts: result.actionCounts,
+  });
+  const after = await ctx.step('independent final state', () => snapshot(ctx));
+  const state = await ctx.bridge.observe();
+  ctx.check('agent stops with time_budget after one action', result.status === 'time_budget' && result.steps === 1, {
+    status: result.status,
+    steps: result.steps,
+  });
+  ctx.check('collection was never dispatched', !result.actionCounts?.collect, { actionCounts: result.actionCounts });
+  ctx.check(
+    'the running wait was not cut short at the budget (runner measured ≥ 10 s)',
+    result.actionCounts?.wait === 1 && elapsedMs >= 9900,
+    { actionCounts: result.actionCounts, runnerSeconds: elapsedMs / 1000 },
+  );
+  ctx.check('server inventory oak logs unchanged', after.held === before.held, {
+    before: before.held,
+    after: after.held,
+  });
+  ctx.check(
+    'reported elapsed time is past the budget and agrees with the runner (≥ 5 s, ≤ runner time)',
+    result.verification?.checks?.timeBudget?.met === false &&
+      result.verification.checks.timeBudget.elapsedSeconds >= 5 &&
+      result.verification.checks.timeBudget.elapsedSeconds <= elapsedMs / 1000 + 0.1,
+    { timeBudget: result.verification?.checks?.timeBudget ?? null, runnerSeconds: elapsedMs / 1000 },
+  );
+  ctx.check('control returned to the player', state.mode === 'manual', { mode: state.mode });
+}
+
 // Survival scenarios: eating, low-health retreat, and a collection that fills the inventory.
 // Bread that takes 30 s to eat: the Fabric mod gives up on consumption after 5 s, so every attempt there fails.
 export const SLOW_BREAD = 'minecraft:bread[food={nutrition:5,saturation:6,eat_seconds:30}]';
@@ -2292,6 +2447,73 @@ export const scenarios = [
       'the reported return agrees with server Pos',
       'server inventory holds exactly 64 logs, the axe, and all cobblestone; the bridge agrees',
       'mode stays agent and the same lease runs wait 1',
+    ],
+  },
+  {
+    id: 'criteria-total',
+    lane: 34,
+    title: 'A total across inventory and storage counts only refreshed storage, and matches the server',
+    release: [RELEASE.criteria],
+    plan: storePlan,
+    run: (ctx, plan) => runTotal(ctx, plan, 'met'),
+    actions: [
+      `scripted agent with criteria total oak_log:${TOTAL} (4 held, 3 in the chest): deposit 4 → collect 8 → done`,
+    ],
+    expect: [
+      'criteria_met with refreshed storage evidence',
+      'agent held and stored counts equal server Inventory and chest Items',
+      `server inventory plus chest ≥ ${TOTAL} oak logs; cobblestone untouched`,
+    ],
+  },
+  {
+    id: 'criteria-total-stale',
+    lane: 35,
+    title: 'Stored items removed before the final check must not satisfy a total',
+    release: [RELEASE.criteria],
+    plan: storePlan,
+    run: (ctx, plan) => runTotal(ctx, plan, 'stale'),
+    during: (plan) => [plan.hooks.removeStored],
+    actions: (plan) => [
+      `scripted agent with criteria total oak_log:${TOTAL}: deposit 4 → collect 8`,
+      `while the agent awaits the done decision: > ${plan.hooks.removeStored}`,
+      'scripted agent: done (repeated; rejected twice, third ends the task)',
+    ],
+    expect: [
+      'status is not criteria_met; refreshed storage evidence',
+      'agent stored count equals the emptied server chest',
+    ],
+  },
+  {
+    id: 'criteria-waypoint',
+    lane: 36,
+    title: 'A waypoint radius and a time budget are met and agree with the server',
+    release: [RELEASE.criteria],
+    plan: (input) => {
+      const plan = storePlan(input);
+      return { ...plan, points: { ...plan.points, waypoint: point(plan.origin, -2, STAND, 2) } };
+    },
+    run: runWaypoint,
+    actions: (plan) => [
+      `scripted agent with criteria waypoint lane-mark (${plan.points.waypoint.x} ${STAND} ${plan.points.waypoint.z}, radius 2) and a 300 s budget: goto it → done`,
+    ],
+    expect: [
+      'criteria_met',
+      'server Pos within 2 blocks of the waypoint; agent distance agrees (± 0.5)',
+      "budget met; elapsed no longer than the runner's measurement",
+    ],
+  },
+  {
+    id: 'criteria-time-budget',
+    lane: 37,
+    title: 'A spent time budget stops the task between actions and releases control',
+    release: [RELEASE.criteria],
+    plan: storePlan,
+    run: runTimeBudget,
+    actions: ['scripted agent with a 5 s budget: wait 10 → collect oak_log 8'],
+    expect: [
+      'time_budget after one action; collect never dispatched',
+      'server inventory oak logs unchanged; reported elapsed ≥ 5 s',
+      'mode manual',
     ],
   },
 ];
